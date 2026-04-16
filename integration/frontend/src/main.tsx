@@ -10,9 +10,17 @@
 
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { setAuthToken } from "./api";
+
+// Shape of the hass object HA passes to custom panel elements.
+// Only the auth token field is needed here.
+interface HassObject {
+  auth: { data: { access_token: string } };
+}
 
 class HaPanelHarvest extends HTMLElement {
   private _root: ReturnType<typeof createRoot> | null = null;
+  private _mounted = false;
 
   connectedCallback(): void {
     // Attach shadow DOM for style isolation.
@@ -30,14 +38,24 @@ class HaPanelHarvest extends HTMLElement {
     style.textContent = BASE_STYLES;
     shadow.insertBefore(style, container);
 
-    // Mount React.
     this._root = createRoot(container);
-    this._root.render(<App />);
+    // Defer first render until HA sets the hass property with the auth token.
+  }
+
+  // HA calls this setter every time the hass state updates. The first call
+  // provides the auth token we need before any API requests fire.
+  set hass(h: HassObject) {
+    setAuthToken(h.auth.data.access_token);
+    if (!this._mounted && this._root) {
+      this._mounted = true;
+      this._root.render(<App />);
+    }
   }
 
   disconnectedCallback(): void {
     this._root?.unmount();
     this._root = null;
+    this._mounted = false;
   }
 }
 

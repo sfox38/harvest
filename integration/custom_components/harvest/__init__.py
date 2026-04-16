@@ -76,7 +76,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                    activity_store, action_manager, sensors)
 
     # --- Register sidebar panel ---
-    register_panel(hass)
+    await register_panel(hass)
 
     # --- Create and register diagnostic sensor entities ---
     # The spec has no separate sensor.py / binary_sensor.py platform files, so
@@ -111,18 +111,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     sensors.schedule_updates()
 
     # Daily activity log purge.
-    async_track_time_interval(
-        hass,
-        lambda _: hass.async_create_task(activity_store.purge_old_records()),
-        timedelta(hours=24),
-    )
+    async def _purge_old_records(_now: object) -> None:
+        await activity_store.purge_old_records()
+
+    async_track_time_interval(hass, _purge_old_records, timedelta(hours=24))
 
     # Periodic preview token cleanup (every 60 seconds per spec).
-    async_track_time_interval(
-        hass,
-        lambda _: hass.async_create_task(token_manager.cleanup_expired_previews()),
-        timedelta(seconds=60),
-    )
+    async def _cleanup_expired_previews(_now: object) -> None:
+        await token_manager.cleanup_expired_previews()
+
+    async_track_time_interval(hass, _cleanup_expired_previews, timedelta(seconds=60))
 
     # --- Store all managers for access by other parts of the integration ---
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {

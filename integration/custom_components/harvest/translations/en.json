@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "HArvest",
+        "description": "Install HArvest to embed live Home Assistant controls on any webpage. Access is controlled via scoped tokens you create in the HArvest panel - no HA credentials are ever exposed to the internet."
+      }
+    },
+    "abort": {
+      "already_configured": "HArvest is already installed. Only one instance is permitted per Home Assistant installation."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "HArvest Settings",
+        "description": "All settings are managed in the HArvest panel. Open the panel from the sidebar to configure tokens, view the activity log, and adjust global settings.\n\n[Open HArvest panel]({panel_url})"
+      }
+    }
+  }
+}

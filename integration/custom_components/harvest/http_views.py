@@ -49,7 +49,7 @@ def register_views(
     hass.http.register_view(HarvestActivityView(activity_store))
     hass.http.register_view(HarvestActionsView(action_manager))
     hass.http.register_view(HarvestConfigView(hass))
-    hass.http.register_view(HarvestStatsView(sensors, activity_store, session_manager))
+    hass.http.register_view(HarvestStatsView(sensors, activity_store, session_manager, token_manager))
     # Additional views needed by the wizard flow.
     hass.http.register_view(HarvestAliasView(token_manager))
     hass.http.register_view(HarvestPreviewTokenView(token_manager))
@@ -508,12 +508,15 @@ class HarvestConfigView(HomeAssistantView):
         self._hass = hass
 
     async def get(self, request: web.Request) -> web.Response:
-        from .const import DOMAIN
+        from .const import DOMAIN, DEFAULTS
         entries = self._hass.config_entries.async_entries(DOMAIN)
         if not entries:
-            return self.json({})
+            return self.json(DEFAULTS)
         entry = entries[0]
-        return self.json(dict(entry.data) | dict(entry.options))
+        # Merge stored values over defaults so a fresh install returns
+        # all fields the Settings screen expects, not a partial object.
+        merged = dict(DEFAULTS) | dict(entry.data) | dict(entry.options)
+        return self.json(merged)
 
     async def patch(self, request: web.Request) -> web.Response:
         """Update global config options. Triggers integration reload."""
@@ -538,7 +541,12 @@ class HarvestConfigView(HomeAssistantView):
 # ---------------------------------------------------------------------------
 
 class HarvestStatsView(HomeAssistantView):
-    """GET /api/harvest/stats - global stats for the panel home screen."""
+    """GET /api/harvest/stats - global stats for the panel home screen.
+
+    Returns the flat PanelStats shape the frontend expects:
+      active_sessions, active_tokens, commands_today, errors_today,
+      db_size_bytes, is_running.
+    """
 
     url = "/api/harvest/stats"
     name = "api:harvest:stats"
@@ -549,18 +557,24 @@ class HarvestStatsView(HomeAssistantView):
         sensors: DiagnosticSensors,
         activity_store: ActivityStore,
         session_manager: SessionManager,
+        token_manager: TokenManager,
     ) -> None:
         self._sensors = sensors
         self._activity_store = activity_store
         self._session_manager = session_manager
+        self._token_manager = token_manager
 
     async def get(self, request: web.Request) -> web.Response:
         today = await self._activity_store.count_today()
         db_size = await self._activity_store.get_db_size_bytes()
+        auth_failures = today.get("auth_fail", 0) + today.get("errors", 0)
         return self.json({
             "active_sessions": self._session_manager.count_active(),
+            "active_tokens": len(self._token_manager.get_active()),
+            "commands_today": today.get("commands", 0),
+            "errors_today": auth_failures,
             "db_size_bytes": db_size,
-            "today": today,
+            "is_running": True,
         })
 
 

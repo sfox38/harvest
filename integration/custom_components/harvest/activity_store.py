@@ -263,7 +263,7 @@ class ActivityStore:
         self,
         hours: int = 24,
         token_id: str | None = None,
-    ) -> dict:
+    ) -> list:
         """Return hourly aggregate counts for dashboard graphs.
 
         Returns hourly buckets for the past `hours` hours covering:
@@ -271,7 +271,7 @@ class ActivityStore:
         (used as a proxy for peak sessions per hour).
         """
         if self._db is None:
-            return {"hours": []}
+            return []
 
         since = _hours_ago_iso(hours)
         token_filter = "AND token_id = ?" if token_id else ""
@@ -313,13 +313,12 @@ class ActivityStore:
             auth_ok, auth_fail = auth_rows.get(hour_str, (0, 0))
             result.append({
                 "hour": hour_str,
-                "auth_ok_count": auth_ok or 0,
-                "auth_fail_count": auth_fail or 0,
-                "command_count": cmd_rows.get(hour_str, 0),
-                "peak_sessions": sess_rows.get(hour_str, 0),
+                "commands": cmd_rows.get(hour_str, 0),
+                "sessions": sess_rows.get(hour_str, 0),
+                "auth_failures": auth_fail or 0,
             })
 
-        return {"hours": result}
+        return result
 
     async def count_today(self) -> dict[str, int]:
         """Return today's totals for diagnostic sensors.

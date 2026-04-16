@@ -22,6 +22,20 @@ import type {
 const BASE = "/api/harvest";
 
 // ---------------------------------------------------------------------------
+// Auth token - set by main.tsx from the hass property before first render
+// ---------------------------------------------------------------------------
+
+let _authToken = "";
+
+export function setAuthToken(token: string): void {
+  _authToken = token;
+}
+
+function _authHeader(): Record<string, string> {
+  return _authToken ? { "Authorization": `Bearer ${_authToken}` } : {};
+}
+
+// ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
@@ -29,7 +43,7 @@ async function _get<T>(path: string, params?: Record<string, string>): Promise<T
   const url = params
     ? `${BASE}${path}?${new URLSearchParams(params)}`
     : `${BASE}${path}`;
-  const res = await fetch(url, { credentials: "include" });
+  const res = await fetch(url, { headers: _authHeader() });
   if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
   return res.json() as Promise<T>;
 }
@@ -37,8 +51,7 @@ async function _get<T>(path: string, params?: Record<string, string>): Promise<T
 async function _post<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ..._authHeader() },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) throw new Error(`POST ${path} failed: ${res.status}`);
@@ -48,8 +61,7 @@ async function _post<T>(path: string, body?: unknown): Promise<T> {
 async function _patch<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: "PATCH",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ..._authHeader() },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`PATCH ${path} failed: ${res.status}`);
@@ -60,7 +72,7 @@ async function _delete(path: string, params?: Record<string, string>): Promise<v
   const url = params
     ? `${BASE}${path}?${new URLSearchParams(params)}`
     : `${BASE}${path}`;
-  const res = await fetch(url, { method: "DELETE", credentials: "include" });
+  const res = await fetch(url, { method: "DELETE", headers: _authHeader() });
   if (!res.ok) throw new Error(`DELETE ${path} failed: ${res.status}`);
 }
 

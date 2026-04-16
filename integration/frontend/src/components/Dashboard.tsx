@@ -12,6 +12,7 @@ import { useState, useEffect, useCallback } from "react";
 import type { Screen, PanelStats, HourlyBucket, ActivityEvent } from "../types";
 import { api } from "../api";
 import { Spinner, ErrorBanner } from "./Shared";
+import buildVersion from "../buildVersion.json";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -176,6 +177,11 @@ function ActivityGraph({ buckets }: ActivityGraphProps) {
             {label}
           </span>
         ))}
+      </div>
+
+      {/* Build version - testing aid */}
+      <div style={{ textAlign: "right", fontSize: 11, color: "var(--secondary-text-color,#9e9e9e)", paddingTop: 8 }}>
+        build #{buildVersion.build}
       </div>
     </div>
   );

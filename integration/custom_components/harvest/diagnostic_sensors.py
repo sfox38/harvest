@@ -125,9 +125,13 @@ class DiagnosticSensors:
             self._unsub_update = None
 
     async def _async_update_global_sensors(self, _now: Any = None) -> None:
-        """Refresh all global sensor states."""
+        """Refresh all global sensor states.
+
+        HarvestRunningSensor is excluded - it updates via set_running() push
+        only and has no async_update() method.
+        """
         for entity in self._entities:
-            if isinstance(entity, _GlobalHarvestSensor | HarvestRunningSensor):
+            if isinstance(entity, _GlobalHarvestSensor):
                 if entity.hass is not None:
                     await entity.async_update()
                     entity.async_write_ha_state()
