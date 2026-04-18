@@ -202,4 +202,4 @@ export interface HAEntity {
 // Panel navigation
 // ---------------------------------------------------------------------------
 
-export type Screen = "dashboard" | "tokens" | "activity" | "sessions" | "settings" | "help";
+export type Screen = "dashboard" | "widgets" | "activity" | "sessions" | "settings";

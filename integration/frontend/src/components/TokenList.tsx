@@ -1,15 +1,16 @@
 /**
- * TokenList.tsx - Token list screen.
+ * TokenList.tsx - Widgets (tokens) list screen.
  *
- * Displays all tokens with search, filter by status, pagination (20 per page),
- * and a separate collapsible archived (expired/revoked) section.
- * Clicking a token card opens the TokenDetail inline view.
+ * Displays all widgets with search, segmented status filter, pagination (20
+ * per page), and a separate collapsible archived section. Clicking a row
+ * opens TokenDetail inline.
  */
 
 import { useState, useEffect, useCallback } from "react";
 import type { Token, TokenStatus } from "../types";
 import { api } from "../api";
 import { StatusBadge, ConfirmDialog, EmptyState, Spinner, ErrorBanner } from "./Shared";
+import { Icon } from "./Icon";
 import { TokenDetail } from "./TokenDetail";
 
 // ---------------------------------------------------------------------------
@@ -29,12 +30,10 @@ interface TokenListProps {
 type FilterOption = "all" | TokenStatus;
 
 const FILTER_OPTIONS: { value: FilterOption; label: string }[] = [
-  { value: "all",           label: "All"           },
-  { value: "active",        label: "Active"        },
-  { value: "expiring_soon", label: "Expiring soon" },
-  { value: "inactive",      label: "Inactive"      },
-  { value: "expired",       label: "Expired"       },
-  { value: "revoked",       label: "Revoked"       },
+  { value: "all",           label: "All"      },
+  { value: "active",        label: "Active"   },
+  { value: "expiring_soon", label: "Expiring" },
+  { value: "inactive",      label: "Inactive" },
 ];
 
 const ARCHIVED_STATUSES: TokenStatus[] = ["expired", "revoked"];
@@ -63,10 +62,10 @@ function expiryLabel(t: Token): string {
 }
 
 // ---------------------------------------------------------------------------
-// TokenCard
+// WidgetRow
 // ---------------------------------------------------------------------------
 
-interface TokenCardProps {
+interface WidgetRowProps {
   token: Token;
   onSelect: () => void;
   onRevoke: (t: Token) => void;
@@ -75,55 +74,61 @@ interface TokenCardProps {
   highlighted: boolean;
 }
 
-function TokenCard({ token: t, onSelect, onRevoke, onDelete, onDuplicate, highlighted }: TokenCardProps) {
+function WidgetRow({ token: t, onSelect, onRevoke, onDelete, onDuplicate, highlighted }: WidgetRowProps) {
   const archived = isArchived(t);
 
   return (
     <div
-      className="hrv-token-card"
-      style={{
-        boxShadow: highlighted
-          ? "0 0 0 2px var(--primary-color,#6200ea)"
-          : "0 1px 3px rgba(0,0,0,0.1)",
-        opacity: archived ? 0.75 : 1,
-      }}
+      className={`widget-row${highlighted ? " widget-row-highlighted" : ""}`}
+      style={{ opacity: archived ? 0.75 : 1, cursor: "pointer" }}
+      onClick={onSelect}
+      role="button"
+      tabIndex={0}
+      onKeyDown={e => { if (e.key === "Enter" || e.key === " ") onSelect(); }}
+      aria-label={`Open widget ${t.label}`}
     >
-      {/* Row 1: label + status */}
-      <div
-        style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}
-        onClick={onSelect}
-        role="button"
-        tabIndex={0}
-        onKeyDown={e => { if (e.key === "Enter" || e.key === " ") onSelect(); }}
-        aria-label={`Open token ${t.label}`}
-      >
-        <span style={{ flex: 1, fontWeight: 600, fontSize: 15, color: "var(--primary-text-color,#212121)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {t.label}
-        </span>
-        <StatusBadge status={t.status} />
+      <div className="widget-thumb">
+        <Icon name="grid" size={16} />
       </div>
-
-      {/* Row 2: origin / entity count / sessions */}
-      <div style={{ fontSize: 12, color: "var(--secondary-text-color,#616161)", display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <span>{primaryOrigin(t)}</span>
-        <span>{t.entities.length} {t.entities.length === 1 ? "entity" : "entities"}</span>
-        {!archived && <span>{t.active_sessions} active {t.active_sessions === 1 ? "session" : "sessions"}</span>}
+      <div className="widget-name">
+        <div className="widget-name-top">{t.label}</div>
+        <div className="widget-name-sub">
+          <Icon name="globe" size={11} />
+          {primaryOrigin(t)} - {t.entities.length} {t.entities.length === 1 ? "entity" : "entities"}
+          {!archived && ` - ${t.active_sessions} live`}
+        </div>
       </div>
-
-      {/* Row 3: expiry + actions */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
-        <span style={{ flex: 1, fontSize: 11, color: "var(--secondary-text-color,#9e9e9e)" }}>
-          {expiryLabel(t)}
-        </span>
-
-        {!archived && (
-          <button onClick={onSelect} className="hrv-btn-sm">Edit</button>
-        )}
-        <button onClick={() => onDuplicate(t)} className="hrv-btn-sm">Duplicate</button>
+      <div className="widget-meta widget-hide-sm">
+        <span className="widget-meta-num">{t.active_sessions}</span>
+        <div className="muted" style={{ fontSize: 11 }}>live</div>
+      </div>
+      <StatusBadge status={t.status} />
+      <div className="widget-actions" onClick={e => e.stopPropagation()}>
+        <button
+          className="btn btn-sm btn-ghost"
+          onClick={() => onDuplicate(t)}
+          aria-label="Duplicate widget"
+          title="Duplicate"
+        >
+          <Icon name="copy" size={13} />
+        </button>
         {archived ? (
-          <button onClick={() => onDelete(t)} className="hrv-btn-sm-danger">Delete</button>
+          <button
+            className="btn btn-sm btn-danger"
+            onClick={() => onDelete(t)}
+            aria-label="Delete widget"
+          >
+            <Icon name="trash" size={13} />
+          </button>
         ) : (
-          <button onClick={() => onRevoke(t)} className="hrv-btn-sm-danger">Revoke</button>
+          <button
+            className="btn btn-sm btn-danger"
+            onClick={() => onRevoke(t)}
+            aria-label="Revoke widget"
+            title="Revoke"
+          >
+            <Icon name="trash" size={13} />
+          </button>
         )}
       </div>
     </div>
@@ -131,7 +136,7 @@ function TokenCard({ token: t, onSelect, onRevoke, onDelete, onDuplicate, highli
 }
 
 // ---------------------------------------------------------------------------
-// Pagination controls
+// Pagination
 // ---------------------------------------------------------------------------
 
 interface PagingProps {
@@ -148,11 +153,27 @@ function Paging({ total, page, pageSize, onPage, label }: PagingProps) {
   const start = page * pageSize + 1;
   const end = Math.min(total, (page + 1) * pageSize);
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", fontSize: 13, color: "var(--secondary-text-color,#616161)" }}>
-      <span style={{ flex: 1 }}>Showing {start}-{end} of {total} {label}</span>
-      <button onClick={() => onPage(page - 1)} disabled={page === 0} className="hrv-btn-sm">Prev</button>
-      <span>Page {page + 1} of {totalPages}</span>
-      <button onClick={() => onPage(page + 1)} disabled={page >= totalPages - 1} className="hrv-btn-sm">Next</button>
+    <div className="paging row" style={{ padding: "8px 16px" }}>
+      <span className="muted" style={{ flex: 1, fontSize: 13 }}>
+        {start}-{end} of {total} {label}
+      </span>
+      <button
+        onClick={() => onPage(page - 1)}
+        disabled={page === 0}
+        className="btn btn-sm btn-ghost"
+      >
+        <Icon name="chevLeft" size={13} /> Prev
+      </button>
+      <span className="muted" style={{ fontSize: 13 }}>
+        {page + 1} / {totalPages}
+      </span>
+      <button
+        onClick={() => onPage(page + 1)}
+        disabled={page >= totalPages - 1}
+        className="btn btn-sm btn-ghost"
+      >
+        Next <Icon name="chevRight" size={13} />
+      </button>
     </div>
   );
 }
@@ -167,9 +188,9 @@ export function TokenList({ onOpenWizard, initialTokenId, onInitialTokenConsumed
   const [error,         setError]         = useState<string | null>(null);
   const [search,        setSearch]        = useState("");
   const [filter,        setFilter]        = useState<FilterOption>("all");
+  const [showArchived,  setShowArchived]  = useState(false);
   const [activePage,    setActivePage]    = useState(0);
   const [archivedPage,  setArchivedPage]  = useState(0);
-  const [archivedOpen,  setArchivedOpen]  = useState(false);
   const [selectedId,    setSelectedId]    = useState<string | null>(null);
   const [confirmRevoke, setConfirmRevoke] = useState<Token | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Token | null>(null);
@@ -180,8 +201,8 @@ export function TokenList({ onOpenWizard, initialTokenId, onInitialTokenConsumed
 
   useEffect(() => { load(); }, [load]);
 
-  // Handle initialTokenId prop - open the token detail and refresh the list
-  // so a newly-created token appears without requiring a manual browser reload.
+  // Handle initialTokenId: open the token detail and refresh so a newly
+  // created token appears without requiring a manual reload.
   useEffect(() => {
     if (initialTokenId) {
       load();
@@ -191,9 +212,9 @@ export function TokenList({ onOpenWizard, initialTokenId, onInitialTokenConsumed
   }, [initialTokenId, onInitialTokenConsumed, load]);
 
   const filtered = tokens.filter(t => {
-    // Search on label only. Token IDs are random base62 and would produce
-    // false positives for single-character queries.
-    const matchSearch = !search || t.label.toLowerCase().includes(search.toLowerCase());
+    const matchSearch = !search
+      || t.label.toLowerCase().includes(search.toLowerCase())
+      || primaryOrigin(t).toLowerCase().includes(search.toLowerCase());
     const matchFilter = filter === "all" || t.status === filter;
     return matchSearch && matchFilter;
   });
@@ -201,7 +222,7 @@ export function TokenList({ onOpenWizard, initialTokenId, onInitialTokenConsumed
   const active   = filtered.filter(t => !isArchived(t));
   const archived = filtered.filter(t => isArchived(t));
 
-  const activePaged   = active.slice(activePage * PAGE_SIZE,   (activePage + 1) * PAGE_SIZE);
+  const activePaged   = active.slice(activePage * PAGE_SIZE, (activePage + 1) * PAGE_SIZE);
   const archivedPaged = archived.slice(archivedPage * PAGE_SIZE, (archivedPage + 1) * PAGE_SIZE);
 
   const handleRevoke = useCallback(async () => {
@@ -248,115 +269,126 @@ export function TokenList({ onOpenWizard, initialTokenId, onInitialTokenConsumed
   }
 
   return (
-    <div className="hrv-page-sm">
+    <div className="content-narrow col" style={{ gap: 18 }}>
       {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
-      {/* Search + filter toolbar */}
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <input
-          type="search"
-          placeholder="Search tokens..."
-          value={search}
-          onChange={e => { setSearch(e.target.value); setActivePage(0); }}
-          className="hrv-input"
-          style={{ flex: "1 1 200px" }}
-          aria-label="Search tokens"
-        />
-        <select
-          value={filter}
-          onChange={e => { setFilter(e.target.value as FilterOption); setActivePage(0); }}
-          className="hrv-select"
-          aria-label="Filter by status"
-        >
-          {FILTER_OPTIONS.map(o => (
-            <option key={o.value} value={o.value}>{o.label}</option>
+      {/* Toolbar */}
+      <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
+        <div className="search" style={{ flex: "1 1 280px", maxWidth: 420 }}>
+          <Icon name="search" size={15} />
+          <input
+            className="input"
+            type="search"
+            placeholder="Search widgets by name or origin..."
+            value={search}
+            onChange={e => { setSearch(e.target.value); setActivePage(0); }}
+            aria-label="Search widgets"
+          />
+        </div>
+        <div className="segmented" role="group" aria-label="Filter by status">
+          {FILTER_OPTIONS.map(({ value, label }) => (
+            <button
+              key={value}
+              aria-pressed={filter === value}
+              onClick={() => { setFilter(value); setActivePage(0); }}
+            >
+              {label}
+            </button>
           ))}
-        </select>
+        </div>
+        <div style={{ flex: 1 }} />
+        <button className="btn btn-ghost" onClick={() => setShowArchived(s => !s)}>
+          <Icon name="clock" size={14} />
+          {showArchived ? "Hide" : "Show"} archived
+        </button>
       </div>
 
       {loading ? (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 64 }}>
           <Spinner size={40} />
         </div>
       ) : active.length === 0 && archived.length === 0 ? (
         <EmptyState
+          icon="grid"
           title="No widgets yet"
           subtitle="Create your first widget to embed live Home Assistant cards on any webpage."
-          action={{ label: "+ Create Widget", onClick: onOpenWizard }}
+          action={{ label: "New widget", onClick: onOpenWizard }}
         />
       ) : (
-        <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 8, paddingBottom: 80 }}>
-          {/* Active tokens */}
-          {activePaged.map(t => (
-            <TokenCard
-              key={t.token_id}
-              token={t}
-              onSelect={() => setSelectedId(t.token_id)}
-              onRevoke={setConfirmRevoke}
-              onDelete={setConfirmDelete}
-              onDuplicate={handleDuplicate}
-              highlighted={t.token_id === initialTokenId}
-            />
-          ))}
+        <>
+          {/* Active widgets */}
+          {active.length > 0 && (
+            <div className="card" style={{ padding: 0 }}>
+              {activePaged.map(t => (
+                <WidgetRow
+                  key={t.token_id}
+                  token={t}
+                  onSelect={() => setSelectedId(t.token_id)}
+                  onRevoke={setConfirmRevoke}
+                  onDelete={setConfirmDelete}
+                  onDuplicate={handleDuplicate}
+                  highlighted={t.token_id === initialTokenId}
+                />
+              ))}
+              <Paging
+                total={active.length}
+                page={activePage}
+                pageSize={PAGE_SIZE}
+                onPage={setActivePage}
+                label="widgets"
+              />
+            </div>
+          )}
 
           {active.length === 0 && filter !== "all" && (
-            <div style={{ textAlign: "center", padding: 24, color: "var(--secondary-text-color,#616161)", fontSize: 13 }}>
-              No tokens match this filter.
+            <div className="card card-pad muted" style={{ textAlign: "center", fontSize: 13 }}>
+              No widgets match this filter.
             </div>
           )}
-
-          <Paging total={active.length} page={activePage} pageSize={PAGE_SIZE} onPage={setActivePage} label="tokens" />
 
           {/* Archived section */}
-          {archived.length > 0 && (
-            <div style={{ marginTop: 8 }}>
-              <button
-                onClick={() => setArchivedOpen(v => !v)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "10px 0",
-                  background: "none",
-                  border: "none",
-                  width: "100%",
-                  textAlign: "left",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: "var(--secondary-text-color,#616161)",
-                  cursor: "pointer",
-                  borderTop: "1px solid var(--divider-color,#e0e0e0)",
-                }}
-                aria-expanded={archivedOpen}
+          {showArchived && archived.length > 0 && (
+            <div>
+              <div
+                className="muted"
+                style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", padding: "8px 0 6px" }}
               >
-                <span>{archivedOpen ? "v" : ">"}</span>
-                Archived tokens ({archived.length})
-              </button>
-              {archivedOpen && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {archivedPaged.map(t => (
-                    <TokenCard
-                      key={t.token_id}
-                      token={t}
-                      onSelect={() => setSelectedId(t.token_id)}
-                      onRevoke={setConfirmRevoke}
-                      onDelete={setConfirmDelete}
-                      onDuplicate={handleDuplicate}
-                      highlighted={false}
-                    />
-                  ))}
-                  <Paging total={archived.length} page={archivedPage} pageSize={PAGE_SIZE} onPage={setArchivedPage} label="archived tokens" />
-                </div>
-              )}
+                Archived ({archived.length})
+              </div>
+              <div className="card" style={{ padding: 0 }}>
+                {archivedPaged.map(t => (
+                  <WidgetRow
+                    key={t.token_id}
+                    token={t}
+                    onSelect={() => setSelectedId(t.token_id)}
+                    onRevoke={setConfirmRevoke}
+                    onDelete={setConfirmDelete}
+                    onDuplicate={handleDuplicate}
+                    highlighted={false}
+                  />
+                ))}
+                <Paging
+                  total={archived.length}
+                  page={archivedPage}
+                  pageSize={PAGE_SIZE}
+                  onPage={setArchivedPage}
+                  label="archived widgets"
+                />
+              </div>
             </div>
           )}
-        </div>
+
+          {showArchived && archived.length === 0 && (
+            <div className="card card-pad muted" style={{ textAlign: "center", fontSize: 13 }}>
+              No archived widgets.
+            </div>
+          )}
+        </>
       )}
 
-      {/* Confirm revoke dialog */}
       {confirmRevoke && (
         <ConfirmDialog
-          title="Revoke token"
+          title="Revoke widget"
           message={`Revoking "${confirmRevoke.label}" will immediately terminate all active sessions. This cannot be undone.`}
           confirmLabel="Revoke"
           confirmDestructive
@@ -365,10 +397,9 @@ export function TokenList({ onOpenWizard, initialTokenId, onInitialTokenConsumed
         />
       )}
 
-      {/* Confirm delete dialog */}
       {confirmDelete && (
         <ConfirmDialog
-          title="Delete token"
+          title="Delete widget"
           message={`Delete "${confirmDelete.label}" and all its activity log entries permanently?`}
           confirmLabel="Delete"
           confirmDestructive

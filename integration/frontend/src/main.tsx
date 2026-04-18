@@ -118,12 +118,10 @@ const BASE_STYLES = /* css */`
 
   #harvest-panel-root {
     height: 100%;
-    font-family: var(--paper-font-body1_-_font-family,
-                  var(--mdc-typography-body1-font-family,
-                  "Roboto", sans-serif));
+    font-family: var(--font-body);
     font-size: 14px;
-    color: var(--primary-text-color, #212121);
-    background: var(--secondary-background-color, #f5f5f5);
+    color: var(--ink);
+    background: var(--bg);
   }
 
   button {
@@ -137,7 +135,7 @@ const BASE_STYLES = /* css */`
   }
 
   a {
-    color: var(--primary-color, #6200ea);
+    color: var(--accent);
     text-decoration: none;
   }
 

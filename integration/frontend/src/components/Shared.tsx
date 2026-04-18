@@ -1,51 +1,84 @@
 /**
- * Shared.tsx - Reusable UI primitives used across multiple panel screens.
+ * Shared.tsx - Reusable UI primitives for the HArvest panel.
  *
- * Components exported:
- *   StatusBadge      - Coloured pill for token/session status
- *   CopyButton       - Clipboard copy with transient feedback
- *   CopyablePre      - <pre> code block + copy button sharing copied state
- *   ConfirmDialog    - Modal confirmation prompt
- *   Spinner          - Loading indicator
- *   EmptyState       - Empty list placeholder
- *   ErrorBanner      - Dismissible error message strip
+ * Exports: StatusBadge, Badge, Card, CopyButton, CopyablePre,
+ *          ConfirmDialog, Spinner, EmptyState, ErrorBanner,
+ *          Sparkline, ActivityGraph, EventRow, fmtRel, fmtBytes
  */
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import type { TokenStatus } from "../types";
-
-// ---------------------------------------------------------------------------
-// Theme tokens - status badge colors (dynamic, cannot move to CSS)
-// ---------------------------------------------------------------------------
-
-const STATUS_COLORS: Record<TokenStatus, { bg: string; text: string }> = {
-  active:        { bg: "#e8f5e9", text: "#2e7d32" },
-  inactive:      { bg: "#f5f5f5", text: "#616161" },
-  expiring_soon: { bg: "#fff3e0", text: "#e65100" },
-  expired:       { bg: "#fce4ec", text: "#b71c1c" },
-  revoked:       { bg: "#f3e5f5", text: "#6a1b9a" },
-};
+import type { TokenStatus, ActivityEvent } from "../types";
+import { Icon } from "./Icon";
 
 // ---------------------------------------------------------------------------
 // StatusBadge
 // ---------------------------------------------------------------------------
 
+const STATUS_BADGE: Record<TokenStatus, { kind: string; label: string }> = {
+  active:        { kind: "ok",      label: "Protected"     },
+  expiring_soon: { kind: "warn",    label: "Expiring soon" },
+  inactive:      { kind: "neutral", label: "Inactive"      },
+  expired:       { kind: "neutral", label: "Ended"         },
+  revoked:       { kind: "danger",  label: "Revoked"       },
+};
+
 interface StatusBadgeProps {
   status: TokenStatus;
-  /** Override the display label. Defaults to formatted status string. */
   label?: string;
 }
 
 export function StatusBadge({ status, label }: StatusBadgeProps) {
-  const { bg, text } = STATUS_COLORS[status] ?? STATUS_COLORS.inactive;
-  const displayLabel = label ?? status.replace(/_/g, " ");
+  const { kind, label: defaultLabel } = STATUS_BADGE[status] ?? { kind: "neutral", label: status };
   return (
-    <span
-      className="hrv-status-badge"
-      style={{ background: bg, color: text }}
-    >
-      {displayLabel}
+    <span className={`badge badge-${kind}`}>
+      <span className="dot" />
+      {label ?? defaultLabel}
     </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Badge (generic)
+// ---------------------------------------------------------------------------
+
+interface BadgeProps {
+  kind?: "ok" | "warn" | "danger" | "neutral" | "info";
+  children: React.ReactNode;
+}
+
+export function Badge({ kind = "neutral", children }: BadgeProps) {
+  return (
+    <span className={`badge badge-${kind}`}>
+      <span className="dot" />
+      {children}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Card
+// ---------------------------------------------------------------------------
+
+interface CardProps {
+  title?: React.ReactNode;
+  action?: React.ReactNode;
+  pad?: boolean;
+  children: React.ReactNode;
+  className?: string;
+}
+
+export function Card({ title, action, pad = true, children, className }: CardProps) {
+  return (
+    <div className={`card${className ? ` ${className}` : ""}`}>
+      {title && (
+        <div className="card-header">
+          <h3>{title}</h3>
+          <div className="spacer" />
+          {action}
+        </div>
+      )}
+      <div className={pad ? "card-body" : ""}>{children}</div>
+    </div>
   );
 }
 
@@ -55,7 +88,6 @@ export function StatusBadge({ status, label }: StatusBadgeProps) {
 
 interface CopyButtonProps {
   text: string;
-  /** Optional label shown before "Copied!" feedback. Default: "Copy". */
   label?: string;
   size?: "sm" | "md";
 }
@@ -71,8 +103,7 @@ export function CopyButton({ text, label = "Copy", size = "md" }: CopyButtonProp
       timerRef.current = setTimeout(() => setCopied(false), 2000);
     };
 
-    // execCommand fallback - works even in HTTP (non-secure) contexts where
-    // navigator.clipboard is unavailable.
+    // execCommand fallback for non-secure (HTTP) contexts where clipboard API is unavailable.
     const fallback = () => {
       const ta = document.createElement("textarea");
       ta.value = text;
@@ -88,27 +119,16 @@ export function CopyButton({ text, label = "Copy", size = "md" }: CopyButtonProp
     if (navigator.clipboard) {
       navigator.clipboard.writeText(text).then(markCopied).catch(fallback);
     } else {
-      // navigator.clipboard is only available in secure contexts (HTTPS / localhost).
-      // HA accessed via a local IP on HTTP will land here.
       fallback();
     }
   }, [text]);
 
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
 
-  const pad = size === "sm" ? "4px 10px" : "6px 14px";
-  const fs  = size === "sm" ? 12 : 13;
-
   return (
     <button
       onClick={handleCopy}
-      className="hrv-copy-btn"
-      style={{
-        padding: pad,
-        fontSize: fs,
-        background: copied ? "var(--success-color, #43a047)" : "var(--primary-background-color, #fff)",
-        color: copied ? "#fff" : "var(--primary-text-color, #212121)",
-      }}
+      className={`copy-btn${size === "sm" ? " copy-btn-sm" : ""}${copied ? " copied" : ""}`}
       aria-label={copied ? "Copied to clipboard" : `Copy ${label}`}
     >
       {copied ? "Copied!" : label}
@@ -122,15 +142,9 @@ export function CopyButton({ text, label = "Copy", size = "md" }: CopyButtonProp
 
 interface CopyablePreProps {
   text: string;
-  /** Label for the copy button. Default: "Copy". */
   label?: string;
 }
 
-/**
- * A <pre> code block paired with a copy button that share the same copied state.
- * Clicking either the pre element or the button copies the text and shows "Copied!"
- * on the button for 2 seconds.
- */
 export function CopyablePre({ text, label = "Copy" }: CopyablePreProps) {
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -162,26 +176,16 @@ export function CopyablePre({ text, label = "Copy" }: CopyablePreProps) {
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
 
   return (
-    <>
-      <pre className="hrv-code" onClick={doCopy} title="Click to copy" style={{ cursor: "pointer" }}>
-        {text}
-      </pre>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
-        <button
-          onClick={doCopy}
-          className="hrv-copy-btn"
-          style={{
-            padding: "4px 10px",
-            fontSize: 12,
-            background: copied ? "var(--success-color, #43a047)" : "var(--primary-background-color, #fff)",
-            color: copied ? "#fff" : "var(--primary-text-color, #212121)",
-          }}
-          aria-label={copied ? "Copied to clipboard" : `Copy ${label}`}
-        >
-          {copied ? "Copied!" : label}
-        </button>
-      </div>
-    </>
+    <div className="code-wrap">
+      <pre className="code" onClick={doCopy} title="Click to copy">{text}</pre>
+      <button
+        onClick={doCopy}
+        className={`copy-btn${copied ? " copied" : ""}`}
+        aria-label={copied ? "Copied to clipboard" : `Copy ${label}`}
+      >
+        {copied ? "Copied!" : label}
+      </button>
+    </div>
   );
 }
 
@@ -206,14 +210,13 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
-  // Trap focus inside dialog on mount
   const dialogRef = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
     const first = dialogRef.current?.querySelector<HTMLElement>("button");
     first?.focus();
   }, []);
 
-  // Close on Escape
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); };
     document.addEventListener("keydown", handler);
@@ -221,48 +224,23 @@ export function ConfirmDialog({
   }, [onCancel]);
 
   return (
-    <div
-      className="hrv-overlay"
-      onClick={onCancel}
-      role="presentation"
-    >
+    <div className="overlay" onClick={onCancel} role="presentation">
       <div
         ref={dialogRef}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="confirm-title"
         aria-describedby="confirm-msg"
-        className="hrv-dialog"
+        className="dialog"
         onClick={e => e.stopPropagation()}
       >
-        <h3
-          id="confirm-title"
-          style={{ marginBottom: 12, fontSize: 16, fontWeight: 600, color: "var(--primary-text-color, #212121)" }}
-        >
-          {title}
-        </h3>
-        <p
-          id="confirm-msg"
-          style={{ marginBottom: 24, fontSize: 14, color: "var(--secondary-text-color, #616161)", lineHeight: 1.5 }}
-        >
-          {message}
-        </p>
-        <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
-          <button onClick={onCancel} className="hrv-btn">
-            Cancel
-          </button>
+        <h3 id="confirm-title" className="dialog-title">{title}</h3>
+        <p id="confirm-msg" className="dialog-body">{message}</p>
+        <div className="dialog-actions">
+          <button onClick={onCancel} className="btn btn-ghost">Cancel</button>
           <button
             onClick={onConfirm}
-            style={{
-              padding: "8px 20px",
-              border: "none",
-              borderRadius: 8,
-              background: confirmDestructive ? "#c62828" : "var(--primary-color, #6200ea)",
-              color: "#fff",
-              fontSize: 14,
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
+            className={`btn ${confirmDestructive ? "btn-danger" : "btn-primary"}`}
           >
             {confirmLabel}
           </button>
@@ -278,7 +256,6 @@ export function ConfirmDialog({
 
 interface SpinnerProps {
   size?: number;
-  /** Accessible label */
   label?: string;
 }
 
@@ -293,23 +270,19 @@ export function Spinner({ size = 32, label = "Loading..." }: SpinnerProps) {
       viewBox={`0 0 ${size} ${size}`}
       aria-label={label}
       role="status"
-      style={{ animation: "hrv-spin 0.8s linear infinite" }}
+      style={{ animation: "spin 0.8s linear infinite" }}
     >
-      <style>{`@keyframes hrv-spin { to { transform: rotate(360deg); transform-origin: ${cx}px ${cx}px; } }`}</style>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); transform-origin: ${cx}px ${cx}px; } }`}</style>
       <circle
-        cx={cx}
-        cy={cx}
-        r={r}
+        cx={cx} cy={cx} r={r}
         fill="none"
-        stroke="var(--divider-color, #e0e0e0)"
+        stroke="var(--divider)"
         strokeWidth={size * 0.08}
       />
       <circle
-        cx={cx}
-        cy={cx}
-        r={r}
+        cx={cx} cy={cx} r={r}
         fill="none"
-        stroke="var(--primary-color, #6200ea)"
+        stroke="var(--accent)"
         strokeWidth={size * 0.08}
         strokeDasharray={`${circumference * 0.25} ${circumference * 0.75}`}
         strokeLinecap="round"
@@ -329,24 +302,14 @@ interface EmptyStateProps {
   action?: { label: string; onClick: () => void };
 }
 
-export function EmptyState({ icon = "?", title, subtitle, action }: EmptyStateProps) {
+export function EmptyState({ icon = "grid", title, subtitle, action }: EmptyStateProps) {
   return (
-    <div className="hrv-empty-state">
-      <div style={{ fontSize: 40, lineHeight: 1 }} aria-hidden="true">{icon}</div>
-      <p style={{ fontSize: 16, fontWeight: 600, color: "var(--primary-text-color, #212121)", margin: 0 }}>
-        {title}
-      </p>
-      {subtitle && (
-        <p style={{ fontSize: 14, color: "var(--secondary-text-color, #616161)", margin: 0, maxWidth: 320 }}>
-          {subtitle}
-        </p>
-      )}
+    <div className="empty">
+      <Icon name={icon} size={44} />
+      <h3>{title}</h3>
+      {subtitle && <p>{subtitle}</p>}
       {action && (
-        <button
-          onClick={action.onClick}
-          className="hrv-btn-primary"
-          style={{ marginTop: 8 }}
-        >
+        <button onClick={action.onClick} className="btn btn-primary" style={{ marginTop: 8 }}>
           {action.label}
         </button>
       )}
@@ -365,25 +328,264 @@ interface ErrorBannerProps {
 
 export function ErrorBanner({ message, onDismiss }: ErrorBannerProps) {
   return (
-    <div role="alert" className="hrv-error-banner">
+    <div role="alert" className="error-banner">
       <span style={{ flex: 1 }}>{message}</span>
       {onDismiss && (
         <button
           onClick={onDismiss}
           aria-label="Dismiss error"
-          style={{
-            background: "none",
-            border: "none",
-            color: "#b71c1c",
-            fontSize: 18,
-            lineHeight: 1,
-            cursor: "pointer",
-            padding: "0 4px",
-          }}
+          className="btn btn-ghost btn-sm"
         >
-          x
+          <Icon name="close" size={14} />
         </button>
       )}
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Sparkline
+// ---------------------------------------------------------------------------
+
+interface SparklineProps {
+  data: number[];
+  color?: string;
+  w?: number;
+  h?: number;
+}
+
+export function Sparkline({ data, color = "var(--accent)", w = 160, h = 28 }: SparklineProps) {
+  if (!data.length) return null;
+  const max = Math.max(1, ...data);
+  const stepX = w / (data.length - 1 || 1);
+  const pts = data.map((v, i) => [i * stepX, h - (v / max) * h * 0.85 - 2]);
+  const d = "M " + pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" L ");
+  const dFill = d + ` L ${w},${h} L 0,${h} Z`;
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width="100%" height={h} preserveAspectRatio="none" aria-hidden="true">
+      <path d={dFill} fill={color} opacity="0.14" />
+      <path d={d} fill="none" stroke={color} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ActivityGraph (24h multi-line)
+// ---------------------------------------------------------------------------
+
+interface ActivityGraphProps {
+  buckets: { hour: string; commands: number; sessions: number; auth_failures: number }[];
+  height?: number;
+}
+
+export function ActivityGraph({ buckets, height = 180 }: ActivityGraphProps) {
+  if (!buckets.length) return null;
+  const W = 800;
+  const H = height;
+  const PAD = { top: 12, right: 12, bottom: 24, left: 32 };
+  const innerW = W - PAD.left - PAD.right;
+  const innerH = H - PAD.top - PAD.bottom;
+  const max = Math.max(1, ...buckets.flatMap(b => [b.commands, b.sessions, b.auth_failures]));
+  const xStep = innerW / Math.max(1, buckets.length - 1);
+
+  const makeLine = (series: number[], color: string, filled = true) => {
+    const pts = series.map((v, i) => {
+      const x = PAD.left + i * xStep;
+      const y = PAD.top + innerH - (v / max) * innerH;
+      return [x, y];
+    });
+    const d = "M " + pts.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" L ");
+    const dFill = d + ` L ${PAD.left + innerW},${PAD.top + innerH} L ${PAD.left},${PAD.top + innerH} Z`;
+    return (
+      <g key={color}>
+        {filled && <path d={dFill} fill={color} opacity="0.08" />}
+        <path d={d} fill="none" stroke={color} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+      </g>
+    );
+  };
+
+  const gridLines = [0, 0.25, 0.5, 0.75, 1].map(f => {
+    const y = PAD.top + innerH * (1 - f);
+    return (
+      <g key={f}>
+        <line x1={PAD.left} x2={W - PAD.right} y1={y} y2={y} stroke="var(--divider)" strokeDasharray="3 4" />
+        <text x={PAD.left - 6} y={y + 3} fontSize="10" textAnchor="end" fill="var(--ink-4)">
+          {Math.round(max * f)}
+        </text>
+      </g>
+    );
+  });
+
+  const xLabels = [0, 6, 12, 18, 23].filter(i => i < buckets.length).map(i => {
+    const x = PAD.left + i * xStep;
+    const lbl = new Date(buckets[i].hour).toLocaleTimeString(undefined, { hour: "numeric" });
+    return (
+      <text key={i} x={x} y={H - 6} fontSize="10" textAnchor="middle" fill="var(--ink-4)">{lbl}</text>
+    );
+  });
+
+  return (
+    <div className="graph-wrap">
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: "block" }} aria-hidden="true">
+        {gridLines}
+        {makeLine(buckets.map(b => b.commands),     "#2563c2")}
+        {makeLine(buckets.map(b => b.sessions),      "var(--accent)")}
+        {makeLine(buckets.map(b => b.auth_failures), "#b3261e", false)}
+        {xLabels}
+      </svg>
+      <div className="graph-legend">
+        <span><i style={{ background: "#2563c2" }} /> Commands</span>
+        <span><i style={{ background: "var(--accent)" }} /> Sessions</span>
+        <span><i style={{ background: "#b3261e" }} /> Auth failures</span>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// EventRow (expandable)
+// ---------------------------------------------------------------------------
+
+const EVENT_STYLE: Record<string, { icon: string; cls: string }> = {
+  AUTH_OK:           { icon: "shieldCheck", cls: "ev-ok"      },
+  AUTH_FAIL:         { icon: "shield",      cls: "ev-danger"  },
+  COMMAND:           { icon: "bolt",        cls: "ev-info"    },
+  SESSION_END:       { icon: "clock",       cls: "ev-neutral" },
+  TOKEN_CREATED:     { icon: "plus",        cls: "ev-ok"      },
+  TOKEN_REVOKED:     { icon: "alert",       cls: "ev-warn"    },
+  TOKEN_DELETED:     { icon: "trash",       cls: "ev-danger"  },
+  RENEWAL:           { icon: "refresh",     cls: "ev-ok"      },
+  SUSPICIOUS_ORIGIN: { icon: "alert",       cls: "ev-warn"    },
+  FLOOD_PROTECTION:  { icon: "waves",       cls: "ev-danger"  },
+  RATE_LIMITED:      { icon: "alert",       cls: "ev-warn"    },
+};
+
+interface EventRowProps {
+  ev: ActivityEvent;
+  onSelectToken?: (tokenId: string) => void;
+}
+
+export function EventRow({ ev, onSelectToken }: EventRowProps) {
+  const [open, setOpen] = useState(false);
+  const st = EVENT_STYLE[ev.type] ?? { icon: "info", cls: "ev-neutral" };
+
+  const toggle = () => setOpen(o => !o);
+
+  const widgetLink = (ev.token_label && ev.token_id && onSelectToken)
+    ? (
+      <a
+        href="#"
+        className="widget-link"
+        onClick={e => { e.preventDefault(); e.stopPropagation(); onSelectToken(ev.token_id!); }}
+      >
+        {ev.token_label}
+      </a>
+    )
+    : (ev.token_label ? <span>{ev.token_label}</span> : null);
+
+  let title: React.ReactNode = ev.type;
+  let sub: React.ReactNode = null;
+  switch (ev.type) {
+    case "AUTH_OK":
+      title = "Auth succeeded";
+      sub = <>{widgetLink}{ev.origin ? ` - ${ev.origin}` : ""}</>;
+      break;
+    case "AUTH_FAIL":
+      title = "Auth failed";
+      sub = <>{widgetLink}{ev.origin ? ` from ${ev.origin}` : ""}{ev.code ? ` - ${ev.code}` : ""}</>;
+      break;
+    case "COMMAND":
+      title = <><span className="mono">{ev.action}</span> on <span className="mono">{ev.entity_id}</span></>;
+      sub = <>{widgetLink}{ev.origin ? ` - ${ev.origin}` : ""}</>;
+      break;
+    case "SESSION_END":
+      title = "Session ended";
+      sub = <>{widgetLink}{ev.origin ? ` - ${ev.origin}` : ""}</>;
+      break;
+    case "RENEWAL":
+      title = "Session renewed";
+      sub = widgetLink;
+      break;
+    case "TOKEN_CREATED":
+      title = "Widget created";
+      sub = widgetLink;
+      break;
+    case "TOKEN_REVOKED":
+      title = "Widget revoked";
+      sub = widgetLink;
+      break;
+    case "TOKEN_DELETED":
+      title = "Widget deleted";
+      sub = widgetLink;
+      break;
+    case "SUSPICIOUS_ORIGIN":
+      title = "Suspicious origin blocked";
+      sub = ev.origin ? <span className="mono">{ev.origin}</span> : null;
+      break;
+    case "FLOOD_PROTECTION":
+      title = "Flood protection triggered";
+      sub = widgetLink;
+      break;
+    case "RATE_LIMITED":
+      title = "Rate limited";
+      sub = <>{widgetLink}{ev.origin ? ` - ${ev.origin}` : ""}</>;
+      break;
+  }
+
+  return (
+    <div
+      className={`event-row expandable${open ? " open" : ""}`}
+      onClick={toggle}
+      tabIndex={0}
+      onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}
+    >
+      <div className="event-row-top">
+        <div className={`event-icon ${st.cls}`}>
+          <Icon name={st.icon} size={12} />
+        </div>
+        <div className="event-main">
+          <div className="event-title">{title}</div>
+          {sub && <div className="event-sub">{sub}</div>}
+        </div>
+        <div className="event-time">{fmtRel(ev.timestamp)}</div>
+        <div className="event-caret">
+          <Icon name={open ? "chevUp" : "chevDown"} size={14} />
+        </div>
+      </div>
+      {open && (
+        <div className="event-details" onClick={e => e.stopPropagation()}>
+          <dl className="kv-compact">
+            <dt>Event ID</dt><dd className="mono">{ev.id}</dd>
+            <dt>Type</dt><dd className="mono">{ev.type}</dd>
+            <dt>Timestamp</dt><dd className="mono">{new Date(ev.timestamp).toISOString()}</dd>
+            {ev.token_label && <><dt>Widget</dt><dd>{widgetLink}</dd></>}
+            {ev.session_id && <><dt>Session</dt><dd className="mono">{ev.session_id}</dd></>}
+            {ev.origin && <><dt>Origin</dt><dd className="mono">{ev.origin}</dd></>}
+            {ev.entity_id && <><dt>Entity</dt><dd className="mono">{ev.entity_id}</dd></>}
+            {ev.action && <><dt>Action</dt><dd className="mono">{ev.action}</dd></>}
+            {ev.code && <><dt>Error code</dt><dd className="mono">{ev.code}</dd></>}
+            {ev.message && <><dt>Message</dt><dd>{ev.message}</dd></>}
+          </dl>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Utility functions
+// ---------------------------------------------------------------------------
+
+export function fmtRel(iso: string): string {
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 60) return "just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+export function fmtBytes(b: number): string {
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / (1024 * 1024)).toFixed(1)} MB`;
 }

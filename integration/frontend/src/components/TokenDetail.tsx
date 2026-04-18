@@ -1,17 +1,15 @@
 /**
- * TokenDetail.tsx - Token detail split-pane view.
+ * TokenDetail.tsx - Widget (token) detail view.
  *
- * Left panel (55%): token info (entities, origins, schedule, security,
- * rate limits) and generated code snippet with alias toggle.
- * Right panel (45%): active sessions and per-token activity log.
- *
- * Edit mode switches left panel fields to editable inputs.
+ * detail-grid split: embed code + entities (left), health/usage + sessions
+ * + activity (right). Code blocks use step-pill labels.
  */
 
 import { useState, useEffect, useCallback } from "react";
-import type { Token, Session, ActivityEvent, ActivityPage } from "../types";
+import type { Token, Session, ActivityPage } from "../types";
 import { api } from "../api";
-import { StatusBadge, CopyablePre, ConfirmDialog, Spinner, ErrorBanner } from "./Shared";
+import { StatusBadge, CopyablePre, ConfirmDialog, Spinner, ErrorBanner, Card, EventRow, fmtRel } from "./Shared";
+import { Icon } from "./Icon";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -25,7 +23,7 @@ interface TokenDetailProps {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Code snippet builders (preserved from original)
 // ---------------------------------------------------------------------------
 
 const WIDGET_SCRIPT = `<script src="https://cdn.jsdelivr.net/gh/sfox38/harvest@latest/widget/dist/harvest.min.js"></script>`;
@@ -62,32 +60,13 @@ function fmtDateLong(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 }
 
-function fmtTimeAgo(iso: string): string {
-  const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (secs < 60) return `${secs}s ago`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
-  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
-  return `${Math.floor(secs / 86400)}d ago`;
-}
-
-const EVENT_TYPE_COLORS: Record<string, string> = {
-  AUTH_OK: "#43a047", AUTH_FAIL: "#e53935", COMMAND: "#1e88e5",
-  SESSION_END: "#757575", TOKEN_REVOKED: "#8e24aa", RENEWAL: "#00897b",
-  SUSPICIOUS_ORIGIN: "#fb8c00", FLOOD_PROTECTION: "#e53935", RATE_LIMITED: "#f4511e",
-};
-
 // ---------------------------------------------------------------------------
 // Code section
 // ---------------------------------------------------------------------------
 
-interface CodeSectionProps {
-  token: Token;
-}
-
-function CodeSection({ token }: CodeSectionProps) {
+function CodeSection({ token }: { token: Token }) {
   const [useAliases, setUseAliases] = useState(false);
-  const [tab, setTab]   = useState<"web" | "wordpress">("web");
-
+  const [tab, setTab] = useState<"web" | "wordpress">("web");
   const haUrl = window.location.origin;
 
   const cardSnippet = tab === "web"
@@ -95,58 +74,61 @@ function CodeSection({ token }: CodeSectionProps) {
     : buildWordPressSnippet(token, useAliases, haUrl);
 
   return (
-    <section style={{ marginTop: 20 }}>
-      <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--primary-text-color,#212121)", marginBottom: 12 }}>
-        Your widget code
-      </h3>
-
+    <Card
+      title="Embed code"
+      action={
+        <div className="segmented" role="group" aria-label="Code format">
+          <button aria-pressed={tab === "web"} onClick={() => setTab("web")}>HTML</button>
+          <button aria-pressed={tab === "wordpress"} onClick={() => setTab("wordpress")}>WordPress</button>
+        </div>
+      }
+    >
       {/* Step 1 */}
-      <p style={{ fontSize: 12, fontWeight: 600, color: "var(--secondary-text-color,#616161)", marginBottom: 6 }}>
-        Step 1: Add to your page &lt;head&gt; once (click to copy)
-      </p>
-      <div style={{ marginBottom: 16 }}>
-        <CopyablePre text={WIDGET_SCRIPT} />
+      <div className="code-block-group">
+        <div className="code-block-label">
+          <span className="step-pill">1</span>
+          <div>
+            <div className="code-block-title">Page-level script</div>
+            <div className="muted" style={{ fontSize: 12 }}>
+              Add once to your site's <code>&lt;head&gt;</code>. Shared by all HArvest widgets on the page.
+            </div>
+          </div>
+        </div>
+        <CopyablePre text={WIDGET_SCRIPT} label="Copy script" />
       </div>
 
-      {/* Step 2 tabs */}
-      <p style={{ fontSize: 12, fontWeight: 600, color: "var(--secondary-text-color,#616161)", marginBottom: 6 }}>
-        Step 2: Paste where you want the widget (click to copy)
-      </p>
-      <div style={{ display: "flex", gap: 0, marginBottom: 8 }}>
-        {(["web", "wordpress"] as const).map(t => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={t === "web" ? "hrv-tab-left" : "hrv-tab-right"}
-            style={{
-              background: tab === t ? "var(--primary-color,#6200ea)" : "var(--primary-background-color,#fff)",
-              color: tab === t ? "#fff" : "var(--primary-text-color,#212121)",
-              fontWeight: tab === t ? 600 : 400,
-            }}
-          >
-            {t === "web" ? "Web page" : "WordPress"}
-          </button>
-        ))}
+      {/* Step 2 */}
+      <div className="code-block-group">
+        <div className="code-block-label">
+          <span className="step-pill">2</span>
+          <div>
+            <div className="code-block-title">Widget markup</div>
+            <div className="muted" style={{ fontSize: 12 }}>
+              Drop wherever this widget should render. Repeat for more widgets.
+            </div>
+          </div>
+        </div>
+        <CopyablePre text={cardSnippet} label="Copy markup" />
       </div>
-      <CopyablePre text={cardSnippet} />
 
-      {/* Alias toggle - below Step 2 */}
-      <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 13, cursor: "pointer" }}>
+      {/* Alias toggle */}
+      <label className="row" style={{ gap: 8, fontSize: 13, cursor: "pointer", marginTop: 8 }}>
         <input
           type="checkbox"
           checked={useAliases}
           onChange={e => setUseAliases(e.target.checked)}
           disabled={token.entities.every(e => !e.alias)}
         />
-        Use alias
+        Show as aliases
         <span
           title="Aliases hide your real entity IDs from the page source. Both formats work against the same token."
-          style={{ fontSize: 11, color: "var(--primary-color,#6200ea)", cursor: "help" }}
+          className="muted"
+          style={{ fontSize: 11, cursor: "help" }}
         >
-          [?]
+          (?)
         </span>
       </label>
-    </section>
+    </Card>
   );
 }
 
@@ -154,20 +136,21 @@ function CodeSection({ token }: CodeSectionProps) {
 // Sessions panel
 // ---------------------------------------------------------------------------
 
-interface SessionsPanelProps {
-  tokenId: string;
-}
-
-function SessionsPanel({ tokenId }: SessionsPanelProps) {
+function SessionsPanel({ tokenId }: { tokenId: string }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading,  setLoading]  = useState(true);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [termAll,  setTermAll]  = useState(false);
 
   const load = useCallback(() => {
     api.sessions.list(tokenId).then(setSessions).catch(() => {}).finally(() => setLoading(false));
   }, [tokenId]);
 
-  useEffect(() => { load(); const id = setInterval(load, 15_000); return () => clearInterval(id); }, [load]);
+  useEffect(() => {
+    load();
+    const id = setInterval(load, 15_000);
+    return () => clearInterval(id);
+  }, [load]);
 
   const terminate = async (sid: string) => {
     await api.sessions.terminate(sid).catch(() => {});
@@ -183,46 +166,57 @@ function SessionsPanel({ tokenId }: SessionsPanelProps) {
   if (loading) return <Spinner size={24} />;
 
   return (
-    <div>
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 12 }}>
-        <h3 style={{ flex: 1, fontSize: 14, fontWeight: 600, color: "var(--primary-text-color,#212121)" }}>
-          Active Sessions ({sessions.length})
-        </h3>
-        {sessions.length > 0 && (
-          <button
-            onClick={() => setTermAll(true)}
-            style={{ fontSize: 12, color: "#c62828", background: "none", border: "none", cursor: "pointer", fontWeight: 500 }}
-          >
-            Terminate all
-          </button>
-        )}
-      </div>
-
+    <Card
+      title={`Sessions (${sessions.length})`}
+      pad={sessions.length === 0}
+      action={sessions.length > 0 ? (
+        <button className="btn btn-sm btn-danger" onClick={() => setTermAll(true)}>
+          Terminate all
+        </button>
+      ) : undefined}
+    >
       {sessions.length === 0 ? (
-        <p style={{ fontSize: 13, color: "var(--secondary-text-color,#616161)" }}>
-          No active sessions. Sessions appear here when someone opens a page with this widget embedded.
+        <p className="muted" style={{ fontSize: 13 }}>
+          No active sessions. Sessions appear when someone opens a page with this widget embedded.
         </p>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div>
           {sessions.map(s => (
-            <div key={s.session_id} className="hrv-inset" style={{ fontSize: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", marginBottom: 4 }}>
-                <code style={{ flex: 1, fontSize: 11, color: "var(--secondary-text-color,#616161)" }}>
-                  {s.session_id.slice(0, 16)}...
+            <div
+              key={s.session_id}
+              className={`session-row${expanded === s.session_id ? " open" : ""}`}
+              onClick={() => setExpanded(expanded === s.session_id ? null : s.session_id)}
+              tabIndex={0}
+              onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpanded(expanded === s.session_id ? null : s.session_id); } }}
+            >
+              <div className="session-row-top">
+                <code className="mono" style={{ fontSize: 11, flex: 1 }}>
+                  {s.session_id.slice(0, 20)}...
                 </code>
-                <button
-                  onClick={() => terminate(s.session_id)}
-                  style={{ fontSize: 11, color: "#c62828", background: "none", border: "none", cursor: "pointer" }}
-                >
-                  Terminate
-                </button>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  {fmtRel(s.issued_at)}
+                </span>
+                <Icon name={expanded === s.session_id ? "chevUp" : "chevDown"} size={14} />
               </div>
-              <div style={{ color: "var(--secondary-text-color,#616161)", lineHeight: 1.7 }}>
-                <div>Origin: {s.origin ?? "unknown"}</div>
-                <div>Connected: {fmtTimeAgo(s.issued_at)}</div>
-                <div>Entities: {s.subscribed_entity_ids.join(", ") || "none"}</div>
-                <div>Renewals: {s.renewal_count}</div>
-              </div>
+              {expanded === s.session_id && (
+                <div className="event-details" onClick={e => e.stopPropagation()}>
+                  <dl className="kv-compact">
+                    <dt>Session ID</dt><dd className="mono">{s.session_id}</dd>
+                    <dt>Origin</dt><dd className="mono">{s.origin ?? "unknown"}</dd>
+                    <dt>Connected</dt><dd>{fmtRel(s.issued_at)}</dd>
+                    <dt>Renewals</dt><dd>{s.renewal_count}</dd>
+                    <dt>Entities</dt><dd className="mono">{s.subscribed_entity_ids.join(", ") || "none"}</dd>
+                  </dl>
+                  <div style={{ marginTop: 8 }}>
+                    <button
+                      className="btn btn-sm btn-danger"
+                      onClick={() => terminate(s.session_id)}
+                    >
+                      Terminate session
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -231,14 +225,14 @@ function SessionsPanel({ tokenId }: SessionsPanelProps) {
       {termAll && (
         <ConfirmDialog
           title="Terminate all sessions"
-          message="All active sessions for this token will be closed immediately."
+          message="All active sessions for this widget will be closed immediately."
           confirmLabel="Terminate all"
           confirmDestructive
           onConfirm={terminateAll}
           onCancel={() => setTermAll(false)}
         />
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -246,23 +240,15 @@ function SessionsPanel({ tokenId }: SessionsPanelProps) {
 // Activity panel
 // ---------------------------------------------------------------------------
 
-const ACTIVITY_TYPE_OPTIONS = [
-  "all", "AUTH_OK", "AUTH_FAIL", "COMMAND", "SESSION_END",
-  "RENEWAL", "SUSPICIOUS_ORIGIN", "FLOOD_PROTECTION", "RATE_LIMITED",
-] as const;
-
-type ActivityTypeFilter = typeof ACTIVITY_TYPE_OPTIONS[number];
-
 type ActivityDateRange = "1h" | "24h" | "7d" | "all";
-
-const ACTIVITY_DATE_OPTIONS: { value: ActivityDateRange; label: string }[] = [
-  { value: "1h",  label: "Last hour"  },
-  { value: "24h", label: "Last 24h"   },
-  { value: "7d",  label: "Last 7 days"},
-  { value: "all", label: "All time"   },
+const DATE_OPTIONS: { value: ActivityDateRange; label: string }[] = [
+  { value: "1h",  label: "Last hour"   },
+  { value: "24h", label: "Last 24h"    },
+  { value: "7d",  label: "Last 7 days" },
+  { value: "all", label: "All time"    },
 ];
 
-function sinceForActivityRange(range: ActivityDateRange): string | undefined {
+function sinceFor(range: ActivityDateRange): string | undefined {
   if (range === "all") return undefined;
   const ms: Record<Exclude<ActivityDateRange, "all">, number> = {
     "1h":  60 * 60 * 1000,
@@ -272,117 +258,80 @@ function sinceForActivityRange(range: ActivityDateRange): string | undefined {
   return new Date(Date.now() - ms[range as Exclude<ActivityDateRange, "all">]).toISOString();
 }
 
-interface ActivityPanelProps {
-  tokenId: string;
-}
-
-function ActivityPanel({ tokenId }: ActivityPanelProps) {
-  const [page,       setPage]       = useState<ActivityPage | null>(null);
-  const [offset,     setOffset]     = useState(0);
-  const [expanded,   setExpanded]   = useState<number | null>(null);
-  const [typeFilter, setTypeFilter] = useState<ActivityTypeFilter>("all");
-  const [dateRange,  setDateRange]  = useState<ActivityDateRange>("24h");
+function ActivityPanel({ tokenId }: { tokenId: string }) {
+  const [page,      setPage]      = useState<ActivityPage | null>(null);
+  const [offset,    setOffset]    = useState(0);
+  const [dateRange, setDateRange] = useState<ActivityDateRange>("24h");
   const LIMIT = 20;
 
   useEffect(() => {
     const params: Parameters<typeof api.activity.list>[0] = { token_id: tokenId, offset, limit: LIMIT };
-    if (typeFilter !== "all") params.event_type = typeFilter;
-    const since = sinceForActivityRange(dateRange);
+    const since = sinceFor(dateRange);
     if (since) params.since = since;
-    api.activity.list(params).then(p => { setPage(p); setExpanded(null); }).catch(() => {});
-  }, [tokenId, offset, typeFilter, dateRange]);
+    api.activity.list(params).then(setPage).catch(() => {});
+  }, [tokenId, offset, dateRange]);
 
   if (!page) return <Spinner size={24} />;
 
   return (
-    <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-        <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--primary-text-color,#212121)", flex: 1 }}>
-          Activity
-        </h3>
+    <Card
+      title="Activity"
+      pad={page.events.length === 0}
+      action={
         <select
           value={dateRange}
           onChange={e => { setDateRange(e.target.value as ActivityDateRange); setOffset(0); }}
-          className="hrv-select-sm"
+          className="input"
+          style={{ fontSize: 12, padding: "2px 6px" }}
           aria-label="Date range"
         >
-          {ACTIVITY_DATE_OPTIONS.map(o => (
+          {DATE_OPTIONS.map(o => (
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>
-        <select
-          value={typeFilter}
-          onChange={e => { setTypeFilter(e.target.value as ActivityTypeFilter); setOffset(0); }}
-          className="hrv-select-sm"
-          aria-label="Event type"
-        >
-          {ACTIVITY_TYPE_OPTIONS.map(t => (
-            <option key={t} value={t}>{t === "all" ? "All types" : t}</option>
-          ))}
-        </select>
-      </div>
-
+      }
+    >
       {page.events.length === 0 ? (
-        <p style={{ fontSize: 13, color: "var(--secondary-text-color,#616161)" }}>No activity yet.</p>
+        <p className="muted" style={{ fontSize: 13 }}>No activity in this period.</p>
       ) : (
-        <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 2 }}>
-          {page.events.map(ev => (
-            <li key={ev.id}>
+        <>
+          <div>
+            {page.events.map(ev => (
+              <EventRow key={ev.id} ev={ev} />
+            ))}
+          </div>
+          {page.total > LIMIT && (
+            <div className="row" style={{ padding: "8px 0", fontSize: 12 }}>
               <button
-                onClick={() => setExpanded(expanded === ev.id ? null : ev.id)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  width: "100%",
-                  textAlign: "left",
-                  background: "none",
-                  border: "none",
-                  padding: "6px 0",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  borderBottom: "1px solid var(--divider-color,#f5f5f5)",
-                }}
+                disabled={offset === 0}
+                onClick={() => setOffset(Math.max(0, offset - LIMIT))}
+                className="btn btn-sm btn-ghost"
               >
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: EVENT_TYPE_COLORS[ev.type] ?? "#9e9e9e", flexShrink: 0 }} />
-                <span style={{ fontWeight: 500, color: "var(--primary-text-color,#212121)", minWidth: 110 }}>{ev.type}</span>
-                <span style={{ flex: 1, color: "var(--secondary-text-color,#9e9e9e)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {ev.origin ?? ev.entity_id ?? ev.action ?? ""}
-                </span>
-                <span style={{ color: "var(--secondary-text-color,#9e9e9e)", fontSize: 11, whiteSpace: "nowrap" }}>
-                  {fmtTimeAgo(ev.timestamp)}
-                </span>
+                Prev
               </button>
-              {expanded === ev.id && (
-                <div className="hrv-inset-sm" style={{ margin: "2px 0 4px", fontSize: 11, color: "var(--secondary-text-color,#616161)", lineHeight: 1.8 }}>
-                  {ev.session_id && <div>Session: {ev.session_id}</div>}
-                  {ev.origin     && <div>Origin: {ev.origin}</div>}
-                  {ev.entity_id  && <div>Entity: {ev.entity_id}</div>}
-                  {ev.action     && <div>Action: {ev.action}</div>}
-                  {ev.code       && <div>Code: {ev.code}</div>}
-                  {ev.message    && <div>Message: {ev.message}</div>}
-                  <div>Time: {new Date(ev.timestamp).toLocaleString()}</div>
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
+              <span className="muted" style={{ flex: 1, textAlign: "center" }}>
+                {offset + 1}-{Math.min(page.total, offset + LIMIT)} of {page.total}
+              </span>
+              <button
+                disabled={offset + LIMIT >= page.total}
+                onClick={() => setOffset(offset + LIMIT)}
+                className="btn btn-sm btn-ghost"
+              >
+                Next
+              </button>
+            </div>
+          )}
+        </>
       )}
-
-      {page.total > LIMIT && (
-        <div style={{ display: "flex", gap: 8, marginTop: 10, fontSize: 12 }}>
-          <button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - LIMIT))} className="hrv-btn-sm">Prev</button>
-          <span style={{ flex: 1, textAlign: "center", color: "var(--secondary-text-color,#616161)" }}>{offset + 1}-{Math.min(page.total, offset + LIMIT)} of {page.total}</span>
-          <button disabled={offset + LIMIT >= page.total} onClick={() => setOffset(offset + LIMIT)} className="hrv-btn-sm">Next</button>
-        </div>
-      )}
-    </div>
+    </Card>
   );
 }
 
 // ---------------------------------------------------------------------------
-// OriginsEditor
+// Origins editor
 // ---------------------------------------------------------------------------
+
+const ORIGIN_CUSTOM = "__custom__";
 
 interface OriginsEditorProps {
   token: Token;
@@ -392,12 +341,10 @@ interface OriginsEditorProps {
   setError: (e: string | null) => void;
 }
 
-const ORIGIN_CUSTOM = "__custom__";
-
 function OriginsEditor({ token, saving, setSaving, setToken, setError }: OriginsEditorProps) {
-  const [allOrigins,  setAllOrigins]  = useState<string[]>([]);
-  const [usingCustom, setUsingCustom] = useState(false);
-  const [customInput, setCustomInput] = useState("");
+  const [allOrigins,   setAllOrigins]   = useState<string[]>([]);
+  const [usingCustom,  setUsingCustom]  = useState(false);
+  const [customInput,  setCustomInput]  = useState("");
   const readonly = token.status === "revoked" || token.status === "expired";
 
   const baseOrigin = token.origins.allowed[0] ?? "";
@@ -408,7 +355,6 @@ function OriginsEditor({ token, saving, setSaving, setToken, setError }: Origins
       ? paths.map(p => `${baseOrigin}${p}`)
       : baseOrigin ? [baseOrigin] : [];
 
-  // Load all origins from other tokens for the dropdown.
   useEffect(() => {
     api.tokens.list().then(tokens => {
       const seen = new Set<string>();
@@ -435,11 +381,6 @@ function OriginsEditor({ token, saving, setSaving, setToken, setError }: Origins
       setToken(updated);
     } catch (e) { setError(String(e)); }
     finally { setSaving(false); }
-  };
-
-  const toggleAllowAny = () => {
-    if (readonly || saving) return;
-    saveOrigins({ allow_any: !token.origins.allow_any, allowed: token.origins.allowed, allow_paths: token.origins.allow_paths });
   };
 
   const removeUrl = (displayUrl: string) => {
@@ -475,87 +416,72 @@ function OriginsEditor({ token, saving, setSaving, setToken, setError }: Origins
     } catch { setError("Invalid URL. Enter a full URL including https://"); }
   };
 
-  // Origins from other tokens that aren't already on this token.
   const otherOrigins = allOrigins.filter(o => !displayUrls.includes(o));
   const hasDropdown = otherOrigins.length > 0;
 
   return (
-    <section style={{ marginBottom: 20 }}>
-      <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--primary-text-color,#212121)", marginBottom: 10 }}>
-        Origins
-      </h3>
-
+    <Card title="Origins">
       {!readonly && (
-        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer", marginBottom: 8 }}>
+        <label className="row" style={{ gap: 8, fontSize: 13, cursor: "pointer", marginBottom: 10 }}>
           <input
             type="checkbox"
             checked={token.origins.allow_any}
-            onChange={toggleAllowAny}
+            onChange={() => saveOrigins({ allow_any: !token.origins.allow_any, allowed: token.origins.allowed, allow_paths: token.origins.allow_paths })}
             disabled={saving}
-            style={{ accentColor: "var(--primary-color,#6200ea)" }}
           />
           Allow from any website
         </label>
       )}
 
       {token.origins.allow_any ? (
-        <div style={{ fontSize: 13, color: "var(--secondary-text-color,#616161)" }}>
+        <div className="muted" style={{ fontSize: 13 }}>
           {token.entities.some(e => e.capabilities === "read-write") && (
-            <div className="hrv-alert-warn-plain" style={{ marginBottom: 4 }}>
-              This token allows write access from any website.
+            <div className="badge badge-warn" style={{ marginBottom: 6, display: "inline-block" }}>
+              Write access from any website
             </div>
           )}
           {readonly && <div>Any website</div>}
         </div>
       ) : (
         <>
-          {/* Current URLs with Delete button */}
           {displayUrls.length === 0 && (
-            <div style={{ fontSize: 13, color: "var(--secondary-text-color,#9e9e9e)", marginBottom: 6 }}>
-              No origin set.
-            </div>
+            <div className="muted" style={{ fontSize: 13, marginBottom: 6 }}>No origin set.</div>
           )}
-          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
+          <div className="col" style={{ gap: 4, marginBottom: 8 }}>
             {displayUrls.map(url => (
-              <div key={url} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
-                <span style={{ flex: 1, color: "var(--primary-text-color,#212121)" }}>{url}</span>
+              <div key={url} className="row" style={{ gap: 6, fontSize: 13 }}>
+                <span style={{ flex: 1 }} className="mono">{url}</span>
                 {!readonly && (
                   <button
                     onClick={() => removeUrl(url)}
                     disabled={saving}
-                    style={{ fontSize: 11, color: "#c62828", background: "none", border: "1px solid #c62828", borderRadius: 4, cursor: "pointer", padding: "1px 8px" }}
+                    className="btn btn-sm btn-danger"
                   >
-                    Delete URL
+                    Remove
                   </button>
                 )}
               </div>
             ))}
           </div>
 
-          {/* Add new URL - wizard-style select dropdown */}
           {!readonly && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <div className="col" style={{ gap: 6 }}>
               {hasDropdown && (
-                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <select
-                    value={usingCustom ? ORIGIN_CUSTOM : ""}
-                    onChange={e => {
-                      const v = e.target.value;
-                      if (v === ORIGIN_CUSTOM) {
-                        setUsingCustom(true);
-                      } else if (v) {
-                        addUrl(v);
-                      }
-                    }}
-                    disabled={saving}
-                    className="hrv-select-sm"
-                    style={{ flex: 1 }}
-                  >
-                    <option value="">-- Add a URL --</option>
-                    {otherOrigins.map(o => <option key={o} value={o}>{o}</option>)}
-                    <option value={ORIGIN_CUSTOM}>Enter a new URL...</option>
-                  </select>
-                </div>
+                <select
+                  value={usingCustom ? ORIGIN_CUSTOM : ""}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (v === ORIGIN_CUSTOM) { setUsingCustom(true); }
+                    else if (v) { addUrl(v); }
+                  }}
+                  disabled={saving}
+                  className="input"
+                  style={{ fontSize: 13 }}
+                >
+                  <option value="">Add a URL...</option>
+                  {otherOrigins.map(o => <option key={o} value={o}>{o}</option>)}
+                  <option value={ORIGIN_CUSTOM}>Enter a new URL...</option>
+                </select>
               )}
               {(usingCustom || !hasDropdown) && (
                 <input
@@ -565,17 +491,18 @@ function OriginsEditor({ token, saving, setSaving, setToken, setError }: Origins
                   placeholder="https://example.com/page.html"
                   disabled={saving}
                   autoFocus={hasDropdown}
-                  className="hrv-input-sm"
+                  className="input"
+                  style={{ fontSize: 13 }}
                 />
               )}
-              <p style={{ fontSize: 11, color: "var(--secondary-text-color,#9e9e9e)", margin: 0 }}>
-                Site only (e.g. https://example.com) or a specific page (e.g. https://example.com/page.html).
+              <p className="muted" style={{ fontSize: 11 }}>
+                Site only (https://example.com) or a specific page (https://example.com/page.html).
               </p>
             </div>
           )}
         </>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -619,11 +546,9 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
 
   const saveExpiry = async (val: string) => {
     if (!token) return;
-    // Treat the datetime-local value ("YYYY-MM-DDTHH:MM") as UTC by appending ":00Z".
-    // This avoids timezone shifts when the value is round-tripped through toISOString().
     let newExpires: string | null = null;
     if (val) {
-      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(val)) return; // reject malformed
+      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(val)) return;
       newExpires = val + ":00Z";
     }
     const current = token.expires ? token.expires.slice(0, 16) : "";
@@ -658,7 +583,7 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
 
   if (loading) {
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", padding: 32 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 64 }}>
         <Spinner size={40} />
       </div>
     );
@@ -672,103 +597,114 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
     );
   }
 
+  const readonly = token.status === "revoked" || token.status === "expired";
+  const expiryFmt = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
+  const expiryInvalid = editExpiry !== "" && !expiryFmt.test(editExpiry);
+  const savedValue = token.expires ? token.expires.slice(0, 16) : "";
+  const expiryDirty = editExpiry !== savedValue;
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+    <div className="content-narrow col" style={{ gap: 18 }}>
       {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
-      {/* Header */}
-      <div style={{ padding: "12px 20px 12px", borderBottom: "1px solid var(--divider-color,#e0e0e0)", background: "var(--primary-background-color,#fff)", flexShrink: 0 }}>
-        <button
-          onClick={onBack}
-          className="hrv-btn-link"
-          style={{ marginBottom: 8 }}
-        >
-          Back to tokens
+      {/* Back + header */}
+      <div className="row">
+        <button className="btn btn-ghost btn-sm" onClick={onBack}>
+          <Icon name="chevLeft" size={14} /> Back
         </button>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <StatusBadge status={token.status} />
-          <input
-            value={editLabel}
-            onChange={e => setEditLabel(e.target.value)}
-            onBlur={e => saveEdit(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }}
-            disabled={saving || token.status === "revoked" || token.status === "expired"}
-            style={{ flex: 1, minWidth: 200, padding: "6px 10px", border: "1px solid var(--divider-color,#e0e0e0)", borderRadius: 6, fontSize: 16, fontWeight: 600, background: "var(--primary-background-color,#fff)", color: "var(--primary-text-color,#212121)" }}
-          />
-          {token.status !== "revoked" && (
-            <button onClick={() => setConfirmRevoke(true)} className="hrv-btn-danger">
-              Revoke
-            </button>
-          )}
-          {(token.status === "revoked" || token.status === "expired") && (
-            <button onClick={() => setConfirmDelete(true)} className="hrv-btn-danger">
-              Delete
-            </button>
-          )}
+      </div>
+
+      <div className="card card-pad">
+        <div className="row detail-header-row" style={{ alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
+              <input
+                value={editLabel}
+                onChange={e => setEditLabel(e.target.value)}
+                onBlur={e => saveEdit(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                disabled={saving || readonly}
+                className="input"
+                style={{ fontSize: 20, fontWeight: 650, border: "none", padding: "0", background: "transparent", flex: 1 }}
+                aria-label="Widget name"
+              />
+              <StatusBadge status={token.status} />
+            </div>
+            <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
+              Created {fmtDateLong(token.created_at)} by {token.created_by_name ?? token.created_by}
+              {" - "}{token.entities.length} {token.entities.length === 1 ? "entity" : "entities"}
+            </div>
+          </div>
+          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+            {!readonly && (
+              <button className="btn btn-sm btn-danger" onClick={() => setConfirmRevoke(true)}>
+                <Icon name="trash" size={13} /> Revoke
+              </button>
+            )}
+            {readonly && (
+              <button className="btn btn-sm btn-danger" onClick={() => setConfirmDelete(true)}>
+                <Icon name="trash" size={13} /> Delete
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Split body */}
-      <div className="hrv-detail-split">
-        {/* Left panel */}
-        <div className="hrv-detail-left">
+      {/* detail-grid: left (code + entities + origins + expiry), right (sessions + activity) */}
+      <div className="detail-grid">
+        <div className="col" style={{ gap: 18 }}>
 
-          {/* Created by */}
-          <div style={{ marginBottom: 16, fontSize: 12, color: "var(--secondary-text-color,#616161)" }}>
-            Created {fmtDateLong(token.created_at)} by {token.created_by_name ?? token.created_by}
-          </div>
+          {/* Code section */}
+          {!readonly && <CodeSection token={token} />}
 
           {/* Entities */}
-          <section style={{ marginBottom: 20 }}>
-            <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--primary-text-color,#212121)", marginBottom: 10 }}>
-              Entities ({token.entities.length})
-            </h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {token.entities.map(e => {
-                const isRW = e.capabilities === "read-write";
-                const canEdit = token.status !== "revoked" && token.status !== "expired" && !saving;
-                const toggleCap = async (newCap: "read" | "read-write") => {
-                  if (!canEdit) return;
-                  const updated = token.entities.map(en =>
-                    en.entity_id === e.entity_id ? { ...en, capabilities: newCap } : en
-                  );
-                  setSaving(true);
-                  const prevCreatedByName = token.created_by_name;
-                  try {
-                    const t = await api.tokens.update(token.token_id, { entities: updated as Token["entities"] });
-                    setToken({ ...t, created_by_name: prevCreatedByName });
-                  } catch (err) { setError(String(err)); }
-                  finally { setSaving(false); }
-                };
-                return (
-                  <div key={e.entity_id} className="hrv-inset-sm" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 500, color: "var(--primary-text-color,#212121)" }}>{e.entity_id}</div>
-                      {e.alias && (
-                        <div style={{ fontSize: 12, color: "var(--secondary-text-color,#616161)", marginTop: 2 }}>alias: {e.alias}</div>
-                      )}
-                    </div>
-                    <select
-                      value={e.capabilities}
-                      onChange={ev => { if (canEdit) toggleCap(ev.target.value as "read" | "read-write"); }}
-                      disabled={!canEdit}
-                      className="hrv-select-sm"
-                      style={{
-                        fontSize: 11, fontWeight: 600, padding: "2px 6px",
-                        background: isRW ? "#e3f2fd" : "#f3e5f5",
-                        color: isRW ? "#1565c0" : "#6a1b9a",
-                        border: `1px solid ${isRW ? "#90caf9" : "#ce93d8"}`,
-                        borderRadius: 10,
-                      }}
-                    >
-                      <option value="read">READ</option>
-                      <option value="read-write">READ-WRITE</option>
-                    </select>
-                  </div>
+          <Card title={`Entities (${token.entities.length})`} pad={false}>
+            {token.entities.map(e => {
+              const isRW = e.capabilities === "read-write";
+              const canEdit = !readonly && !saving;
+              const toggleCap = async (newCap: "read" | "read-write") => {
+                if (!canEdit) return;
+                const updated = token.entities.map(en =>
+                  en.entity_id === e.entity_id ? { ...en, capabilities: newCap } : en
                 );
-              })}
-            </div>
-          </section>
+                setSaving(true);
+                const prevName = token.created_by_name;
+                try {
+                  const t = await api.tokens.update(token.token_id, { entities: updated as Token["entities"] });
+                  setToken({ ...t, created_by_name: prevName });
+                } catch (err) { setError(String(err)); }
+                finally { setSaving(false); }
+              };
+              return (
+                <div key={e.entity_id} className="widget-row" style={{ gridTemplateColumns: "32px 1fr auto auto", cursor: "default" }}>
+                  <div className="widget-thumb" style={{ width: 32, height: 32 }}>
+                    <Icon name="plug" size={16} />
+                  </div>
+                  <div className="widget-name">
+                    <div className="widget-name-top mono" style={{ fontSize: 13 }}>{e.entity_id}</div>
+                    {e.alias && (
+                      <div className="widget-name-sub">Alias: <span className="mono">{e.alias}</span></div>
+                    )}
+                  </div>
+                  <select
+                    value={e.capabilities}
+                    onChange={ev => { if (canEdit) toggleCap(ev.target.value as "read" | "read-write"); }}
+                    disabled={!canEdit}
+                    className="input"
+                    style={{
+                      fontSize: 11, fontWeight: 600, padding: "2px 6px",
+                      background: isRW ? "var(--info-weak)" : "var(--ok-weak)",
+                      color: isRW ? "var(--info)" : "var(--ok)",
+                      border: "none", borderRadius: 10,
+                    }}
+                  >
+                    <option value="read">READ</option>
+                    <option value="read-write">READ-WRITE</option>
+                  </select>
+                </div>
+              );
+            })}
+          </Card>
 
           {/* Origins */}
           <OriginsEditor
@@ -779,95 +715,76 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
             setError={setError}
           />
 
-          {/* Expiry / schedule */}
-          <section style={{ marginBottom: 20 }}>
-            <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--primary-text-color,#212121)", marginBottom: 6 }}>
-              Expiry
-            </h3>
-            {token.status === "revoked" || token.status === "expired" ? (
-              <div style={{ fontSize: 13, color: "var(--secondary-text-color,#616161)" }}>
+          {/* Expiry */}
+          <Card title="Expiry">
+            {readonly ? (
+              <div className="muted" style={{ fontSize: 13 }}>
                 {token.expires ? new Date(token.expires).toLocaleString() : "No expiry set"}
               </div>
-            ) : (() => {
-              const expiryFmt = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
-              const expiryInvalid = editExpiry !== "" && !expiryFmt.test(editExpiry);
-              const savedValue = token.expires ? token.expires.slice(0, 16) : "";
-              const expiryDirty = editExpiry !== savedValue;
-              return (
-                <>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <input
-                      type="datetime-local"
-                      value={editExpiry}
-                      onChange={e => setEditExpiry(e.target.value)}
-                      onKeyDown={e => { if (e.key === "Enter") saveExpiry(editExpiry); }}
-                      disabled={saving}
-                      className="hrv-input"
-                      style={{ fontSize: 13, borderColor: expiryInvalid ? "#e53935" : undefined }}
-                    />
+            ) : (
+              <div className="col" style={{ gap: 6 }}>
+                <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                  <input
+                    type="datetime-local"
+                    value={editExpiry}
+                    onChange={e => setEditExpiry(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") saveExpiry(editExpiry); }}
+                    disabled={saving}
+                    className="input"
+                    style={{ fontSize: 13, borderColor: expiryInvalid ? "var(--danger)" : undefined }}
+                  />
+                  <button
+                    onClick={() => saveExpiry(editExpiry)}
+                    disabled={saving || expiryInvalid || !expiryDirty}
+                    className="btn btn-sm btn-primary"
+                  >
+                    Apply
+                  </button>
+                  {editExpiry && (
                     <button
-                      onClick={() => saveExpiry(editExpiry)}
-                      disabled={saving || expiryInvalid || !expiryDirty}
-                      className="hrv-btn-sm"
+                      onClick={() => saveExpiry("")}
+                      disabled={saving}
+                      className="btn btn-sm btn-ghost"
                     >
-                      Apply
+                      Clear
                     </button>
-                    {editExpiry && (
-                      <button
-                        onClick={() => saveExpiry("")}
-                        disabled={saving}
-                        className="hrv-btn-sm"
-                        title="Clear expiry (never expires)"
-                      >
-                        Clear
-                      </button>
-                    )}
-                  </div>
-                  {expiryInvalid && (
-                    <div style={{ fontSize: 12, color: "#e53935", marginTop: 4 }}>
-                      Invalid date format.
-                    </div>
                   )}
-                  {!editExpiry && !expiryInvalid && (
-                    <div style={{ fontSize: 12, color: "var(--secondary-text-color,#9e9e9e)", marginTop: 4 }}>
-                      No expiry set - token never expires
-                    </div>
-                  )}
-                  {editExpiry && !expiryInvalid && !expiryDirty && (
-                    <div style={{ fontSize: 12, color: "var(--secondary-text-color,#9e9e9e)", marginTop: 4 }}>
-                      Expires {new Date(editExpiry + ":00Z").toLocaleString()}
-                    </div>
-                  )}
-                </>
-              );
-            })()}
-            {token.active_schedule && (
-              <div style={{ marginTop: 8, fontSize: 13, color: "var(--secondary-text-color,#616161)" }}>
-                Schedule: {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].filter((_, i) => token.active_schedule!.days.includes(i)).join(", ")}
-                {token.active_schedule.windows.map((w, i) => (
-                  <span key={i}> {w.start}-{w.end}</span>
-                ))}
+                </div>
+                {expiryInvalid && (
+                  <div style={{ fontSize: 12, color: "var(--danger)" }}>Invalid date format.</div>
+                )}
+                {!editExpiry && !expiryInvalid && (
+                  <div className="muted" style={{ fontSize: 12 }}>No expiry - widget never expires</div>
+                )}
               </div>
             )}
-          </section>
-
-          {/* Code section - hidden for revoked/expired tokens */}
-          {token.status !== "revoked" && token.status !== "expired" && (
-            <CodeSection token={token} />
-          )}
+            {token.active_schedule && (
+              <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>
+                Schedule: {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].filter((_, i) => token.active_schedule!.days.includes(i)).join(", ")}
+              </div>
+            )}
+          </Card>
         </div>
 
-        {/* Right panel */}
-        <div className="hrv-detail-right">
+        {/* Right column */}
+        <div className="col" style={{ gap: 18 }}>
+          <Card title="Usage">
+            <dl className="kv">
+              <dt>Live sessions</dt><dd>{token.active_sessions}</dd>
+              <dt>Token ID</dt><dd className="mono" style={{ fontSize: 11 }}>{token.token_id}</dd>
+              <dt>Version</dt><dd>{token.token_version}</dd>
+              <dt>Max sessions</dt><dd>{token.max_sessions ?? "unlimited"}</dd>
+            </dl>
+          </Card>
+
           <SessionsPanel tokenId={tokenId} />
-          <hr style={{ border: "none", borderTop: "1px solid var(--divider-color,#e0e0e0)" }} />
           <ActivityPanel tokenId={tokenId} />
         </div>
       </div>
 
       {confirmRevoke && (
         <ConfirmDialog
-          title="Revoke token"
+          title="Revoke widget"
           message={`Revoking "${token.label}" will immediately terminate all active sessions.`}
           confirmLabel="Revoke"
           confirmDestructive
@@ -877,7 +794,7 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
       )}
       {confirmDelete && (
         <ConfirmDialog
-          title="Delete token"
+          title="Delete widget"
           message={`Delete "${token.label}" and all associated activity log entries permanently?`}
           confirmLabel="Delete"
           confirmDestructive

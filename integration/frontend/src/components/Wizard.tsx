@@ -1,26 +1,17 @@
 /**
- * Wizard.tsx - Six-step widget creation wizard.
+ * Wizard.tsx - Six-step widget creation wizard (side-sheet layout).
  *
- * Steps:
- *   1. Pick entities (single or group mode, alias generated on selection)
- *   2. Set permissions (read / read-write)
- *   3. Set origin (saved origins dropdown or new inline)
- *   4. Set expiry (preset or custom, with advanced: schedule, IP, HMAC)
- *   5. Choose appearance (theme selection)
- *   6. Done (generate, show code, alias toggle, web/WordPress tabs)
- *
- * Wizard memory: last-used origin, expiry, theme, capability stored in
- * localStorage under the key "hrv_wizard_memory".
- *
+ * Steps: Entities, Permissions, Origin, Expiry, Appearance, Done.
+ * Right pane shows a fake-browser preview that updates as the user progresses.
+ * Aliases are generated at entity selection time (Step 1).
  * Preview tokens are created at Step 5 and revoked on wizard close.
  */
 
-import {
-  useState, useEffect, useCallback, useRef, useMemo,
-} from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { Token, EntityAccess } from "../types";
 import { api } from "../api";
-import { CopyablePre, Spinner, ErrorBanner } from "./Shared";
+import { CopyablePre, CopyButton, Spinner, ErrorBanner, ConfirmDialog } from "./Shared";
+import { Icon } from "./Icon";
 import { getEntityCache, loadEntityCache } from "../entityCache";
 import type { HAEntity } from "../types";
 
@@ -36,11 +27,8 @@ interface WizardMemory {
 }
 
 function loadMemory(): WizardMemory {
-  try {
-    return JSON.parse(localStorage.getItem("hrv_wizard_memory") ?? "{}");
-  } catch {
-    return {} as WizardMemory;
-  }
+  try { return JSON.parse(localStorage.getItem("hrv_wizard_memory") ?? "{}"); }
+  catch { return {} as WizardMemory; }
 }
 
 function saveMemory(m: Partial<WizardMemory>) {
@@ -58,7 +46,7 @@ interface SelectedEntity {
 
 interface WizardState {
   mode: "single" | "group";
-  entities: SelectedEntity[];  // primary entities selected
+  entities: SelectedEntity[];
   capability: "read" | "read-write";
   originMode: "specific" | "any";
   selectedOriginUrl: string;
@@ -71,10 +59,6 @@ interface WizardState {
   previewTokenId: string | null;
 }
 
-// ---------------------------------------------------------------------------
-// Props
-// ---------------------------------------------------------------------------
-
 interface WizardProps {
   onClose: (newTokenId?: string) => void;
 }
@@ -85,25 +69,18 @@ interface WizardProps {
 
 const TOTAL_STEPS = 6;
 const WIDGET_SCRIPT = `<script src="https://cdn.jsdelivr.net/gh/sfox38/harvest@latest/widget/dist/harvest.min.js"></script>`;
+const STEP_LABELS = ["Entities", "Permissions", "Origin", "Expiry", "Appearance", "Done"];
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Split a URL into { origin, path } for storage in OriginConfig.
-// The browser Origin header contains only scheme+host+port, never a path.
-// The path (if any) goes into allow_paths and is matched against the Referer header.
-// Examples:
-//   "https://oddtunes.com"              -> { origin: "https://oddtunes.com", path: null }
-//   "https://oddtunes.com/harvest.html" -> { origin: "https://oddtunes.com", path: "/harvest.html" }
 function splitOriginUrl(url: string): { origin: string; path: string | null } {
   try {
     const u = new URL(url);
     const path = (u.pathname && u.pathname !== "/") ? u.pathname : null;
     return { origin: u.origin, path };
-  } catch {
-    return { origin: url, path: null };
-  }
+  } catch { return { origin: url, path: null }; }
 }
 
 function expiresAt(option: string, customDate: string): string | null {
@@ -116,17 +93,13 @@ function expiresAt(option: string, customDate: string): string | null {
 }
 
 function fmtExpiry(option: string): string {
-  if (option === "never") return "";
-  if (option === "custom") return "";
+  if (option === "never" || option === "custom") return "";
   const days = option === "30d" ? 30 : option === "90d" ? 90 : 365;
   const d = new Date();
   d.setDate(d.getDate() + days);
   return `until ${d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`;
 }
 
-// Build the card/group snippet with ha-url and token embedded directly.
-// This makes each widget self-contained so multiple widgets with different
-// tokens can coexist on the same page without overwriting each other.
 function buildCardSnippet(token: Token, useAliases: boolean, haUrl: string): string {
   const attrs = `ha-url="${haUrl}" token="${token.token_id}"`;
   const cards = token.entities.map((e: EntityAccess) => {
@@ -135,7 +108,6 @@ function buildCardSnippet(token: Token, useAliases: boolean, haUrl: string): str
   });
   const isGroup = token.entities.length > 1;
   if (isGroup) return `<hrv-group ${attrs}>\n${cards.join("\n")}\n</hrv-group>`;
-  // Single card: inline the attrs on the card itself.
   const entityAttr = useAliases && token.entities[0]?.alias
     ? `alias="${token.entities[0].alias}"`
     : `entity="${token.entities[0]?.entity_id ?? ""}"`;
@@ -160,37 +132,22 @@ function buildWordPressSnippet(token: Token, useAliases: boolean, haUrl: string)
 // StepIndicator
 // ---------------------------------------------------------------------------
 
-const STEP_LABELS = ["Entities", "Permissions", "Origin", "Expiry", "Appearance", "Done"];
-
 function StepIndicator({ current }: { current: number }) {
   return (
-    <div className="hrv-step-indicator">
+    <div className="stepper">
       {STEP_LABELS.map((label, i) => {
         const stepNum = i + 1;
-        const done    = stepNum < current;
-        const active  = stepNum === current;
+        const state = stepNum < current ? "done" : stepNum === current ? "active" : "pending";
         return (
-          <div key={label} style={{ display: "flex", alignItems: "center" }}>
-            <div style={{
-              display: "flex", alignItems: "center", gap: 6, padding: "4px 8px",
-              borderRadius: 16,
-              background: active ? "var(--primary-color,#6200ea)" : done ? "#e8f5e9" : "transparent",
-              color: active ? "#fff" : done ? "#2e7d32" : "var(--secondary-text-color,#9e9e9e)",
-              fontSize: 12, fontWeight: active ? 700 : 500,
-            }}>
-              <span style={{
-                width: 18, height: 18, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
-                background: active ? "rgba(255,255,255,0.3)" : done ? "#43a047" : "var(--divider-color,#e0e0e0)",
-                color: done ? "#fff" : "inherit", fontSize: 11, fontWeight: 700, flexShrink: 0,
-              }}>
-                {done ? "check" : stepNum}
+          <React.Fragment key={label}>
+            <div className="step" data-state={state}>
+              <span className="step-num">
+                {state === "done" ? <Icon name="check" size={11} /> : stepNum}
               </span>
-              {label}
+              <span className="step-label">{label}</span>
             </div>
-            {i < STEP_LABELS.length - 1 && (
-              <div className="hrv-step-connector" />
-            )}
-          </div>
+            {i < STEP_LABELS.length - 1 && <div className="step-line" />}
+          </React.Fragment>
         );
       })}
     </div>
@@ -198,7 +155,105 @@ function StepIndicator({ current }: { current: number }) {
 }
 
 // ---------------------------------------------------------------------------
-// EntityAutocomplete - combobox for entity ID selection in Step 1
+// WizardPreview
+// ---------------------------------------------------------------------------
+
+function WizardPreview({ state, step }: { state: WizardState; step: number }) {
+  const originUrl = state.originMode === "any"
+    ? "https://your-site.com"
+    : state.selectedOriginUrl || "https://your-site.com";
+
+  const hasEntities = state.entities.length > 0;
+
+  return (
+    <div className="wizard-preview">
+      <div className="preview-label">Preview</div>
+      <div className="preview-site">
+        <div className="preview-chrome">
+          <div className="dot r" />
+          <div className="dot y" />
+          <div className="dot g" />
+          <div className="url">{originUrl}</div>
+        </div>
+        <div className="preview-page">
+          <p className="preview-heading">
+            {step <= 2 ? "My page" : originUrl.replace(/^https?:\/\//, "").split("/")[0]}
+          </p>
+          <div className="preview-paragraph" style={{ width: "70%" }} />
+          <div className="preview-paragraph" style={{ width: "90%" }} />
+          <div className="preview-paragraph" style={{ width: "50%" }} />
+
+          {hasEntities && (
+            <div style={{ marginTop: 18 }}>
+              {state.entities.slice(0, 3).map(e => (
+                <div key={e.entity_id} className="fake-widget" style={{
+                  marginBottom: 10, padding: "12px 14px",
+                  background: "white", borderRadius: 8,
+                  border: "1px solid #e0e0e0",
+                  fontSize: 12,
+                }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4, color: "#333" }}>
+                    {e.entity_id.split(".")[1]?.replace(/_/g, " ") ?? e.entity_id}
+                  </div>
+                  <div style={{ color: "#666", fontSize: 11 }}>
+                    {e.alias ? `alias: ${e.alias}` : e.entity_id}
+                  </div>
+                  {state.capability === "read-write" && (
+                    <div style={{ marginTop: 8, display: "flex", gap: 4 }}>
+                      <div style={{ padding: "2px 8px", background: "var(--accent)", color: "#fff", borderRadius: 4, fontSize: 10 }}>
+                        On
+                      </div>
+                      <div style={{ padding: "2px 8px", background: "#e0e0e0", color: "#666", borderRadius: 4, fontSize: 10 }}>
+                        Off
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {state.entities.length > 3 && (
+                <div style={{ fontSize: 11, color: "#999", textAlign: "center" }}>
+                  +{state.entities.length - 3} more
+                </div>
+              )}
+            </div>
+          )}
+
+          {!hasEntities && (
+            <div style={{
+              marginTop: 18, padding: "20px 14px", background: "#f5f5f5",
+              borderRadius: 8, border: "1px dashed #ccc", textAlign: "center",
+              fontSize: 11, color: "#999",
+            }}>
+              Select an entity to preview
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Summary kv */}
+      {hasEntities && (
+        <div>
+          <div className="preview-label" style={{ marginBottom: 8 }}>Widget summary</div>
+          <dl className="kv-compact">
+            <dt>Entities</dt>
+            <dd>{state.entities.length}</dd>
+            <dt>Access</dt>
+            <dd>{state.capability === "read-write" ? "View and control" : "View only"}</dd>
+            {state.originMode === "specific" && state.selectedOriginUrl && (
+              <><dt>Origin</dt><dd className="mono" style={{ fontSize: 11 }}>{state.selectedOriginUrl}</dd></>
+            )}
+            {state.originMode === "any" && <><dt>Origin</dt><dd>Any website</dd></>}
+            <dt>Expires</dt>
+            <dd>{state.expiryOption === "never" ? "Never" : state.expiryOption === "custom" ? state.expiryCustomDate || "-" : fmtExpiry(state.expiryOption)}</dd>
+          </dl>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// EntityAutocomplete
 // ---------------------------------------------------------------------------
 
 interface EntityAutocompleteProps {
@@ -218,16 +273,12 @@ function EntityAutocomplete({ value, onChange, onSelect, disabled }: EntityAutoc
     if (!value.trim()) return [];
     const q = value.toLowerCase();
     return getEntityCache()
-      .filter(e =>
-        e.entity_id.toLowerCase().includes(q) ||
-        e.friendly_name.toLowerCase().includes(q)
-      )
+      .filter(e => e.entity_id.toLowerCase().includes(q) || e.friendly_name.toLowerCase().includes(q))
       .slice(0, 8);
   }, [value]);
 
   useEffect(() => { setHighlighted(0); }, [matches.length]);
 
-  // Recalculate fixed position whenever the dropdown opens or matches change.
   useEffect(() => {
     if (open && matches.length > 0 && inputRef.current) {
       const r = inputRef.current.getBoundingClientRect();
@@ -253,10 +304,7 @@ function EntityAutocomplete({ value, onChange, onSelect, disabled }: EntityAutoc
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         onKeyDown={e => {
           if (!open || matches.length === 0) {
-            if (e.key === "Enter" && value.trim().includes(".")) {
-              select(value.trim());
-              e.preventDefault();
-            }
+            if (e.key === "Enter" && value.trim().includes(".")) { select(value.trim()); e.preventDefault(); }
             return;
           }
           if (e.key === "ArrowDown") { setHighlighted(h => Math.min(h + 1, matches.length - 1)); e.preventDefault(); }
@@ -266,46 +314,35 @@ function EntityAutocomplete({ value, onChange, onSelect, disabled }: EntityAutoc
         }}
         disabled={disabled}
         placeholder="Search entity ID or friendly name..."
-        className="hrv-input"
+        className="input"
         style={{ width: "100%", boxSizing: "border-box" }}
+        aria-label="Search entities"
+        aria-autocomplete="list"
+        aria-expanded={open && matches.length > 0}
       />
       {dropdownRect && (
         <div
-          className="hrv-autocomplete-dropdown"
-          style={{
-            top: dropdownRect.top,
-            left: dropdownRect.left,
-            width: dropdownRect.width,
-          }}
+          className="autocomplete-dropdown"
+          style={{ top: dropdownRect.top, left: dropdownRect.left, width: dropdownRect.width }}
+          role="listbox"
         >
           {matches.map((e, i) => (
             <div
               key={e.entity_id}
               onMouseDown={() => select(e.entity_id)}
               onMouseEnter={() => setHighlighted(i)}
-              className="hrv-autocomplete-item"
-              style={{
-                background: i === highlighted ? "var(--secondary-background-color,#f5f5f5)" : "transparent",
-                borderBottom: i < matches.length - 1 ? "1px solid var(--divider-color,#f0f0f0)" : "none",
-              }}
+              className={`autocomplete-item${i === highlighted ? " highlighted" : ""}`}
+              role="option"
+              aria-selected={i === highlighted}
             >
-              <span className="hrv-domain-badge">{e.domain}</span>
+              <span className="badge badge-neutral" style={{ fontSize: 10 }}>{e.domain}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {e.entity_id}
-                </div>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>{e.entity_id}</div>
                 {e.friendly_name !== e.entity_id && (
-                  <div style={{ fontSize: 11, color: "var(--secondary-text-color,#9e9e9e)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {e.friendly_name}
-                  </div>
+                  <div className="muted" style={{ fontSize: 11 }}>{e.friendly_name}</div>
                 )}
               </div>
-              <span style={{
-                fontSize: 11, flexShrink: 0,
-                color: e.state === "on" || e.state === "open" ? "#43a047" : "var(--secondary-text-color,#9e9e9e)",
-              }}>
-                {e.state}
-              </span>
+              <span className="muted" style={{ fontSize: 11 }}>{e.state}</span>
             </div>
           ))}
         </div>
@@ -318,19 +355,12 @@ function EntityAutocomplete({ value, onChange, onSelect, disabled }: EntityAutoc
 // Step 1: Pick entities
 // ---------------------------------------------------------------------------
 
-interface Step1Props {
-  state: WizardState;
-  onChange: (updates: Partial<WizardState>) => void;
-}
-
-function Step1({ state, onChange }: Step1Props) {
+function Step1({ state, onChange }: { state: WizardState; onChange: (u: Partial<WizardState>) => void }) {
   const [entityInput, setEntityInput] = useState("");
   const [loadingAlias, setLoadingAlias] = useState<string | null>(null);
 
   useEffect(() => {
-    if (getEntityCache().length === 0) {
-      loadEntityCache();
-    }
+    if (getEntityCache().length === 0) loadEntityCache();
   }, []);
 
   const selectEntity = async (entityId: string) => {
@@ -340,7 +370,7 @@ function Step1({ state, onChange }: Step1Props) {
     try {
       const result = await api.tokens.generateAlias(entityId);
       alias = result.alias;
-    } catch { /* alias stays null - harmless */ }
+    } catch { /* alias stays null */ }
     finally { setLoadingAlias(null); }
 
     const entry: SelectedEntity = { entity_id: entityId, alias, companions: [] };
@@ -356,30 +386,20 @@ function Step1({ state, onChange }: Step1Props) {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* Mode toggle */}
-      <div style={{ display: "flex", gap: 0 }}>
+    <div className="col" style={{ gap: 16 }}>
+      <div className="segmented" role="group">
         {(["single", "group"] as const).map(m => (
-          <button
-            key={m}
-            onClick={() => onChange({ mode: m, entities: [] })}
-            className={m === "single" ? "hrv-seg-left" : "hrv-seg-right"}
-            style={{
-              background: state.mode === m ? "var(--primary-color,#6200ea)" : "transparent",
-              color: state.mode === m ? "#fff" : "var(--primary-color,#6200ea)",
-            }}
-          >
+          <button key={m} aria-pressed={state.mode === m} onClick={() => onChange({ mode: m, entities: [] })}>
             {m === "single" ? "Single card" : "Group of cards"}
           </button>
         ))}
       </div>
 
-      <p style={{ fontSize: 13, color: "var(--secondary-text-color,#616161)" }}>
+      <p className="muted" style={{ fontSize: 13 }}>
         Enter entity IDs from your Home Assistant instance.
-        {state.mode === "group" ? " You can add multiple entities." : ""}
+        {state.mode === "group" ? " Add multiple entities for a group widget." : ""}
       </p>
 
-      {/* Entity input with autocomplete */}
       <EntityAutocomplete
         value={entityInput}
         onChange={setEntityInput}
@@ -387,26 +407,38 @@ function Step1({ state, onChange }: Step1Props) {
         disabled={loadingAlias !== null}
       />
 
-      {/* Selected entities */}
+      {loadingAlias && (
+        <div className="row muted" style={{ gap: 8, fontSize: 12 }}>
+          <Spinner size={14} /> Generating alias for {loadingAlias}...
+        </div>
+      )}
+
       {state.entities.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--secondary-text-color,#616161)" }}>
+        <div className="col" style={{ gap: 6 }}>
+          <div className="muted" style={{ fontSize: 12, fontWeight: 600 }}>
             Selected ({state.entities.length}):
           </div>
           {state.entities.map(e => (
-            <div key={e.entity_id} className="hrv-inset-sm" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-              <span style={{ flex: 1, fontWeight: 500 }}>{e.entity_id}</span>
+            <div key={e.entity_id} className="chip" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{e.entity_id}</span>
               {e.alias && (
-                <span style={{ fontSize: 11, color: "var(--secondary-text-color,#9e9e9e)" }}>alias: {e.alias}</span>
+                <span className="muted" style={{ fontSize: 11 }}>alias: {e.alias}</span>
               )}
-              <button onClick={() => removeEntity(e.entity_id)} style={{ background: "none", border: "none", color: "#c62828", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>x</button>
+              <button
+                onClick={() => removeEntity(e.entity_id)}
+                className="btn btn-sm btn-ghost"
+                style={{ padding: "1px 4px" }}
+                aria-label={`Remove ${e.entity_id}`}
+              >
+                <Icon name="close" size={12} />
+              </button>
             </div>
           ))}
         </div>
       )}
 
       {state.entities.length === 0 && (
-        <p style={{ fontSize: 12, color: "var(--secondary-text-color,#9e9e9e)" }}>
+        <p className="muted" style={{ fontSize: 12 }}>
           No entities selected yet. Add at least one to continue.
         </p>
       )}
@@ -420,19 +452,26 @@ function Step1({ state, onChange }: Step1Props) {
 
 function Step2({ state, onChange }: { state: WizardState; onChange: (u: Partial<WizardState>) => void }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <p style={{ fontSize: 14, fontWeight: 600, color: "var(--primary-text-color,#212121)" }}>
-        What can visitors do with this widget?
-      </p>
+    <div className="col" style={{ gap: 14 }}>
+      <p style={{ fontSize: 14, fontWeight: 600 }}>What can visitors do with this widget?</p>
       {([
-        { value: "read"       as const, label: "View only",       desc: "Visitors can see the current state of your device but cannot control it." },
-        { value: "read-write" as const, label: "View and control", desc: "Visitors can see the state and send commands, such as toggling a light or adjusting brightness." },
+        { value: "read"       as const, label: "View only",        desc: "Visitors can see the current state but cannot control devices." },
+        { value: "read-write" as const, label: "View and control",  desc: "Visitors can see the state and send commands, such as toggling a light." },
       ]).map(({ value, label, desc }) => (
-        <label key={value} style={{ display: "flex", gap: 12, cursor: "pointer", padding: "12px 14px", borderRadius: 8, border: `2px solid ${state.capability === value ? "var(--primary-color,#6200ea)" : "var(--divider-color,#e0e0e0)"}`, background: "var(--primary-background-color,#fff)" }}>
-          <input type="radio" name="capability" value={value} checked={state.capability === value} onChange={() => { onChange({ capability: value }); saveMemory({ capability: value }); }} style={{ marginTop: 2, accentColor: "var(--primary-color,#6200ea)" }} />
+        <label
+          key={value}
+          className={`choice${state.capability === value ? " choice-selected" : ""}`}
+        >
+          <input
+            type="radio"
+            name="capability"
+            value={value}
+            checked={state.capability === value}
+            onChange={() => { onChange({ capability: value }); saveMemory({ capability: value }); }}
+          />
           <div>
-            <div style={{ fontWeight: 600, fontSize: 14, color: "var(--primary-text-color,#212121)" }}>{label}</div>
-            <div style={{ fontSize: 13, color: "var(--secondary-text-color,#616161)", marginTop: 2 }}>{desc}</div>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>{label}</div>
+            <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>{desc}</div>
           </div>
         </label>
       ))}
@@ -445,7 +484,6 @@ function Step2({ state, onChange }: { state: WizardState; onChange: (u: Partial<
 // ---------------------------------------------------------------------------
 
 const ORIGIN_CUSTOM = "__custom__";
-
 const HIDDEN_ORIGINS_KEY = "hrv_hidden_origins";
 
 function loadHiddenOrigins(): Set<string> {
@@ -472,17 +510,11 @@ function Step3({ state, onChange }: { state: WizardState; onChange: (u: Partial<
           t.origins.allowed.forEach(o => {
             if (t.origins.allow_paths.length > 0) {
               t.origins.allow_paths.forEach(p => seen.add(`${o}${p}`));
-            } else {
-              seen.add(o);
-            }
+            } else { seen.add(o); }
           });
         }
       });
-      const list = Array.from(seen);
-      setAllOrigins(list);
-      if (state.selectedOriginUrl && !list.includes(state.selectedOriginUrl)) {
-        setUsingCustom(true);
-      }
+      setAllOrigins(Array.from(seen));
     }).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -490,68 +522,54 @@ function Step3({ state, onChange }: { state: WizardState; onChange: (u: Partial<
   const hasExisting = existingOrigins.length > 0;
   const showTextInput = !hasExisting || usingCustom;
   const selectVal = usingCustom ? ORIGIN_CUSTOM : (state.selectedOriginUrl || "");
-
-  // The delete button is only active when a real existing origin is selected.
-  const canDelete = !usingCustom && !!state.selectedOriginUrl && state.selectedOriginUrl !== ORIGIN_CUSTOM;
+  const canDelete = !usingCustom && !!state.selectedOriginUrl;
 
   const handleDeleteOrigin = () => {
-    const toHide = state.selectedOriginUrl;
-    if (!toHide) return;
     const next = new Set(hiddenOrigins);
-    next.add(toHide);
+    next.add(state.selectedOriginUrl);
     setHiddenOrigins(next);
     saveHiddenOrigins(next);
     onChange({ selectedOriginUrl: "" });
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <p style={{ fontSize: 14, fontWeight: 600, color: "var(--primary-text-color,#212121)" }}>
-        Where will this widget appear?
-      </p>
+    <div className="col" style={{ gap: 14 }}>
+      <p style={{ fontSize: 14, fontWeight: 600 }}>Where will this widget appear?</p>
 
-      {/* Specific website or page */}
-      <label style={{ display: "flex", gap: 12, cursor: "pointer" }}>
-        <input type="radio" name="originMode" value="specific" checked={state.originMode === "specific"} onChange={() => onChange({ originMode: "specific" })} style={{ marginTop: 2, accentColor: "var(--primary-color,#6200ea)" }} />
+      <label className={`choice${state.originMode === "specific" ? " choice-selected" : ""}`}>
+        <input
+          type="radio" name="originMode" value="specific"
+          checked={state.originMode === "specific"}
+          onChange={() => onChange({ originMode: "specific" })}
+        />
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 600, fontSize: 14 }}>A specific website or page</div>
           {state.originMode === "specific" && (
-            <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+            <div className="col" style={{ gap: 8, marginTop: 10 }}>
               {hasExisting && (
-                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <div className="row" style={{ gap: 6 }}>
                   <select
                     value={selectVal}
                     onChange={e => {
-                      if (e.target.value === ORIGIN_CUSTOM) {
-                        setUsingCustom(true);
-                        onChange({ selectedOriginUrl: "" });
-                      } else {
-                        setUsingCustom(false);
-                        onChange({ selectedOriginUrl: e.target.value });
-                      }
+                      if (e.target.value === ORIGIN_CUSTOM) { setUsingCustom(true); onChange({ selectedOriginUrl: "" }); }
+                      else { setUsingCustom(false); onChange({ selectedOriginUrl: e.target.value }); }
                     }}
-                    className="hrv-select-sm"
-                    style={{ flex: 1 }}
+                    className="input"
+                    style={{ flex: 1, fontSize: 13 }}
                   >
-                    <option value="">-- Select an origin --</option>
+                    <option value="">Select an origin...</option>
                     {existingOrigins.map(o => <option key={o} value={o}>{o}</option>)}
                     <option value={ORIGIN_CUSTOM}>Enter a new URL...</option>
                   </select>
-                  <button
-                    type="button"
-                    onClick={handleDeleteOrigin}
-                    disabled={!canDelete}
-                    title="Remove this URL from the list"
-                    style={{
-                      padding: "4px 10px", border: "1px solid var(--divider-color,#e0e0e0)",
-                      borderRadius: 6, background: "var(--primary-background-color,#fff)",
-                      color: canDelete ? "#c62828" : "var(--secondary-text-color,#9e9e9e)",
-                      fontSize: 12, cursor: canDelete ? "pointer" : "default",
-                      whiteSpace: "nowrap", flexShrink: 0,
-                    }}
-                  >
-                    Delete URL
-                  </button>
+                  {canDelete && (
+                    <button
+                      type="button"
+                      onClick={handleDeleteOrigin}
+                      className="btn btn-sm btn-danger"
+                    >
+                      Remove
+                    </button>
+                  )}
                 </div>
               )}
               {showTextInput && (
@@ -560,29 +578,35 @@ function Step3({ state, onChange }: { state: WizardState; onChange: (u: Partial<
                   onChange={e => onChange({ selectedOriginUrl: e.target.value })}
                   placeholder="https://example.com"
                   autoFocus={hasExisting}
-                  className="hrv-input-sm"
+                  className="input"
+                  style={{ fontSize: 13 }}
                 />
               )}
-              <p style={{ fontSize: 11, color: "var(--secondary-text-color,#9e9e9e)", margin: 0 }}>
-                Site only (e.g. https://example.com) or a specific page (e.g. https://example.com/page.html). A path restricts the widget to that page only.
+              <p className="muted" style={{ fontSize: 11 }}>
+                Site only (https://example.com) or a specific page (https://example.com/page.html).
               </p>
             </div>
           )}
         </div>
       </label>
 
-      {/* Any website */}
-      <label style={{ display: "flex", gap: 12, cursor: "pointer" }}>
-        <input type="radio" name="originMode" value="any" checked={state.originMode === "any"} onChange={() => onChange({ originMode: "any" })} style={{ marginTop: 2, accentColor: "var(--primary-color,#6200ea)" }} />
+      <label className={`choice${state.originMode === "any" ? " choice-selected" : ""}`}>
+        <input
+          type="radio" name="originMode" value="any"
+          checked={state.originMode === "any"}
+          onChange={() => onChange({ originMode: "any" })}
+        />
         <div>
           <div style={{ fontWeight: 600, fontSize: 14 }}>Any website</div>
-          <div style={{ fontSize: 13, color: "var(--secondary-text-color,#616161)", marginTop: 2 }}>The widget will work when embedded on any page.</div>
+          <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
+            The widget will work when embedded on any page.
+          </div>
         </div>
       </label>
 
       {showWarning && (
-        <div className="hrv-alert-warn">
-          <strong>Security Warning:</strong> This allows anyone on the internet to control your device from any website. Only proceed if you understand this risk.
+        <div className="badge badge-warn" style={{ fontSize: 13, padding: "8px 12px", display: "block" }}>
+          <strong>Security warning:</strong> This allows anyone on the internet to control your device from any website. Only proceed if you understand this risk.
         </div>
       )}
     </div>
@@ -601,34 +625,36 @@ function Step4({ state, onChange }: { state: WizardState; onChange: (u: Partial<
     { value: "1y",     label: "1 year"        },
     { value: "custom", label: "Custom date"   },
   ];
-
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <p style={{ fontSize: 14, fontWeight: 600, color: "var(--primary-text-color,#212121)" }}>
-        When should this widget stop working?
-      </p>
+    <div className="col" style={{ gap: 12 }}>
+      <p style={{ fontSize: 14, fontWeight: 600 }}>When should this widget stop working?</p>
       {options.map(({ value, label }) => (
-        <label key={value} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+        <label
+          key={value}
+          className={`choice${state.expiryOption === value ? " choice-selected" : ""}`}
+          style={{ flexDirection: "row", alignItems: "center", gap: 12 }}
+        >
           <input
             type="radio" name="expiry" value={value}
             checked={state.expiryOption === value}
             onChange={() => { onChange({ expiryOption: value }); saveMemory({ expiryOption: value }); }}
-            style={{ accentColor: "var(--primary-color,#6200ea)" }}
           />
-          <span style={{ fontSize: 14 }}>{label}</span>
-          {value !== "never" && value !== "custom" && (
-            <span style={{ fontSize: 12, color: "var(--secondary-text-color,#9e9e9e)" }}>({fmtExpiry(value)})</span>
-          )}
-          {value === "custom" && state.expiryOption === "custom" && (
-            <input
-              type="date"
-              value={state.expiryCustomDate}
-              onChange={e => onChange({ expiryCustomDate: e.target.value })}
-              min={new Date().toISOString().split("T")[0]}
-              className="hrv-input-sm"
-              style={{ padding: "4px 8px" }}
-            />
-          )}
+          <div style={{ flex: 1 }}>
+            <span style={{ fontSize: 14 }}>{label}</span>
+            {value !== "never" && value !== "custom" && (
+              <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>({fmtExpiry(value)})</span>
+            )}
+            {value === "custom" && state.expiryOption === "custom" && (
+              <input
+                type="date"
+                value={state.expiryCustomDate}
+                onChange={e => onChange({ expiryCustomDate: e.target.value })}
+                min={new Date().toISOString().split("T")[0]}
+                className="input"
+                style={{ marginLeft: 10, fontSize: 13 }}
+              />
+            )}
+          </div>
         </label>
       ))}
     </div>
@@ -647,41 +673,28 @@ const BUNDLED_THEMES = [
 
 function Step5({ state, onChange }: { state: WizardState; onChange: (u: Partial<WizardState>) => void }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <p style={{ fontSize: 14, color: "var(--secondary-text-color,#616161)" }}>
+    <div className="col" style={{ gap: 16 }}>
+      <p className="muted" style={{ fontSize: 13 }}>
         How should your widget look? (optional - skip to use the default theme)
       </p>
 
-      <div>
-        <label style={{ fontSize: 13, fontWeight: 600, color: "var(--primary-text-color,#212121)", display: "block", marginBottom: 6 }}>
-          Theme
-        </label>
-        <select
-          value={state.themeUrl}
-          onChange={e => { onChange({ themeUrl: e.target.value }); saveMemory({ themeUrl: e.target.value }); }}
-          className="hrv-select"
-          style={{ width: "100%" }}
-        >
+      <div className="col" style={{ gap: 6 }}>
+        <label style={{ fontSize: 13, fontWeight: 600 }}>Theme</label>
+        <div className="theme-grid">
           {BUNDLED_THEMES.map(t => (
-            <option key={t.url} value={t.url}>{t.label}</option>
+            <button
+              key={t.url}
+              className={`theme-card${state.themeUrl === t.url ? " selected" : ""}`}
+              onClick={() => { onChange({ themeUrl: t.url }); saveMemory({ themeUrl: t.url }); }}
+            >
+              <div className="theme-preview" />
+              <span style={{ fontSize: 12 }}>{t.label}</span>
+            </button>
           ))}
-        </select>
+        </div>
       </div>
 
-      {state.previewTokenId && (
-        <div style={{ marginTop: 8 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--secondary-text-color,#616161)", marginBottom: 8 }}>
-            Live preview
-          </div>
-          <div style={{ display: "inline-block", border: "1px solid var(--divider-color,#e0e0e0)", borderRadius: 8, padding: 8, maxWidth: 320, minWidth: 200, minHeight: 100, background: "var(--primary-background-color,#fff)", fontSize: 12, color: "var(--secondary-text-color,#9e9e9e)", textAlign: "center", paddingTop: 32 }}>
-            Preview connects to HA via a 5-minute token.
-            <br />
-            (Live card rendered here at runtime.)
-          </div>
-        </div>
-      )}
-
-      <p style={{ fontSize: 12, color: "var(--secondary-text-color,#9e9e9e)" }}>
+      <p className="muted" style={{ fontSize: 12 }}>
         Themes are fully customizable. Manage custom themes in Settings.
       </p>
     </div>
@@ -692,14 +705,12 @@ function Step5({ state, onChange }: { state: WizardState; onChange: (u: Partial<
 // Step 6: Done
 // ---------------------------------------------------------------------------
 
-interface Step6Props {
+function Step6({ token, tokenSecret, originMode, originUrl }: {
   token: Token;
   tokenSecret: string | null;
   originMode: "specific" | "any";
   originUrl: string;
-}
-
-function Step6({ token, tokenSecret, originMode, originUrl }: Step6Props) {
+}) {
   const [useAliases,   setUseAliases]   = useState(false);
   const [tab,          setTab]          = useState<"web" | "wordpress">("web");
   const [acknowledged, setAcknowledged] = useState(!tokenSecret);
@@ -707,42 +718,36 @@ function Step6({ token, tokenSecret, originMode, originUrl }: Step6Props) {
   const [nameSaving,   setNameSaving]   = useState(false);
 
   const haUrl = window.location.origin;
-
   const cardSnippet = tab === "web"
     ? buildCardSnippet(token, useAliases, haUrl)
     : buildWordPressSnippet(token, useAliases, haUrl);
-
   const hostDisplay = originMode === "any" ? "Anywhere" : (originUrl || haUrl);
 
   const saveWidgetName = async (name: string) => {
     if (!name.trim() || name === token.label) return;
     setNameSaving(true);
-    try {
-      await api.tokens.update(token.token_id, { label: name.trim() });
-    } catch { /* non-fatal */ }
+    try { await api.tokens.update(token.token_id, { label: name.trim() }); }
+    catch { /* non-fatal */ }
     finally { setNameSaving(false); }
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <p style={{ fontSize: 16, fontWeight: 700, color: "var(--primary-text-color,#212121)" }}>
-        Your widget is ready.
-      </p>
+    <div className="col" style={{ gap: 16 }}>
+      <p style={{ fontSize: 16, fontWeight: 700 }}>Your widget is ready.</p>
 
-      {/* HMAC secret acknowledgement */}
       {tokenSecret && (
-        <div className="hrv-alert-secret">
-          <div style={{ fontWeight: 600, fontSize: 13, color: "#b71c1c", marginBottom: 8 }}>
+        <div style={{ background: "var(--danger-weak)", border: "1px solid var(--danger)", borderRadius: 8, padding: 14 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, color: "var(--danger)", marginBottom: 8 }}>
             Save your token secret now
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-            <code style={{ flex: 1, fontSize: 12, wordBreak: "break-all", color: "#212121" }}>{tokenSecret}</code>
+          <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+            <code className="mono" style={{ flex: 1, fontSize: 12, wordBreak: "break-all" }}>{tokenSecret}</code>
             <CopyButton text={tokenSecret} label="Copy" size="sm" />
           </div>
-          <p style={{ fontSize: 12, color: "#b71c1c", margin: "0 0 10px" }}>
+          <p style={{ fontSize: 12, color: "var(--danger)", margin: "0 0 10px" }}>
             This is shown once only and cannot be retrieved again.
           </p>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+          <label className="row" style={{ gap: 8, fontSize: 13, cursor: "pointer" }}>
             <input type="checkbox" checked={acknowledged} onChange={e => setAcknowledged(e.target.checked)} />
             I have saved my token secret
           </label>
@@ -751,74 +756,62 @@ function Step6({ token, tokenSecret, originMode, originUrl }: Step6Props) {
 
       {acknowledged && (
         <>
-          {/* Host URL + Widget name */}
-          <div style={{ fontSize: 13, color: "var(--secondary-text-color,#616161)", lineHeight: 1.8 }}>
-            <div>
-              <span style={{ fontWeight: 600, color: "var(--primary-text-color,#212121)" }}>Host URL:</span>{" "}
-              {hostDisplay}
-            </div>
-          </div>
-
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "var(--secondary-text-color,#616161)", display: "block", marginBottom: 4 }}>
-              Widget name
-            </label>
+          <div className="col" style={{ gap: 4 }}>
+            <label style={{ fontSize: 12, fontWeight: 600 }}>Widget name</label>
             <input
               value={widgetName}
               onChange={e => setWidgetName(e.target.value)}
               onBlur={e => saveWidgetName(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }}
               disabled={nameSaving}
-              className="hrv-input-sm"
-              style={{ width: "100%", boxSizing: "border-box" }}
+              className="input"
+              style={{ fontSize: 14 }}
             />
-            <p style={{ fontSize: 11, color: "var(--secondary-text-color,#9e9e9e)", margin: "4px 0 0" }}>
-              A label to identify this widget in your token list. Edit and press Enter to save.
-            </p>
+          </div>
+
+          <div className="muted" style={{ fontSize: 13 }}>
+            Host URL: <span className="mono">{hostDisplay}</span>
           </div>
 
           {/* Step 1: script tag */}
-          <div>
-            <p style={{ fontSize: 12, fontWeight: 600, color: "var(--secondary-text-color,#616161)", marginBottom: 6 }}>
-              Step 1: Add to your page &lt;head&gt; once (click to copy)
-            </p>
-            <CopyablePre text={WIDGET_SCRIPT} label="Copy step 1" />
+          <div className="code-block-group">
+            <div className="code-block-label">
+              <span className="step-pill">1</span>
+              <div>
+                <div className="code-block-title">Page-level script</div>
+                <div className="muted" style={{ fontSize: 12 }}>Add once to your page's &lt;head&gt;.</div>
+              </div>
+            </div>
+            <CopyablePre text={WIDGET_SCRIPT} label="Copy script" />
           </div>
 
           {/* Step 2: card snippet */}
-          <div>
-            <p style={{ fontSize: 12, fontWeight: 600, color: "var(--secondary-text-color,#616161)", marginBottom: 6 }}>
-              Step 2: Paste where you want the widget (click to copy)
-            </p>
-            <div style={{ display: "flex", gap: 0, marginBottom: 8 }}>
-              {(["web", "wordpress"] as const).map(t => (
-                <button
-                  key={t}
-                  onClick={() => setTab(t)}
-                  className={t === "web" ? "hrv-tab-left" : "hrv-tab-right"}
-                  style={{
-                    background: tab === t ? "var(--primary-color,#6200ea)" : "var(--primary-background-color,#fff)",
-                    color: tab === t ? "#fff" : "var(--primary-text-color,#212121)",
-                    fontWeight: tab === t ? 600 : 400,
-                  }}
-                >
-                  {t === "web" ? "Web page" : "WordPress"}
-                </button>
-              ))}
+          <div className="code-block-group">
+            <div className="code-block-label">
+              <span className="step-pill">2</span>
+              <div>
+                <div className="code-block-title">Widget markup</div>
+                <div className="muted" style={{ fontSize: 12 }}>Drop wherever the widget should render.</div>
+              </div>
             </div>
-            <CopyablePre text={cardSnippet} label="Copy step 2" />
+            <div className="segmented" role="group" aria-label="Code format" style={{ marginBottom: 8 }}>
+              <button aria-pressed={tab === "web"} onClick={() => setTab("web")}>Web page</button>
+              <button aria-pressed={tab === "wordpress"} onClick={() => setTab("wordpress")}>WordPress</button>
+            </div>
+            <CopyablePre text={cardSnippet} label="Copy markup" />
           </div>
 
-          {/* Alias toggle - below Step 2 */}
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+          {/* Alias toggle */}
+          <label className="row" style={{ gap: 8, fontSize: 13, cursor: "pointer" }}>
             <input
               type="checkbox"
               checked={useAliases}
               onChange={e => setUseAliases(e.target.checked)}
               disabled={token.entities.every((e: EntityAccess) => !e.alias)}
             />
-            Use alias
-            <span title="Aliases hide your real entity IDs from the page source. Both formats work against the same token." style={{ fontSize: 11, color: "var(--primary-color,#6200ea)", cursor: "help" }}>[?]</span>
+            Show as aliases
+            <span className="muted" style={{ fontSize: 11, cursor: "help" }} title="Aliases hide your real entity IDs from the page source. Both formats work against the same token.">(?)
+            </span>
           </label>
         </>
       )}
@@ -850,15 +843,12 @@ function freshState(): WizardState {
 
 export function Wizard({ onClose }: WizardProps) {
   const [step,    setStep]    = useState(1);
-  // Lazy initializer: called fresh on every mount so it reads the latest localStorage.
   const [wState,  setWState]  = useState<WizardState>(freshState);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
-
   const previewRevoked = useRef(false);
 
-  // Revoke preview token on unmount if not yet revoked
   useEffect(() => {
     return () => {
       if (wState.previewTokenId && !previewRevoked.current) {
@@ -877,9 +867,7 @@ export function Wizard({ onClose }: WizardProps) {
       try {
         const u = new URL(wState.selectedOriginUrl);
         return (u.protocol === "http:" || u.protocol === "https:") && u.host.length > 0;
-      } catch {
-        return false;
-      }
+      } catch { return false; }
     }
     return true;
   };
@@ -890,7 +878,6 @@ export function Wizard({ onClose }: WizardProps) {
     }
 
     if (step === 5 && !wState.previewTokenId) {
-      // Create preview token
       try {
         const preview = await api.tokens.createPreview({
           entity_ids: wState.entities.map(e => e.entity_id),
@@ -901,7 +888,6 @@ export function Wizard({ onClose }: WizardProps) {
     }
 
     if (step === 5) {
-      // Generate the real token
       setLoading(true);
       setError(null);
       try {
@@ -916,20 +902,16 @@ export function Wizard({ onClose }: WizardProps) {
           ? { allow_any: true, allowed: [], allow_paths: [] }
           : { allow_any: false, allowed: [originHost], allow_paths: originPath ? [originPath] : [] };
         const expires = expiresAt(wState.expiryOption, wState.expiryCustomDate);
-
         const token = await api.tokens.create({
           label: wState.entities.map(e => e.entity_id).join(", "),
           entities: entityPayload as Token["entities"],
           origins,
           expires,
         });
-
-        // Revoke preview token
         if (wState.previewTokenId) {
           api.tokens.revoke(wState.previewTokenId).catch(() => {});
           previewRevoked.current = true;
         }
-
         patchState({ generatedToken: token });
         setStep(6);
       } catch (e) {
@@ -943,8 +925,6 @@ export function Wizard({ onClose }: WizardProps) {
     setStep(s => Math.min(TOTAL_STEPS, s + 1));
   };
 
-  const handleBack = () => setStep(s => Math.max(1, s - 1));
-
   const handleCloseRequest = () => {
     if (step > 1 && !wState.generatedToken) {
       setConfirmClose(true);
@@ -954,119 +934,101 @@ export function Wizard({ onClose }: WizardProps) {
   };
 
   return (
-    <div className="hrv-wizard-overlay" role="presentation">
+    <div className="overlay" role="presentation" onClick={handleCloseRequest}>
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Create Widget"
-        className="hrv-wizard-dialog"
+        className="wizard"
+        onClick={e => e.stopPropagation()}
       >
-        {/* Modal header */}
-        <div className="hrv-wizard-header">
-          <h2 style={{ flex: 1, fontSize: 18, fontWeight: 700, color: "var(--primary-text-color,#212121)", margin: 0 }}>
-            {step === 6 && wState.generatedToken ? "Your widget is ready" : "Create Widget"}
-          </h2>
-          <button
-            onClick={handleCloseRequest}
-            disabled={step === 6 && !!wState.tokenSecret && !wState.generatedToken}
-            aria-label="Close wizard"
-            style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "var(--secondary-text-color,#616161)", lineHeight: 1, padding: 4 }}
-          >
-            x
-          </button>
-        </div>
-
-        {/* Step indicator */}
-        <div style={{ padding: "16px 0 0", flexShrink: 0 }}>
-          <StepIndicator current={step} />
-        </div>
-
-        {error && <div style={{ margin: "0 24px" }}><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}
-
-        {/* Step content */}
-        <div className="hrv-wizard-body">
-          {step === 1 && <Step1 state={wState} onChange={patchState} />}
-          {step === 2 && <Step2 state={wState} onChange={patchState} />}
-          {step === 3 && <Step3 state={wState} onChange={patchState} />}
-          {step === 4 && <Step4 state={wState} onChange={patchState} />}
-          {step === 5 && <Step5 state={wState} onChange={patchState} />}
-          {step === 6 && wState.generatedToken && (
-            <Step6
-              token={wState.generatedToken}
-              tokenSecret={wState.tokenSecret}
-              originMode={wState.originMode}
-              originUrl={wState.selectedOriginUrl}
-            />
-          )}
-        </div>
-
-        {/* Navigation footer */}
-        <div className="hrv-wizard-footer">
-          {step === 6 && wState.generatedToken ? (
+        {/* Left: main wizard panel */}
+        <div className="wizard-main">
+          {/* Header */}
+          <div className="wizard-head">
+            <h2>{step === 6 && wState.generatedToken ? "Your widget is ready" : "Create Widget"}</h2>
             <button
-              onClick={() => onClose(wState.generatedToken!.token_id)}
-              style={{ flex: 1, padding: "10px 0", border: "none", borderRadius: 8, background: "var(--primary-color,#6200ea)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" }}
+              onClick={handleCloseRequest}
+              aria-label="Close wizard"
+              className="btn btn-ghost btn-sm"
             >
-              Close
+              <Icon name="close" size={16} />
             </button>
-          ) : (
-            <>
-              <button
-                onClick={handleBack}
-                disabled={step === 1}
-                className="hrv-btn"
-                style={{ padding: "9px 20px" }}
-              >
-                Back
-              </button>
-              <div style={{ flex: 1 }} />
-              <button
-                onClick={handleNext}
-                disabled={!canProceed() || loading}
-                style={{
-                  padding: "9px 24px", border: "none", borderRadius: 8,
-                  background: canProceed() ? "var(--primary-color,#6200ea)" : "var(--divider-color,#e0e0e0)",
-                  color: canProceed() ? "#fff" : "var(--secondary-text-color,#9e9e9e)",
-                  fontSize: 14, fontWeight: 600, cursor: canProceed() ? "pointer" : "default",
-                  display: "flex", alignItems: "center", gap: 8,
-                }}
-              >
-                {loading && <Spinner size={16} label="Generating..." />}
-                {step === 5 ? "Generate" : "Continue"}
-              </button>
-            </>
-          )}
-        </div>
-      </div>
+          </div>
 
-      {/* Confirm close */}
-      {confirmClose && (
-        <div
-          className="hrv-wizard-confirm-overlay"
-          onClick={() => setConfirmClose(false)}
-          role="presentation"
-        >
-          <div
-            role="alertdialog"
-            aria-modal="true"
-            onClick={e => e.stopPropagation()}
-            className="hrv-dialog"
-            style={{ maxWidth: 360 }}
-          >
-            <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Discard and close?</h3>
-            <p style={{ fontSize: 14, color: "var(--secondary-text-color,#616161)", marginBottom: 24 }}>
-              Your progress will be lost. No token has been created yet.
-            </p>
-            <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
-              <button onClick={() => setConfirmClose(false)} className="hrv-btn" style={{ padding: "8px 18px" }}>
-                Keep editing
-              </button>
-              <button onClick={() => { setConfirmClose(false); onClose(); }} style={{ padding: "8px 18px", border: "none", borderRadius: 8, background: "#c62828", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
-                Discard
-              </button>
+          {/* Stepper */}
+          <div style={{ padding: "12px 28px", borderBottom: "1px solid var(--divider)", flexShrink: 0, overflowX: "auto" }}>
+            <StepIndicator current={step} />
+          </div>
+
+          {error && (
+            <div style={{ padding: "0 28px" }}>
+              <ErrorBanner message={error} onDismiss={() => setError(null)} />
             </div>
+          )}
+
+          {/* Body */}
+          <div className="wizard-body">
+            {step === 1 && <Step1 state={wState} onChange={patchState} />}
+            {step === 2 && <Step2 state={wState} onChange={patchState} />}
+            {step === 3 && <Step3 state={wState} onChange={patchState} />}
+            {step === 4 && <Step4 state={wState} onChange={patchState} />}
+            {step === 5 && <Step5 state={wState} onChange={patchState} />}
+            {step === 6 && wState.generatedToken && (
+              <Step6
+                token={wState.generatedToken}
+                tokenSecret={wState.tokenSecret}
+                originMode={wState.originMode}
+                originUrl={wState.selectedOriginUrl}
+              />
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="wizard-foot">
+            {step === 6 && wState.generatedToken ? (
+              <button
+                onClick={() => onClose(wState.generatedToken!.token_id)}
+                className="btn btn-primary"
+                style={{ flex: 1 }}
+              >
+                Go to widget
+              </button>
+            ) : (
+              <>
+                <button onClick={() => setStep(s => Math.max(1, s - 1))} disabled={step === 1} className="btn btn-ghost">
+                  <Icon name="chevLeft" size={14} /> Back
+                </button>
+                <div className="spacer" />
+                <button
+                  onClick={handleNext}
+                  disabled={!canProceed() || loading}
+                  className={`btn ${canProceed() ? "btn-primary" : ""}`}
+                  style={{ display: "flex", alignItems: "center", gap: 8 }}
+                >
+                  {loading && <Spinner size={16} label="Generating..." />}
+                  {step === 5 ? "Generate" : "Continue"}
+                  {step !== 5 && !loading && <Icon name="chevRight" size={14} />}
+                </button>
+              </>
+            )}
           </div>
         </div>
+
+        {/* Right: preview pane */}
+        <WizardPreview state={wState} step={step} />
+      </div>
+
+      {/* Confirm discard */}
+      {confirmClose && (
+        <ConfirmDialog
+          title="Discard and close?"
+          message="Your progress will be lost. No widget has been created yet."
+          confirmLabel="Discard"
+          confirmDestructive
+          onConfirm={() => { setConfirmClose(false); onClose(); }}
+          onCancel={() => setConfirmClose(false)}
+        />
       )}
     </div>
   );
