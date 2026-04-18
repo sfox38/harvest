@@ -279,15 +279,24 @@ export class HarvestClient {
       return;
     }
 
-    this.#ws.onopen    = () => this.#onOpen();
+    this.#ws.onopen    = () => { this.#onOpen(); };
     this.#ws.onmessage = (event) => this.#onMessage(event);
     this.#ws.onclose   = (event) => this.#onClose(event);
     this.#ws.onerror   = (event) => this.#onError(event);
   }
 
-  #onOpen() {
+  async #onOpen() {
     this.#resetHeartbeat();
-    this.#sendAuth();
+    try {
+      await this.#sendAuth();
+    } catch (err) {
+      console.error("[HArvest] HMAC signing failed - entering permanent failure:", err);
+      this.#permanentFailure = true;
+      for (const card of this.#cards.values()) {
+        card.setErrorState?.("HRV_AUTH_FAILED");
+      }
+      this.#ws?.close();
+    }
   }
 
   /**
@@ -451,6 +460,7 @@ export class HarvestClient {
     const permanentCodes = [
       "HRV_TOKEN_INVALID", "HRV_TOKEN_EXPIRED",
       "HRV_TOKEN_REVOKED", "HRV_TOKEN_INACTIVE",
+      "HRV_IP_DENIED", "HRV_ORIGIN_DENIED", "HRV_SIGNATURE_INVALID",
     ];
 
     const isPermanent = permanentCodes.includes(code) || this.#reauthAttempts >= MAX_REAUTH_ATTEMPTS;

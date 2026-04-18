@@ -77,7 +77,7 @@ export class HrvCard extends HTMLElement {
     this.#resolveConfig();
     this.#i18n = new I18n(this.#config.lang ?? "auto");
 
-    this.attachShadow({ mode: "open" });
+    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
 
     // Show connecting skeleton immediately.
     this.setErrorState("HRV_CONNECTING");
@@ -360,7 +360,7 @@ export class HrvCard extends HTMLElement {
       holdAction:   this._parseJsonAttr("hold-action")       ?? null,
       doubleTapAction: this._parseJsonAttr("double-tap-action") ?? null,
       showHistory:  this.getAttribute("show-history") === "true",
-      hoursToShow:  parseInt(this.getAttribute("hours-to-show") ?? "24", 10),
+      hoursToShow:  parseInt(this.getAttribute("hours-to-show") ?? "", 10) || 24,
       graph:        this.getAttribute("graph") ?? "line",
       a11y:         this.getAttribute("a11y") ?? "standard",
       companions:   this.#companions,

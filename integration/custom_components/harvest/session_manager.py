@@ -32,6 +32,7 @@ class Session:
     expires_at: datetime
     absolute_expires_at: datetime
     renewal_count: int
+    lifetime_minutes: int               # stored so renew() always uses the original token config
     origin_validated: str
     referer_validated: str | None
     source_ip: str | None
@@ -101,6 +102,7 @@ class SessionManager:
             expires_at=expires_at,
             absolute_expires_at=absolute_expires_at,
             renewal_count=0,
+            lifetime_minutes=token.session.lifetime_minutes,
             origin_validated=origin,
             referer_validated=referer,
             source_ip=source_ip,
@@ -180,9 +182,9 @@ class SessionManager:
                 "Full re-auth required."
             )
 
-        # Derive the renewal window from the original lifetime delta.
-        original_window = session.expires_at - session.issued_at
-        new_expires_at = now + original_window
+        # Use the token's lifetime_minutes stored at session creation so the
+        # renewal window stays constant across multiple renewals.
+        new_expires_at = now + timedelta(minutes=session.lifetime_minutes)
 
         # Cap at absolute lifetime.
         if new_expires_at > session.absolute_expires_at:

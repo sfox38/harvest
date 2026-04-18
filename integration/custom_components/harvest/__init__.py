@@ -73,7 +73,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # --- Register HTTP panel API views ---
     register_views(hass, token_manager, session_manager,
-                   activity_store, action_manager, sensors)
+                   activity_store, action_manager, sensors, event_bus)
 
     # --- Register sidebar panel ---
     await register_panel(hass)
@@ -152,7 +152,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Signal the running sensor to go offline before teardown.
     if sensors := data.get("sensors"):
         sensors.stop_updates()
-        for entity in sensors._entities:
+        for entity in sensors.get_entities():
             if hasattr(entity, "set_running"):
                 entity.set_running(False)
 

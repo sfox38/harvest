@@ -6,6 +6,7 @@ All endpoints are prefixed with /api/harvest/.
 """
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 from datetime import datetime, timezone
 from typing import Any
@@ -16,6 +17,7 @@ from homeassistant.core import HomeAssistant
 
 from .activity_store import ActivityStore, TokenLifecycleEvent
 from .diagnostic_sensors import DiagnosticSensors
+from .event_bus import EventBus
 from .harvest_action import HarvestActionManager, ServiceCall
 from .session_manager import SessionManager
 from .token_manager import (
@@ -37,6 +39,7 @@ def register_views(
     activity_store: ActivityStore,
     action_manager: HarvestActionManager,
     sensors: DiagnosticSensors,
+    event_bus: EventBus,
 ) -> None:
     """Register all HTTP API views with HA's HTTP server.
 
@@ -44,11 +47,12 @@ def register_views(
     All views require HA authentication (panel runs in authenticated context).
     """
     hass.http.register_view(HarvestTokensView(token_manager, session_manager, activity_store))
-    hass.http.register_view(HarvestTokenDetailView(hass, token_manager, session_manager, activity_store))
+    hass.http.register_view(HarvestTokenDetailView(hass, token_manager, session_manager, activity_store, event_bus))
     hass.http.register_view(HarvestSessionsView(session_manager))
     hass.http.register_view(HarvestSessionTerminateView(session_manager))
     hass.http.register_view(HarvestActivityView(activity_store, token_manager))
     hass.http.register_view(HarvestActionsView(action_manager))
+    hass.http.register_view(HarvestActionDetailView(action_manager))
     hass.http.register_view(HarvestConfigView(hass))
     hass.http.register_view(HarvestStatsView(sensors, activity_store, session_manager, token_manager))
     # Additional views needed by the wizard flow.
@@ -93,16 +97,19 @@ def _session_to_dict(session) -> dict:
 
 
 def _parse_dt(value: Any) -> datetime | None:
-    """Parse an ISO 8601 datetime string to a datetime, or None."""
+    """Parse an ISO 8601 datetime string to a timezone-aware datetime, or None if empty.
+
+    Raises ValueError on non-empty values that cannot be parsed.
+    """
     if not value:
         return None
     try:
         dt = datetime.fromisoformat(str(value))
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt
     except (ValueError, TypeError):
-        return None
+        raise ValueError(f"Invalid datetime: {value!r}")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def _parse_origins(raw: dict) -> OriginConfig:
@@ -130,12 +137,17 @@ def _parse_session_config(raw: dict) -> SessionConfig:
     )
 
 
+_VALID_CAPABILITIES = ("read", "read-write")
+
 def _parse_entities(raw_list: list) -> list[EntityAccess]:
     entities = []
     for e in raw_list:
+        cap = str(e.get("capabilities", "read"))
+        if cap not in _VALID_CAPABILITIES:
+            raise ValueError(f"Invalid capabilities {cap!r}; must be one of {_VALID_CAPABILITIES}")
         entities.append(EntityAccess(
             entity_id=str(e["entity_id"]),
-            capabilities=str(e.get("capabilities", "read")),
+            capabilities=cap,
             alias=e.get("alias") or None,
             exclude_attributes=list(e.get("exclude_attributes", [])),
         ))
@@ -256,11 +268,12 @@ class HarvestTokenDetailView(HomeAssistantView):
     name = "api:harvest:token_detail"
     requires_auth = True
 
-    def __init__(self, hass: HomeAssistant, token_manager: TokenManager, session_manager: SessionManager, activity_store: ActivityStore) -> None:
+    def __init__(self, hass: HomeAssistant, token_manager: TokenManager, session_manager: SessionManager, activity_store: ActivityStore, event_bus: EventBus) -> None:
         self._hass = hass
         self._token_manager = token_manager
         self._session_manager = session_manager
         self._activity_store = activity_store
+        self._event_bus = event_bus
 
     async def get(self, request: web.Request, token_id: str) -> web.Response:
         token = self._token_manager.get(token_id)
@@ -330,14 +343,14 @@ class HarvestTokenDetailView(HomeAssistantView):
                 ws_list = self._session_manager.terminate_all_for_token(token_id)
                 for ws in ws_list:
                     if not ws.closed:
-                        import asyncio
-                        asyncio.ensure_future(ws.close())
+                        asyncio.create_task(ws.close())
                 self._activity_store.record_token_lifecycle(TokenLifecycleEvent(
                     token_id=token_id,
                     display_type="TOKEN_REVOKED",
                     reason=reason,
                     timestamp=datetime.now(timezone.utc),
                 ))
+                self._event_bus.token_revoked(token_id, token.label, reason)
             except KeyError:
                 raise web.HTTPNotFound(reason=f"Token not found: {token_id}")
             return self.json(_token_to_dict(token))
@@ -394,10 +407,9 @@ class HarvestSessionsView(HomeAssistantView):
             for s in all_sessions:
                 self._session_manager.terminate(s.session_id)
                 ws_list.append(s.ws)
-        import asyncio
         for ws in ws_list:
             if not ws.closed:
-                asyncio.ensure_future(ws.close())
+                asyncio.create_task(ws.close())
         return web.Response(status=204)
 
 
@@ -417,9 +429,8 @@ class HarvestSessionTerminateView(HomeAssistantView):
             raise web.HTTPNotFound(reason=f"Session not found: {session_id}")
         ws = session.ws
         self._session_manager.terminate(session_id)
-        import asyncio
         if not ws.closed:
-            asyncio.ensure_future(ws.close())
+            asyncio.create_task(ws.close())
         return web.Response(status=204)
 
 
@@ -446,8 +457,11 @@ class HarvestActivityView(HomeAssistantView):
         token_id = request.query.get("token_id") or None
         # Accept both singular (frontend) and plural (legacy) param names.
         display_type = request.query.get("event_type") or request.query.get("event_types") or None
-        since = _parse_dt(request.query.get("since"))
-        until = _parse_dt(request.query.get("until"))
+        try:
+            since = _parse_dt(request.query.get("since"))
+            until = _parse_dt(request.query.get("until"))
+        except ValueError as exc:
+            raise web.HTTPBadRequest(reason=str(exc))
         limit = int(request.query.get("limit", "50"))
         offset = int(request.query.get("offset", "0"))
 
@@ -482,8 +496,11 @@ class HarvestActivityExportView(HomeAssistantView):
     async def get(self, request: web.Request) -> web.Response:
         token_id = request.query.get("token_id") or None
         display_type = request.query.get("event_type") or request.query.get("event_types") or None
-        since = _parse_dt(request.query.get("since"))
-        until = _parse_dt(request.query.get("until"))
+        try:
+            since = _parse_dt(request.query.get("since"))
+            until = _parse_dt(request.query.get("until"))
+        except ValueError as exc:
+            raise web.HTTPBadRequest(reason=str(exc))
 
         csv_data = await self._activity_store.export_csv(
             token_id=token_id,
@@ -630,9 +647,14 @@ class HarvestConfigView(HomeAssistantView):
             raise web.HTTPBadRequest(reason="Invalid JSON body.")
 
         entry = entries[0]
+        # Strip unknown top-level keys so callers cannot inject arbitrary options.
+        allowed_keys = set(DEFAULTS.keys())
+        filtered = {k: v for k, v in body.items() if k in allowed_keys}
+        if not filtered:
+            raise web.HTTPBadRequest(reason="No valid config keys in body.")
         # Deep-merge the incoming partial update over the current full config.
         current = _deep_merge(dict(DEFAULTS), _deep_merge(dict(entry.data), dict(entry.options)))
-        updated = _deep_merge(current, body)
+        updated = _deep_merge(current, filtered)
         self._hass.config_entries.async_update_entry(entry, options=updated)
         return self.json(updated)
 
@@ -668,12 +690,11 @@ class HarvestStatsView(HomeAssistantView):
     async def get(self, request: web.Request) -> web.Response:
         today = await self._activity_store.count_today()
         db_size = await self._activity_store.get_db_size_bytes()
-        auth_failures = today.get("auth_fail", 0) + today.get("errors", 0)
         return self.json({
             "active_sessions": self._session_manager.count_active(),
             "active_tokens": len(self._token_manager.get_active()),
             "commands_today": today.get("commands", 0),
-            "errors_today": auth_failures,
+            "errors_today": today.get("auth_fail", 0),
             "db_size_bytes": db_size,
             "is_running": True,
         })

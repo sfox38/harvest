@@ -147,6 +147,10 @@ class DiagnosticSensors:
             if sensor.hass is not None:
                 self._hass.async_create_task(self._refresh_sensor(sensor))
 
+    def get_entities(self) -> list:
+        """Return all registered sensor entities."""
+        return list(self._entities)
+
     async def _refresh_sensor(self, sensor: SensorEntity) -> None:
         await sensor.async_update()
         sensor.async_write_ha_state()

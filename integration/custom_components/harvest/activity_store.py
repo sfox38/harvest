@@ -121,7 +121,7 @@ class ActivityStore:
         await self._apply_schema()
         await self._db.commit()
 
-        self._flush_task = asyncio.ensure_future(self._flush_loop())
+        self._flush_task = asyncio.create_task(self._flush_loop())
 
     async def close(self) -> None:
         """Flush all pending writes and close the database connection."""
@@ -464,20 +464,13 @@ class ActivityStore:
         all matching rows (no pagination limit) formatted as CSV with a
         header row.
         """
-        _, total = await self.query_activity(
-            token_id=token_id,
-            display_type_filter=display_type_filter,
-            since=since,
-            until=until,
-            limit=1,
-            offset=0,
-        )
+        # Use a single query with a large limit to fetch all matching rows.
         events, _ = await self.query_activity(
             token_id=token_id,
             display_type_filter=display_type_filter,
             since=since,
             until=until,
-            limit=max(total, 1),
+            limit=100_000,
             offset=0,
         )
 
@@ -738,4 +731,6 @@ def _map_display_type(raw_type: str, result: str) -> str:
         return "AUTH_OK"  # "connected" - session established after successful auth
     if raw_type == "lifecycle":
         return result   # display_type stored directly: TOKEN_REVOKED, TOKEN_DELETED
-    return "AUTH_FAIL"  # fallback for error table rows
+    if raw_type == "error":
+        return "ERROR"
+    return raw_type.upper()  # unknown types pass through as-is

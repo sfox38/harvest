@@ -551,15 +551,11 @@ class TokenManager:
         entity_id: str,
         token: Token,
         attributes: dict,
-    ) -> tuple[dict, dict]:
-        """Split and filter entity attributes before sending in state_update.
+    ) -> dict:
+        """Filter entity attributes before sending in state_update.
 
-        Returns (standard_attributes, extended_attributes).
         Applies ATTRIBUTE_DENYLIST_SUBSTRINGS first (key-level substring matching),
         then per-entity exclude_attributes from the token (exact key matching).
-        All filtered attributes are returned as standard_attributes.
-        Extended attributes splitting is handled by entity_definition.py which has
-        domain-specific knowledge of which attributes are considered extended.
         """
         # Find the EntityAccess for this entity_id (match by entity_id only - not alias).
         entity_access: EntityAccess | None = None
@@ -580,7 +576,7 @@ class TokenManager:
                 continue
             filtered[key] = value
 
-        return filtered, {}
+        return filtered
 
     def verify_hmac(
         self,

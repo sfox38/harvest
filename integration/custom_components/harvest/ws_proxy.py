@@ -21,15 +21,12 @@ from homeassistant.helpers.event import async_track_state_change_event
 from .activity_store import ActivityStore, AuthEvent, CommandEvent, ErrorEvent, SessionEvent
 from .const import (
     CONF_AUTH_TIMEOUT,
-    CONF_HEARTBEAT_TIMEOUT,
     CONF_KEEPALIVE_INTERVAL,
     CONF_KEEPALIVE_TIMEOUT,
     CONF_MAX_INBOUND_BYTES,
     DEFAULTS,
-    ERR_BAD_REQUEST,
-    ERR_ENTITY_INCOMPATIBLE,
     ERR_ENTITY_NOT_IN_TOKEN,
-    ERR_MESSAGE_TOO_LARGE,
+    ERR_ORIGIN_DENIED,
     ERR_PERMISSION_DENIED,
     ERR_RATE_LIMITED,
     ERR_SERVER_ERROR,
@@ -56,13 +53,23 @@ FLOOD_WINDOW_SECONDS = 5
 # Warn the client this many seconds before session expiry.
 _SESSION_EXPIRING_WARN_BEFORE = 600  # 10 minutes
 
+def _fire(coro: object) -> None:
+    """Schedule a coroutine as a fire-and-forget task, logging any exception."""
+    async def _wrap(c: object) -> None:
+        try:
+            await c  # type: ignore[misc]
+        except Exception:
+            _LOGGER.debug("Fire-and-forget task raised an exception", exc_info=True)
+    asyncio.create_task(_wrap(coro))
+
+
 # Allowed data keys per domain for command forwarding.
 # Unknown keys are stripped before the call reaches HA.
 _ALLOWED_DATA_KEYS: dict[str, set[str]] = {
     "light": {
         "brightness", "brightness_pct", "color_temp", "color_temp_kelvin",
         "rgb_color", "rgbw_color", "rgbww_color", "hs_color", "xy_color",
-        "color_mode", "effect", "flash", "transition", "kelvin",
+        "color_mode", "effect", "flash", "transition",
     },
     "fan": {"percentage", "oscillating", "direction", "preset_mode"},
     "cover": {"position", "tilt_position"},
@@ -173,10 +180,21 @@ class HarvestWsView(HomeAssistantView):
             return
 
         token_id = msg.get("token_id", "")
-        entity_refs: list[str] = msg.get("entity_ids", [])
+        raw_entity_refs = msg.get("entity_ids", [])
+        if not isinstance(raw_entity_refs, list):
+            await ws.close()
+            return
+        entity_refs: list[str] = raw_entity_refs
         origin: str = request.headers.get("Origin", "")
         referer: str | None = request.headers.get("Referer")
         msg_id = msg.get("msg_id")
+
+        # Per-token auth rate limit check (brute-force protection).
+        if not self._rate_limiter.check_auth_for_token(token_id):
+            self._rate_limiter.record_auth_attempt(token_id)
+            await ws.send_json({"type": "auth_failed", "code": ERR_RATE_LIMITED, "msg_id": msg_id})
+            await ws.close()
+            return
 
         # Validate auth (checks all 10 conditions in spec order).
         token, error_code = self._token_manager.validate_auth(
@@ -203,8 +221,14 @@ class HarvestWsView(HomeAssistantView):
                 referer=referer,
             ))
             self._event_bus.auth_failure(token_id or None, origin, error_code)
-            if error_code == ERR_ENTITY_NOT_IN_TOKEN or error_code == ERR_ENTITY_INCOMPATIBLE:
+            if error_code == ERR_ORIGIN_DENIED:
                 self._event_bus.suspicious_origin(token_id, origin, source_ip)
+                self._activity_store.record_error(ErrorEvent(
+                    session_id=None,
+                    code="SUSPICIOUS_ORIGIN",
+                    message=f"Origin denied: {origin}",
+                    timestamp=datetime.now(tz=timezone.utc),
+                ))
             await ws.send_json({"type": "auth_failed", "code": error_code, "msg_id": msg_id})
             await ws.close()
             return
@@ -275,20 +299,20 @@ class HarvestWsView(HomeAssistantView):
             referer=referer,
         ))
 
-        # Send initial interleaved entity_definition + state_update.
-        await self._send_initial_state(ws, session, real_entity_ids, token, outgoing_ids)
-
         # Register HA state listeners. listener_unsubs maps real_entity_id -> unsub callable.
         listener_unsubs: dict[str, Callable] = {}
-        self._register_listeners(ws, session, token, outgoing_ids, listener_unsubs, real_entity_ids)
 
         # Schedule session_expiring warning.
-        expiry_warning_task = asyncio.ensure_future(
+        expiry_warning_task = asyncio.create_task(
             self._send_session_expiring(ws, session)
         )
 
-        # --- Step 6: Enter message loop ---
+        # --- Steps 4b/6/7: Initial state, message loop, and cleanup ---
+        # _send_initial_state and _register_listeners are inside the try block so
+        # that a dropped connection during initial state push still triggers cleanup.
         try:
+            await self._send_initial_state(ws, session, real_entity_ids, token, outgoing_ids)
+            self._register_listeners(ws, session, token, outgoing_ids, listener_unsubs, real_entity_ids)
             await self._message_loop(ws, session, token, outgoing_ids, listener_unsubs)
         finally:
             # --- Step 7: Cleanup ---
@@ -396,6 +420,12 @@ class HarvestWsView(HomeAssistantView):
                     )
                     if flood_count > FLOOD_LIMIT:
                         self._event_bus.flood_protection(session.session_id, session.origin_validated)
+                        self._activity_store.record_error(ErrorEvent(
+                            session_id=session.session_id,
+                            code="FLOOD_PROTECTION",
+                            message="Connection closed: message flood detected.",
+                            timestamp=datetime.now(tz=timezone.utc),
+                        ))
                         await ws.close()
                         return
                     continue
@@ -404,6 +434,12 @@ class HarvestWsView(HomeAssistantView):
                     flood_count, flood_window_start = _track_flood(flood_count, flood_window_start)
                     if flood_count > FLOOD_LIMIT:
                         self._event_bus.flood_protection(session.session_id, session.origin_validated)
+                        self._activity_store.record_error(ErrorEvent(
+                            session_id=session.session_id,
+                            code="FLOOD_PROTECTION",
+                            message="Connection closed: message flood detected.",
+                            timestamp=datetime.now(tz=timezone.utc),
+                        ))
                         await ws.close()
                         return
                     continue
@@ -445,7 +481,8 @@ class HarvestWsView(HomeAssistantView):
         msg_id = msg.get("msg_id")
         entity_ref: str = msg.get("entity_id", "")
         action: str = msg.get("action", "")
-        data: dict = msg.get("data") or {}
+        raw_data = msg.get("data")
+        data: dict = raw_data if isinstance(raw_data, dict) else {}
 
         async def ack_error(code: str, message: str) -> None:
             await ws.send_json({
@@ -518,6 +555,7 @@ class HarvestWsView(HomeAssistantView):
         await ws.send_json({
             "type": "ack",
             "success": success,
+            "entity_id": entity_ref,
             "error_code": ERR_SERVER_ERROR if not success else None,
             "error_message": "Internal error executing command." if not success else None,
             "msg_id": msg_id,
@@ -548,7 +586,11 @@ class HarvestWsView(HomeAssistantView):
         Sends interleaved entity_definition + state_update for each new entity.
         """
         msg_id = msg.get("msg_id")
-        refs: list[str] = msg.get("entity_ids", [])
+        raw_refs = msg.get("entity_ids", [])
+        if not isinstance(raw_refs, list):
+            await ws.send_json({"type": "error", "code": "ERR_BAD_REQUEST", "msg_id": msg_id})
+            return
+        refs: list[str] = raw_refs
 
         accepted_refs: list[str] = []
         new_real_ids: list[str] = []
@@ -714,7 +756,7 @@ class HarvestWsView(HomeAssistantView):
 
         Finds all sessions subscribed to this entity.
         Checks push rate limit, builds state_update delta,
-        enqueues send via asyncio.ensure_future() to avoid blocking the event loop.
+        enqueues send via asyncio.create_task() to avoid blocking the event loop.
         """
         if entity_id not in session.subscribed_entity_ids:
             return
@@ -724,9 +766,7 @@ class HarvestWsView(HomeAssistantView):
         # Entity was removed from HA entirely (new_state is None).
         if new_state is None:
             outgoing_id = outgoing_ids.get(entity_id, entity_id)
-            asyncio.ensure_future(
-                ws.send_json({"type": "entity_removed", "entity_id": outgoing_id, "msg_id": None})
-            )
+            _fire(ws.send_json({"type": "entity_removed", "entity_id": outgoing_id, "msg_id": None}))
             return
 
         # Push rate limit per (session, entity).
@@ -734,9 +774,7 @@ class HarvestWsView(HomeAssistantView):
         if not self._rate_limiter.check_push(session.session_id, entity_id, push_rate):
             # Schedule a deferred push so the widget always converges to the
             # latest state even when intermediate updates are rate-limited.
-            asyncio.ensure_future(
-                self._deferred_state_push(ws, entity_id, outgoing_ids.get(entity_id, entity_id), token, session)
-            )
+            _fire(self._deferred_state_push(ws, entity_id, outgoing_ids.get(entity_id, entity_id), token, session))
             return
 
         outgoing_id = outgoing_ids.get(entity_id, entity_id)
@@ -748,7 +786,7 @@ class HarvestWsView(HomeAssistantView):
             is_initial=False,
             session=session,
         )
-        asyncio.ensure_future(ws.send_json(update))
+        _fire(ws.send_json(update))
 
     async def _deferred_state_push(
         self,
@@ -808,7 +846,7 @@ class HarvestWsView(HomeAssistantView):
         raw_attrs = dict(state.attributes)
 
         # Filter via token denylist and per-entity exclusions.
-        filtered_attrs, _ = self._token_manager.filter_attributes(real_id, token, raw_attrs)
+        filtered_attrs = self._token_manager.filter_attributes(real_id, token, raw_attrs)
 
         # Split into standard and extended.
         standard, extended = split_attributes(domain, filtered_attrs)
