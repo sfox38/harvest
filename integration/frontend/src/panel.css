@@ -53,6 +53,43 @@
 }
 
 /* ============================================================
+   Light theme override (explicit) - re-declares :root values scoped to .app
+   so HA's own dark :root variables cannot bleed in when user picks "light".
+   ============================================================ */
+
+.app[data-theme="light"] {
+  --accent:          #2f7d4d;
+  --accent-weak:     #e8f3ec;
+  --accent-strong:   #1f5c38;
+
+  --ink:             #0f1a14;
+  --ink-2:           #3b4a42;
+  --ink-3:           #6b7a71;
+  --ink-4:           #9aa69f;
+
+  --paper:           #ffffff;
+  --bg:              #f6f8f6;
+  --bg-2:            #eef2ef;
+  --divider:         #e3e8e4;
+  --divider-strong:  #cfd6d1;
+
+  --ok:              #2f7d4d;
+  --warn:            #b7791f;
+  --warn-weak:       #fdf6e7;
+  --danger:          #b3261e;
+  --danger-weak:     #fbeceb;
+  --info:            #2563c2;
+  --info-weak:       #e8f0fb;
+
+  --shadow-xs:       0 1px 2px rgba(15, 26, 20, 0.04);
+  --shadow-sm:       0 1px 3px rgba(15, 26, 20, 0.06), 0 1px 2px rgba(15, 26, 20, 0.04);
+  --shadow-md:       0 4px 14px rgba(15, 26, 20, 0.08), 0 1px 3px rgba(15, 26, 20, 0.04);
+  --shadow-lg:       0 16px 40px rgba(15, 26, 20, 0.14), 0 4px 12px rgba(15, 26, 20, 0.06);
+
+  color-scheme: light;
+}
+
+/* ============================================================
    Dark theme overrides (explicit)
    ============================================================ */
 
@@ -621,6 +658,94 @@
 .stat-spark { margin-top: auto; height: 28px; }
 
 /* ============================================================
+   Widget card grid
+   ============================================================ */
+
+.widgets-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+.wcard {
+  background: var(--paper);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  transition: box-shadow 120ms, border-color 120ms;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.wcard:hover {
+  box-shadow: var(--shadow-sm);
+  border-color: var(--divider-strong);
+}
+
+.wcard-archived {
+  opacity: 0.6;
+  filter: grayscale(0.5);
+  border-style: dashed;
+}
+
+.wcard-archived:hover {
+  opacity: 0.75;
+}
+
+.wcard-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 14px 14px 10px;
+}
+
+.wcard-body {
+  padding: 0 14px 10px;
+  flex: 1;
+}
+
+.wcard-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--ink);
+  line-height: 1.3;
+}
+
+.wcard-domain {
+  font-size: 12px;
+  color: var(--ink-3);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px;
+}
+
+.wcard-footer {
+  padding: 8px 14px 12px;
+  border-top: 1px solid var(--divider);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.wcard-footer-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.wcard-footer-num {
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+
+/* ============================================================
    Widget list rows
    ============================================================ */
 
@@ -804,16 +929,11 @@
 .session-row:hover, .session-row.open { background: var(--bg); }
 
 .session-row-top {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 24px 1.3fr 1fr 120px 1fr 18px auto;
   gap: 12px;
+  align-items: center;
   padding: 12px 14px;
-}
-
-.session-row-top > [style*="flex: 1"],
-.session-row-top > div:first-child {
-  flex: 1;
-  min-width: 0;
 }
 
 .session-row .sess-col {
@@ -872,7 +992,7 @@
   color: #dce7e0;
   padding: 14px 16px;
   border-radius: 10px;
-  overflow-x: auto;
+  overflow: hidden;
   white-space: pre;
   position: relative;
   margin: 0;
@@ -885,15 +1005,25 @@
 .code .t { color: #c3e88d; }
 
 .code-wrap {
-  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   min-width: 0;
   max-width: 100%;
   width: 100%;
 }
 
 .code-wrap > .code {
-  max-width: 100%;
+  flex: 1;
+  min-width: 0;
   box-sizing: border-box;
+}
+
+.code-wrap > .copy-btn {
+  position: static;
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 0;
 }
 
 .code-block-group {
@@ -975,7 +1105,7 @@
 }
 
 /* ============================================================
-   Wizard (side-sheet)
+   Wizard (centered modal)
    ============================================================ */
 
 .overlay {
@@ -983,10 +1113,11 @@
   inset: 0;
   background: rgba(12, 22, 17, 0.42);
   display: flex;
-  align-items: stretch;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: center;
   z-index: 9000;
   animation: overlay-fade 180ms ease;
+  padding: 20px;
 }
 
 @keyframes overlay-fade {
@@ -994,58 +1125,72 @@
   to   { opacity: 1; }
 }
 
-@keyframes wizard-slide {
-  from { transform: translateX(30px); opacity: 0; }
-  to   { transform: translateX(0);    opacity: 1; }
+@keyframes wizard-pop {
+  from { transform: scale(0.96) translateY(8px); opacity: 0; }
+  to   { transform: scale(1)    translateY(0);   opacity: 1; }
 }
 
 .wizard {
-  width: min(1000px, 92vw);
-  height: 100vh;
+  width: min(780px, 100%);
+  max-height: min(860px, 100%);
   background: var(--paper);
-  display: grid;
-  grid-template-columns: 1fr 420px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px;
   box-shadow: var(--shadow-lg);
-  animation: wizard-slide 220ms ease;
+  animation: wizard-pop 220ms ease;
   overflow: hidden;
 }
 
 .wizard-main {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--paper);
+  display: contents;
 }
 
 .wizard-head {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 18px 28px;
+  gap: 14px;
+  padding: 16px 22px;
   border-bottom: 1px solid var(--divider);
   flex-shrink: 0;
 }
 
-.wizard-head h2 {
-  margin: 0;
-  font-size: 17px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
+.wizard-head-brand {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
 }
 
-.wizard-head .crumb { color: var(--ink-3); font-size: 13px; }
+.wizard-head-title {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.wizard-head-sub {
+  font-size: 12px;
+  color: var(--ink-3);
+  line-height: 1.3;
+  margin-top: 1px;
+}
 
 .wizard-body {
   flex: 1;
   overflow-y: auto;
-  padding: 28px 36px;
+  padding: 24px 28px;
 }
 
 .wizard-foot {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px 28px;
+  padding: 14px 22px;
   border-top: 1px solid var(--divider);
   background: var(--paper);
   flex-shrink: 0;
@@ -1435,6 +1580,7 @@
 .muted   { color: var(--ink-3); }
 .mono    { font-family: var(--font-mono); }
 .spacer  { flex: 1; }
+.url-clip { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Widget name links */
 .widget-link {
@@ -1739,6 +1885,9 @@
   .detail-grid { grid-template-columns: 1fr; }
   .dash-split { grid-template-columns: 1fr; }
   .brand-sub { display: none; }
+  .widgets-grid { grid-template-columns: repeat(2, 1fr); }
+  .session-row-top { grid-template-columns: 24px 1.3fr 1fr 18px auto; }
+  .session-row-top .sess-col:nth-child(n+4) { display: none; }
 }
 
 /* ============================================================
@@ -1775,23 +1924,19 @@
   .widget-hide-sm { display: none !important; }
   .widget-thumb { width: 32px !important; height: 32px !important; }
 
-  .wizard {
-    width: 100vw !important;
-    grid-template-columns: 1fr !important;
-    border-radius: 0 !important;
-  }
-
-  .wizard-preview { display: none !important; }
-  .wizard-body { padding: 18px !important; }
+  .overlay { padding: 10px; }
+  .wizard { border-radius: 14px !important; }
+  .wizard-body { padding: 16px !important; }
   .wizard-head { padding: 12px 16px !important; }
   .wizard-foot { padding: 10px 14px !important; }
+  .widgets-grid { grid-template-columns: 1fr !important; }
 
   .step-label { display: none; }
   .step-line { width: 10px; margin: 0 4px; }
 
   .stat-value { font-size: 24px !important; }
 
-  .session-row-top { grid-template-columns: 24px 1fr 18px auto; }
+  .session-row-top { grid-template-columns: 24px 1fr 18px auto !important; }
   .session-row-top .sess-col { display: none; }
   .event-details { padding: 12px 14px; }
   .kv-compact { grid-template-columns: 110px 1fr; }
@@ -1816,7 +1961,5 @@
    ============================================================ */
 
 @media (prefers-reduced-motion: reduce) {
-  .overlay, .wizard {
-    animation: none !important;
-  }
+  .overlay, .wizard { animation: none !important; }
 }

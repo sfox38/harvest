@@ -12,6 +12,15 @@ from homeassistant.core import HomeAssistant
 from .const import DOMAIN, PANEL_PATH, PANEL_ASSETS_PATH
 
 
+def _panel_build_version(hass: HomeAssistant) -> str:
+    """Read the build number written by the frontend build script."""
+    path = hass.config.path("custom_components", DOMAIN, "panel", "panel_version.txt")
+    try:
+        return open(path).read().strip()  # noqa: WPS515
+    except OSError:
+        return "0"
+
+
 async def register_panel(hass: HomeAssistant) -> None:
     """Register the HArvest sidebar panel.
 
@@ -45,7 +54,7 @@ async def register_panel(hass: HomeAssistant) -> None:
         frontend_url_path=PANEL_PATH,
         config={"_panel_custom": {
             "name": "ha-panel-harvest",
-            "js_url": f"/{PANEL_ASSETS_PATH}/panel.js",
+            "js_url": f"/{PANEL_ASSETS_PATH}/panel.js?v={_panel_build_version(hass)}",
             "embed_iframe": False,
             "trust_external": False,
         }},

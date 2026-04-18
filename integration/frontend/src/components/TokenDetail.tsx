@@ -10,6 +10,7 @@ import type { Token, Session, ActivityPage } from "../types";
 import { api } from "../api";
 import { StatusBadge, CopyablePre, ConfirmDialog, Spinner, ErrorBanner, Card, EventRow, fmtRel } from "./Shared";
 import { Icon } from "./Icon";
+import { loadKnownOrigins, addKnownOrigin, removeKnownOrigin, validateOriginUrl, displayOriginLabel } from "./originMemory";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -58,6 +59,19 @@ function buildWordPressSnippet(token: Token, useAliases: boolean, haUrl: string)
 
 function fmtDateLong(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+}
+
+const LABEL_ILLEGAL = /[\x00-\x1f<>"&]/;
+
+function validateLabel(label: string, otherLabels: string[]): string | null {
+  const t = label.trim();
+  if (!t) return "Name is required.";
+  if (t.length > 100) return "Name must be 100 characters or fewer.";
+  if (LABEL_ILLEGAL.test(t)) return "Name contains invalid characters.";
+  if (otherLabels.some(l => l.trim().toLowerCase() === t.toLowerCase())) {
+    return "A widget with this name already exists.";
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -342,9 +356,12 @@ interface OriginsEditorProps {
 }
 
 function OriginsEditor({ token, saving, setSaving, setToken, setError }: OriginsEditorProps) {
-  const [allOrigins,   setAllOrigins]   = useState<string[]>([]);
-  const [usingCustom,  setUsingCustom]  = useState(false);
-  const [customInput,  setCustomInput]  = useState("");
+  const [knownOrigins,   setKnownOrigins]   = useState<string[]>(loadKnownOrigins);
+  const [usingCustom,    setUsingCustom]    = useState(false);
+  const [customInput,    setCustomInput]    = useState("");
+  const [dropdownSel,    setDropdownSel]    = useState("");
+  const [urlError,       setUrlError]       = useState<string | null>(null);
+  const [pendingReplace, setPendingReplace] = useState<{ url: string; newOrigin: string; path: string | null } | null>(null);
   const readonly = token.status === "revoked" || token.status === "expired";
 
   const baseOrigin = token.origins.allowed[0] ?? "";
@@ -354,25 +371,6 @@ function OriginsEditor({ token, saving, setSaving, setToken, setError }: Origins
     : paths.length > 0
       ? paths.map(p => `${baseOrigin}${p}`)
       : baseOrigin ? [baseOrigin] : [];
-
-  useEffect(() => {
-    api.tokens.list().then(tokens => {
-      const seen = new Set<string>();
-      tokens.forEach(t => {
-        if (t.token_id === token.token_id) return;
-        if (!t.origins.allow_any) {
-          t.origins.allowed.forEach(o => {
-            if (t.origins.allow_paths.length > 0) {
-              t.origins.allow_paths.forEach(p => seen.add(`${o}${p}`));
-            } else {
-              seen.add(o);
-            }
-          });
-        }
-      });
-      setAllOrigins(Array.from(seen));
-    }).catch(() => {});
-  }, [token.token_id]);
 
   const saveOrigins = async (origins: Token["origins"]) => {
     setSaving(true);
@@ -397,27 +395,52 @@ function OriginsEditor({ token, saving, setSaving, setToken, setError }: Origins
     } catch { /* bad URL */ }
   };
 
+  const applyUrl = (url: string, newOrigin: string, path: string | null) => {
+    const differentHost = !!baseOrigin && baseOrigin !== newOrigin;
+    if (path) {
+      const newPaths = differentHost ? [path] : [...paths.filter(p => p !== path), path];
+      saveOrigins({ allow_any: false, allowed: [newOrigin], allow_paths: newPaths });
+    } else {
+      saveOrigins({ allow_any: false, allowed: [newOrigin], allow_paths: differentHost ? [] : paths });
+    }
+    addKnownOrigin(url);
+    setKnownOrigins(loadKnownOrigins());
+    setDropdownSel("");
+    setUsingCustom(false);
+    setCustomInput("");
+    setUrlError(null);
+    setPendingReplace(null);
+  };
+
   const addUrl = (url: string) => {
     const trimmed = url.trim();
     if (!trimmed || readonly || saving) return;
-    try {
-      const u = new URL(trimmed);
-      const newOrigin = u.origin;
-      const path = (u.pathname && u.pathname !== "/") ? u.pathname : null;
-      if (path) {
-        const origin = baseOrigin || newOrigin;
-        const newPaths = [...paths.filter(p => p !== path), path];
-        saveOrigins({ allow_any: false, allowed: [origin], allow_paths: newPaths });
-      } else {
-        saveOrigins({ allow_any: false, allowed: [newOrigin], allow_paths: paths });
-      }
-      setUsingCustom(false);
-      setCustomInput("");
-    } catch { setError("Invalid URL. Enter a full URL including https://"); }
+    const err = validateOriginUrl(trimmed);
+    if (err) { setUrlError(err); return; }
+    const u = new URL(trimmed);
+    const newOrigin = u.origin;
+    const path = (u.pathname && u.pathname !== "/") ? u.pathname : null;
+    // Strip query string and fragment - only origin+path are used for matching.
+    const normalized = path ? `${newOrigin}${path}` : newOrigin;
+    if (baseOrigin && baseOrigin !== newOrigin && displayUrls.length > 0) {
+      setPendingReplace({ url: normalized, newOrigin, path });
+      return;
+    }
+    applyUrl(normalized, newOrigin, path);
   };
 
-  const otherOrigins = allOrigins.filter(o => !displayUrls.includes(o));
-  const hasDropdown = otherOrigins.length > 0;
+  const handleDeleteFromDropdown = () => {
+    removeKnownOrigin(dropdownSel);
+    setKnownOrigins(loadKnownOrigins());
+    setDropdownSel("");
+  };
+
+  const dropdownItems = knownOrigins.filter(o => {
+    if (displayUrls.includes(o)) return false;
+    if (!baseOrigin) return true;
+    try { return new URL(o).origin === baseOrigin; } catch { return false; }
+  });
+  const hasDropdown = dropdownItems.length > 0;
 
   return (
     <Card title="Origins">
@@ -450,7 +473,7 @@ function OriginsEditor({ token, saving, setSaving, setToken, setError }: Origins
           <div className="col" style={{ gap: 4, marginBottom: 8 }}>
             {displayUrls.map(url => (
               <div key={url} className="row" style={{ gap: 6, fontSize: 13 }}>
-                <span style={{ flex: 1 }} className="mono">{url}</span>
+                <span style={{ flex: 1 }} className="mono url-clip">{url}</span>
                 {!readonly && (
                   <button
                     onClick={() => removeUrl(url)}
@@ -467,33 +490,65 @@ function OriginsEditor({ token, saving, setSaving, setToken, setError }: Origins
           {!readonly && (
             <div className="col" style={{ gap: 6 }}>
               {hasDropdown && (
-                <select
-                  value={usingCustom ? ORIGIN_CUSTOM : ""}
-                  onChange={e => {
-                    const v = e.target.value;
-                    if (v === ORIGIN_CUSTOM) { setUsingCustom(true); }
-                    else if (v) { addUrl(v); }
-                  }}
-                  disabled={saving}
-                  className="input"
-                  style={{ fontSize: 13 }}
-                >
-                  <option value="">Add a URL...</option>
-                  {otherOrigins.map(o => <option key={o} value={o}>{o}</option>)}
-                  <option value={ORIGIN_CUSTOM}>Enter a new URL...</option>
-                </select>
+                <div className="row" style={{ gap: 6 }}>
+                  <select
+                    value={usingCustom ? ORIGIN_CUSTOM : dropdownSel}
+                    onChange={e => {
+                      const v = e.target.value;
+                      if (v === ORIGIN_CUSTOM) { setUsingCustom(true); setDropdownSel(""); }
+                      else { setDropdownSel(v); setUsingCustom(false); }
+                    }}
+                    disabled={saving}
+                    className="input"
+                    style={{ flex: 1, fontSize: 13 }}
+                  >
+                    <option value="">Select a URL...</option>
+                    {dropdownItems.map(o => <option key={o} value={o}>{displayOriginLabel(o)}</option>)}
+                    <option value={ORIGIN_CUSTOM}>Enter a new URL...</option>
+                  </select>
+                  {dropdownSel && !usingCustom && (
+                    <>
+                      <button
+                        onClick={() => addUrl(dropdownSel)}
+                        disabled={saving}
+                        className="btn btn-sm"
+                      >
+                        Add URL
+                      </button>
+                      <button
+                        onClick={handleDeleteFromDropdown}
+                        disabled={saving}
+                        className="btn btn-sm btn-danger"
+                      >
+                        Delete URL
+                      </button>
+                    </>
+                  )}
+                </div>
               )}
               {(usingCustom || !hasDropdown) && (
-                <input
-                  value={customInput}
-                  onChange={e => setCustomInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter") addUrl(customInput); }}
-                  placeholder="https://example.com/page.html"
-                  disabled={saving}
-                  autoFocus={hasDropdown}
-                  className="input"
-                  style={{ fontSize: 13 }}
-                />
+                <div className="row" style={{ gap: 6 }}>
+                  <input
+                    value={customInput}
+                    onChange={e => setCustomInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") addUrl(customInput); }}
+                    placeholder="https://example.com/page.html"
+                    disabled={saving}
+                    autoFocus={hasDropdown}
+                    className="input"
+                    style={{ flex: 1, fontSize: 13 }}
+                  />
+                  <button
+                    onClick={() => addUrl(customInput)}
+                    disabled={saving || !customInput.trim()}
+                    className="btn btn-sm"
+                  >
+                    Add URL
+                  </button>
+                </div>
+              )}
+              {urlError && (
+                <div style={{ fontSize: 12, color: "var(--danger)" }}>{urlError}</div>
               )}
               <p className="muted" style={{ fontSize: 11 }}>
                 Site only (https://example.com) or a specific page (https://example.com/page.html).
@@ -501,6 +556,17 @@ function OriginsEditor({ token, saving, setSaving, setToken, setError }: Origins
             </div>
           )}
         </>
+      )}
+
+      {pendingReplace && (
+        <ConfirmDialog
+          title="Replace website?"
+          message={`Changing to ${pendingReplace.newOrigin} will remove all existing URLs for ${baseOrigin}. Continue?`}
+          confirmLabel="Replace"
+          confirmDestructive
+          onConfirm={() => applyUrl(pendingReplace.url, pendingReplace.newOrigin, pendingReplace.path)}
+          onCancel={() => setPendingReplace(null)}
+        />
       )}
     </Card>
   );
@@ -515,6 +581,8 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
   const [loading,       setLoading]       = useState(true);
   const [error,         setError]         = useState<string | null>(null);
   const [editLabel,     setEditLabel]     = useState("");
+  const [labelError,    setLabelError]    = useState<string | null>(null);
+  const [allLabels,     setAllLabels]     = useState<string[]>([]);
   const [editExpiry,    setEditExpiry]    = useState("");
   const [saving,        setSaving]        = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
@@ -525,7 +593,7 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
       .then(t => {
         setToken(t);
         setEditLabel(t.label);
-        setEditExpiry(t.expires ? t.expires.slice(0, 16) : "");
+        setEditExpiry(t.expires ? t.expires.slice(0, 10) : "");
       })
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
@@ -533,12 +601,28 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    api.tokens.list().then(ts => {
+      setAllLabels(ts.filter(t => t.token_id !== tokenId).map(t => t.label));
+    }).catch(() => {});
+  }, [tokenId]);
+
   const saveEdit = async (currentLabel: string) => {
-    if (!token || currentLabel === token.label) return;
+    if (!token) return;
+    const trimmed = currentLabel.trim();
+    if (!trimmed) {
+      setEditLabel(token.label);
+      setLabelError(null);
+      return;
+    }
+    const err = validateLabel(trimmed, allLabels);
+    if (err) { setLabelError(err); return; }
+    setLabelError(null);
+    if (trimmed === token.label) return;
     setSaving(true);
     const prevCreatedByName = token.created_by_name;
     try {
-      const updated = await api.tokens.update(token.token_id, { label: currentLabel });
+      const updated = await api.tokens.update(token.token_id, { label: trimmed });
       setToken({ ...updated, created_by_name: prevCreatedByName });
     } catch (e) { setError(String(e)); }
     finally { setSaving(false); }
@@ -548,17 +632,17 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
     if (!token) return;
     let newExpires: string | null = null;
     if (val) {
-      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(val)) return;
-      newExpires = val + ":00Z";
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(val)) return;
+      newExpires = val + "T00:00:00Z";
     }
-    const current = token.expires ? token.expires.slice(0, 16) : "";
+    const current = token.expires ? token.expires.slice(0, 10) : "";
     if (val === current) return;
     setSaving(true);
     const prevCreatedByName = token.created_by_name;
     try {
       const updated = await api.tokens.update(token.token_id, { expires: newExpires });
       setToken({ ...updated, created_by_name: prevCreatedByName });
-      setEditExpiry(updated.expires ? updated.expires.slice(0, 16) : "");
+      setEditExpiry(updated.expires ? updated.expires.slice(0, 10) : "");
     } catch (e) { setError(String(e)); }
     finally { setSaving(false); }
   };
@@ -598,9 +682,11 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
   }
 
   const readonly = token.status === "revoked" || token.status === "expired";
-  const expiryFmt = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
-  const expiryInvalid = editExpiry !== "" && !expiryFmt.test(editExpiry);
-  const savedValue = token.expires ? token.expires.slice(0, 16) : "";
+  const today = new Date().toISOString().slice(0, 10);
+  const expiryInvalid = editExpiry !== "" && (
+    !/^\d{4}-\d{2}-\d{2}$/.test(editExpiry) || editExpiry <= today
+  );
+  const savedValue = token.expires ? token.expires.slice(0, 10) : "";
   const expiryDirty = editExpiry !== savedValue;
 
   return (
@@ -620,7 +706,11 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
             <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
               <input
                 value={editLabel}
-                onChange={e => setEditLabel(e.target.value)}
+                maxLength={100}
+                onChange={e => {
+                  setEditLabel(e.target.value);
+                  if (labelError !== null) setLabelError(validateLabel(e.target.value.trim(), allLabels));
+                }}
                 onBlur={e => saveEdit(e.target.value)}
                 onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }}
                 disabled={saving || readonly}
@@ -630,6 +720,9 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
               />
               <StatusBadge status={token.status} />
             </div>
+            {labelError && (
+              <div style={{ fontSize: 12, color: "var(--danger)", marginTop: 3 }}>{labelError}</div>
+            )}
             <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
               Created {fmtDateLong(token.created_at)} by {token.created_by_name ?? token.created_by}
               {" - "}{token.entities.length} {token.entities.length === 1 ? "entity" : "entities"}
@@ -725,8 +818,9 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
               <div className="col" style={{ gap: 6 }}>
                 <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
                   <input
-                    type="datetime-local"
+                    type="date"
                     value={editExpiry}
+                    min={new Date(Date.now() + 86400000).toISOString().slice(0, 10)}
                     onChange={e => setEditExpiry(e.target.value)}
                     onKeyDown={e => { if (e.key === "Enter") saveExpiry(editExpiry); }}
                     disabled={saving}
@@ -751,7 +845,7 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
                   )}
                 </div>
                 {expiryInvalid && (
-                  <div style={{ fontSize: 12, color: "var(--danger)" }}>Invalid date format.</div>
+                  <div style={{ fontSize: 12, color: "var(--danger)" }}>Date must be in the future.</div>
                 )}
                 {!editExpiry && !expiryInvalid && (
                   <div className="muted" style={{ fontSize: 12 }}>No expiry - widget never expires</div>

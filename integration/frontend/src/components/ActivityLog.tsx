@@ -1,61 +1,43 @@
 /**
  * ActivityLog.tsx - Global activity log screen.
  *
- * Expandable event rows with filtering by date range, event type, and token.
- * CSV export and pagination at 50 events per page.
+ * 24-hour activity chart at the top, segmented type filter, time range select,
+ * and expandable event rows. CSV export button.
  */
 
-import { useState, useEffect } from "react";
-import type { ActivityPage, Token, ActivityEventType } from "../types";
+import { useState, useEffect, useCallback } from "react";
+import type { ActivityPage, ActivityEventType, HourlyBucket } from "../types";
 import { api } from "../api";
-import { Spinner, ErrorBanner, EventRow, Card } from "./Shared";
+import { Spinner, ErrorBanner, EventRow, Card, ActivityGraph } from "./Shared";
 import { Icon } from "./Icon";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type DateRange = "1h" | "24h" | "7d" | "30d" | "custom";
+type TypeTab = "all" | "commands" | "auth_ok" | "auth_fail" | "suspicious";
 
-const DATE_RANGE_OPTIONS: { value: DateRange; label: string }[] = [
-  { value: "1h",     label: "Last 1 hour"   },
-  { value: "24h",    label: "Last 24 hours"  },
-  { value: "7d",     label: "Last 7 days"   },
-  { value: "30d",    label: "Last 30 days"  },
-  { value: "custom", label: "Custom range"  },
+const TYPE_TABS: { value: TypeTab; label: string; types: ActivityEventType[] }[] = [
+  { value: "all",        label: "All",        types: [] },
+  { value: "commands",   label: "Commands",   types: ["COMMAND"] },
+  { value: "auth_ok",    label: "Auth OK",    types: ["AUTH_OK"] },
+  { value: "auth_fail",  label: "Auth fail",  types: ["AUTH_FAIL"] },
+  { value: "suspicious", label: "Suspicious", types: ["SUSPICIOUS_ORIGIN", "FLOOD_PROTECTION", "RATE_LIMITED"] },
 ];
 
-const EVENT_TYPE_OPTIONS: (ActivityEventType | "all")[] = [
-  "all", "AUTH_OK", "AUTH_FAIL", "COMMAND", "SESSION_END",
-  "TOKEN_CREATED", "TOKEN_REVOKED", "TOKEN_DELETED", "RENEWAL",
-  "SUSPICIOUS_ORIGIN", "FLOOD_PROTECTION", "RATE_LIMITED",
+type TimeRange = "5m" | "1h" | "6h" | "1d" | "1w" | "1mo" | "all";
+
+const TIME_RANGES: { value: TimeRange; label: string; hours: number; sinceMs: number | null }[] = [
+  { value: "5m",  label: "5 minutes", hours: 1,    sinceMs: 5 * 60 * 1000 },
+  { value: "1h",  label: "1 hour",    hours: 1,    sinceMs: 60 * 60 * 1000 },
+  { value: "6h",  label: "6 hours",   hours: 6,    sinceMs: 6 * 60 * 60 * 1000 },
+  { value: "1d",  label: "1 day",     hours: 24,   sinceMs: 24 * 60 * 60 * 1000 },
+  { value: "1w",  label: "1 week",    hours: 168,  sinceMs: 7 * 24 * 60 * 60 * 1000 },
+  { value: "1mo", label: "1 month",   hours: 720,  sinceMs: 30 * 24 * 60 * 60 * 1000 },
+  { value: "all", label: "All time",  hours: 8760, sinceMs: null },
 ];
 
 const PAGE_LIMIT = 50;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function sinceForRange(range: DateRange): string | undefined {
-  if (range === "custom") return undefined;
-  const ms: Record<Exclude<DateRange, "custom">, number> = {
-    "1h":  60 * 60 * 1000,
-    "24h": 24 * 60 * 60 * 1000,
-    "7d":  7  * 24 * 60 * 60 * 1000,
-    "30d": 30 * 24 * 60 * 60 * 1000,
-  };
-  return new Date(Date.now() - ms[range as Exclude<DateRange, "custom">]).toISOString();
-}
-
-function normalizeDt(val: string): string {
-  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(val) ? val + ":00" : val;
-}
-
-function isValidDt(val: string): boolean {
-  if (!val) return false;
-  return !isNaN(new Date(normalizeDt(val)).getTime());
-}
 
 // ---------------------------------------------------------------------------
 // ActivityLog
@@ -67,87 +49,80 @@ interface ActivityLogProps {
 }
 
 export function ActivityLog({ onSelectToken, initialTypeFilter }: ActivityLogProps) {
-  const [page,        setPage]        = useState<ActivityPage | null>(null);
-  const [tokens,      setTokens]      = useState<Token[]>([]);
-  const [loading,     setLoading]     = useState(true);
-  const [error,       setError]       = useState<string | null>(null);
-  const [exporting,   setExporting]   = useState(false);
-  const [offset,      setOffset]      = useState(0);
-  const [range,       setRange]       = useState<DateRange>("24h");
-  const [customSince, setCustomSince] = useState("");
-  const [customUntil, setCustomUntil] = useState("");
-  const [appliedSince, setAppliedSince] = useState("");
-  const [appliedUntil, setAppliedUntil] = useState("");
-  const [tokenFilter,  setTokenFilter]  = useState<string>("all");
-  const [typeFilter,   setTypeFilter]   = useState<ActivityEventType | "all">((initialTypeFilter as ActivityEventType) || "all");
-  const [loadTick,     setLoadTick]     = useState(0);
+  const [page,      setPage]      = useState<ActivityPage | null>(null);
+  const [buckets,   setBuckets]   = useState<HourlyBucket[]>([]);
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [offset,    setOffset]    = useState(0);
+  const [tab,       setTab]       = useState<TypeTab>("all");
+  const [timeRange, setTimeRange] = useState<TimeRange>("1d");
+  const [loadTick,  setLoadTick]  = useState(0);
 
-  const sinceOk = isValidDt(customSince);
-  const untilOk = !customUntil || isValidDt(customUntil);
-  const untilBeforeSince = sinceOk && isValidDt(customUntil)
-    && new Date(normalizeDt(customUntil)) <= new Date(normalizeDt(customSince));
+  const activeTab  = TYPE_TABS.find(t => t.value === tab) ?? TYPE_TABS[0];
+  const activeTime = TIME_RANGES.find(t => t.value === timeRange) ?? TIME_RANGES[3];
 
-  const applyCustomRange = () => {
-    if (!sinceOk) { setCustomSince(""); return; }
-    if (!untilOk) { setCustomUntil(""); return; }
-    if (untilBeforeSince) { setCustomUntil(""); return; }
-    setAppliedSince(customSince);
-    setAppliedUntil(customUntil);
-    setOffset(0);
-    setLoadTick(t => t + 1);
-  };
+  const sinceIso = activeTime.sinceMs !== null
+    ? new Date(Date.now() - activeTime.sinceMs).toISOString()
+    : undefined;
 
+  // Map initialTypeFilter to a tab
   useEffect(() => {
-    if (initialTypeFilter !== undefined) {
-      setTypeFilter((initialTypeFilter as ActivityEventType) || "all");
-      setOffset(0);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!initialTypeFilter) return;
+    const match = TYPE_TABS.find(t => t.types.includes(initialTypeFilter as ActivityEventType));
+    if (match) { setTab(match.value); setOffset(0); }
   }, [initialTypeFilter]);
 
+  // Fetch aggregates for the chart
   useEffect(() => {
-    api.tokens.list().then(setTokens).catch(() => {});
-  }, []);
+    let cancelled = false;
+    setBuckets([]);
+    api.activity.aggregates(activeTime.hours)
+      .then(b => { if (!cancelled) setBuckets(b); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeRange, loadTick]);
 
+  // Fetch events
   useEffect(() => {
+    let cancelled = false;
+    setPage(null);
     setLoading(true);
     setError(null);
     const params: Parameters<typeof api.activity.list>[0] = { offset, limit: PAGE_LIMIT };
-    if (range === "custom") {
-      if (appliedSince) {
-        params.since = new Date(normalizeDt(appliedSince)).toISOString();
-        if (appliedUntil) params.until = new Date(normalizeDt(appliedUntil)).toISOString();
-      }
-    } else {
-      const s = sinceForRange(range);
-      if (s) params.since = s;
+    if (sinceIso) params.since = sinceIso;
+    if (activeTab.types.length === 1) {
+      params.event_type = activeTab.types[0];
     }
-    if (tokenFilter !== "all") params.token_id = tokenFilter;
-    if (typeFilter  !== "all") params.event_type = typeFilter;
     api.activity.list(params)
-      .then(p => setPage(p))
-      .catch(e => setError(String(e)))
-      .finally(() => setLoading(false));
-  // loadTick ensures Refresh/Apply force a reload even without other dep changes.
+      .then(p => { if (!cancelled) setPage(p); })
+      .catch(e => { if (!cancelled) setError(String(e)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offset, range, appliedSince, appliedUntil, tokenFilter, typeFilter, loadTick]);
+  }, [offset, tab, timeRange, loadTick]);
 
-  const handleExport = async () => {
+  const handleExport = useCallback(async () => {
     setExporting(true);
     try {
       const p: Record<string, string> = {};
-      const since = range === "custom" ? appliedSince : sinceForRange(range);
-      if (since) p.since = since;
-      if (range === "custom" && appliedUntil) p.until = appliedUntil;
-      if (tokenFilter !== "all") p.token_id = tokenFilter;
-      if (typeFilter  !== "all") p.event_type = typeFilter;
+      if (sinceIso) p.since = sinceIso;
+      if (activeTab.types.length === 1) p.event_type = activeTab.types[0];
       await api.activity.exportCsv(p);
     } catch (e) {
       setError(String(e));
     } finally {
       setExporting(false);
     }
-  };
+  }, [activeTab, sinceIso]);
+
+  const chartTitle = timeRange === "all"
+    ? "Activity - all time"
+    : `Activity - last ${activeTime.label}`;
+
+  const hasChartData = buckets.length >= 2 &&
+    buckets.some(b => b.commands > 0 || b.sessions > 0 || b.auth_failures > 0);
 
   const totalPages = page ? Math.max(1, Math.ceil(page.total / PAGE_LIMIT)) : 1;
   const currentPage = Math.floor(offset / PAGE_LIMIT);
@@ -156,81 +131,51 @@ export function ActivityLog({ onSelectToken, initialTypeFilter }: ActivityLogPro
     <div className="content-narrow col" style={{ gap: 18 }}>
       {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
-      {/* Filter toolbar */}
+      {/* Activity chart */}
+      <Card>
+        <div className="card-header">
+          <h3>{chartTitle}</h3>
+        </div>
+        <div className="card-body">
+          {hasChartData ? (
+            <ActivityGraph buckets={buckets} height={140} />
+          ) : (
+            <div className="muted" style={{ textAlign: "center", padding: "18px 0", fontSize: 13 }}>
+              No activity data for this period.
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {/* Filter bar */}
       <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-        <select
-          value={range}
-          onChange={e => { setRange(e.target.value as DateRange); setOffset(0); }}
-          className="input"
-          style={{ fontSize: 13 }}
-          aria-label="Date range"
-        >
-          {DATE_RANGE_OPTIONS.map(o => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
-
-        {range === "custom" && (
-          <>
-            <input
-              type="datetime-local"
-              value={customSince}
-              onChange={e => setCustomSince(e.target.value)}
-              className="input"
-              style={{ fontSize: 13, borderColor: customSince && !sinceOk ? "var(--danger)" : undefined }}
-              aria-label="From"
-            />
-            <input
-              type="datetime-local"
-              value={customUntil}
-              onChange={e => setCustomUntil(e.target.value)}
-              className="input"
-              style={{ fontSize: 13, borderColor: (untilBeforeSince || (customUntil && !untilOk)) ? "var(--danger)" : undefined }}
-              aria-label="To"
-            />
+        <div className="segmented" role="group" aria-label="Filter by event type">
+          {TYPE_TABS.map(t => (
             <button
-              onClick={applyCustomRange}
-              disabled={!sinceOk}
-              className="btn btn-sm btn-primary"
+              key={t.value}
+              aria-pressed={tab === t.value}
+              onClick={() => { setTab(t.value); setOffset(0); }}
             >
-              Apply
+              {t.label}
             </button>
-            {untilBeforeSince && (
-              <span className="muted" style={{ fontSize: 12, color: "var(--danger)" }}>
-                End must be after start.
-              </span>
-            )}
-          </>
-        )}
-
+          ))}
+        </div>
         <select
-          value={typeFilter}
-          onChange={e => { setTypeFilter(e.target.value as ActivityEventType | "all"); setOffset(0); }}
+          value={timeRange}
+          onChange={e => { setTimeRange(e.target.value as TimeRange); setOffset(0); }}
           className="input"
-          style={{ fontSize: 13 }}
-          aria-label="Event type"
+          style={{ fontSize: 13, padding: "4px 8px", width: 120, flexShrink: 0 }}
+          aria-label="Time range"
         >
-          {EVENT_TYPE_OPTIONS.map(t => (
-            <option key={t} value={t}>{t === "all" ? "All types" : t}</option>
+          {TIME_RANGES.map(t => (
+            <option key={t.value} value={t.value}>{t.label}</option>
           ))}
         </select>
-
-        <select
-          value={tokenFilter}
-          onChange={e => { setTokenFilter(e.target.value); setOffset(0); }}
-          className="input"
-          style={{ fontSize: 13 }}
-          aria-label="Widget"
-        >
-          <option value="all">All widgets</option>
-          {tokens.map(t => (
-            <option key={t.token_id} value={t.token_id}>{t.label}</option>
-          ))}
-        </select>
-
+        <div style={{ flex: 1 }} />
         <button
-          onClick={() => setLoadTick(t => t + 1)}
-          className="btn btn-sm btn-ghost"
+          onClick={() => setLoadTick(n => n + 1)}
+          className="icon-btn"
+          aria-label="Refresh"
           title="Refresh"
         >
           <Icon name="refresh" size={14} />
@@ -238,10 +183,10 @@ export function ActivityLog({ onSelectToken, initialTypeFilter }: ActivityLogPro
         <button
           onClick={handleExport}
           disabled={exporting}
-          className="btn btn-sm btn-ghost"
+          className="btn"
         >
           <Icon name="download" size={14} />
-          {exporting ? "Exporting..." : "CSV"}
+          {exporting ? "Exporting..." : "Export CSV"}
         </button>
       </div>
 
@@ -250,10 +195,10 @@ export function ActivityLog({ onSelectToken, initialTypeFilter }: ActivityLogPro
         <div style={{ display: "flex", justifyContent: "center", padding: 40 }}>
           <Spinner size={36} />
         </div>
-      ) : !page || page.events.length === 0 ? (
+      ) : !hasChartData || !page || page.events.length === 0 ? (
         <Card>
           <div className="muted" style={{ textAlign: "center", padding: 24, fontSize: 14 }}>
-            No events found for the selected filters.
+            No activity data for this period.
           </div>
         </Card>
       ) : (
@@ -269,7 +214,7 @@ export function ActivityLog({ onSelectToken, initialTypeFilter }: ActivityLogPro
       )}
 
       {/* Pagination */}
-      {page && page.total > PAGE_LIMIT && (
+      {hasChartData && page && page.total > PAGE_LIMIT && (
         <div className="row" style={{ fontSize: 13 }}>
           <span className="muted" style={{ flex: 1 }}>
             {offset + 1}-{Math.min(page.total, offset + PAGE_LIMIT)} of {page.total} events

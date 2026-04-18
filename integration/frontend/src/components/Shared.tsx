@@ -15,7 +15,7 @@ import { Icon } from "./Icon";
 // ---------------------------------------------------------------------------
 
 const STATUS_BADGE: Record<TokenStatus, { kind: string; label: string }> = {
-  active:        { kind: "ok",      label: "Protected"     },
+  active:        { kind: "ok",      label: "Active"        },
   expiring_soon: { kind: "warn",    label: "Expiring soon" },
   inactive:      { kind: "neutral", label: "Inactive"      },
   expired:       { kind: "neutral", label: "Ended"         },
@@ -379,7 +379,9 @@ interface ActivityGraphProps {
 }
 
 export function ActivityGraph({ buckets, height = 180 }: ActivityGraphProps) {
-  if (!buckets.length) return null;
+  if (buckets.length < 2) return null;
+  const total = buckets.reduce((s, b) => s + b.commands + b.sessions + b.auth_failures, 0);
+  if (total === 0) return null;
   const W = 800;
   const H = height;
   const PAD = { top: 12, right: 12, bottom: 24, left: 32 };

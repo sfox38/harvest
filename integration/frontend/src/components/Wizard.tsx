@@ -1,8 +1,7 @@
 /**
- * Wizard.tsx - Six-step widget creation wizard (side-sheet layout).
+ * Wizard.tsx - Six-step widget creation wizard (centered modal).
  *
  * Steps: Entities, Permissions, Origin, Expiry, Appearance, Done.
- * Right pane shows a fake-browser preview that updates as the user progresses.
  * Aliases are generated at entity selection time (Step 1).
  * Preview tokens are created at Step 5 and revoked on wizard close.
  */
@@ -13,6 +12,7 @@ import { api } from "../api";
 import { CopyablePre, CopyButton, Spinner, ErrorBanner, ConfirmDialog } from "./Shared";
 import { Icon } from "./Icon";
 import { getEntityCache, loadEntityCache } from "../entityCache";
+import { loadKnownOrigins, addKnownOrigin, removeKnownOrigin, validateOriginUrl, displayOriginLabel } from "./originMemory";
 import type { HAEntity } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -23,7 +23,7 @@ interface WizardMemory {
   capability: "read" | "read-write";
   expiryOption: string;
   themeUrl: string;
-  selectedOriginUrl: string;
+  originUrls: string[];
 }
 
 function loadMemory(): WizardMemory {
@@ -49,7 +49,7 @@ interface WizardState {
   entities: SelectedEntity[];
   capability: "read" | "read-write";
   originMode: "specific" | "any";
-  selectedOriginUrl: string;
+  originUrls: string[];
   expiryOption: "never" | "30d" | "90d" | "1y" | "custom";
   expiryCustomDate: string;
   themeUrl: string;
@@ -150,104 +150,6 @@ function StepIndicator({ current }: { current: number }) {
           </React.Fragment>
         );
       })}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// WizardPreview
-// ---------------------------------------------------------------------------
-
-function WizardPreview({ state, step }: { state: WizardState; step: number }) {
-  const originUrl = state.originMode === "any"
-    ? "https://your-site.com"
-    : state.selectedOriginUrl || "https://your-site.com";
-
-  const hasEntities = state.entities.length > 0;
-
-  return (
-    <div className="wizard-preview">
-      <div className="preview-label">Preview</div>
-      <div className="preview-site">
-        <div className="preview-chrome">
-          <div className="dot r" />
-          <div className="dot y" />
-          <div className="dot g" />
-          <div className="url">{originUrl}</div>
-        </div>
-        <div className="preview-page">
-          <p className="preview-heading">
-            {step <= 2 ? "My page" : originUrl.replace(/^https?:\/\//, "").split("/")[0]}
-          </p>
-          <div className="preview-paragraph" style={{ width: "70%" }} />
-          <div className="preview-paragraph" style={{ width: "90%" }} />
-          <div className="preview-paragraph" style={{ width: "50%" }} />
-
-          {hasEntities && (
-            <div style={{ marginTop: 18 }}>
-              {state.entities.slice(0, 3).map(e => (
-                <div key={e.entity_id} className="fake-widget" style={{
-                  marginBottom: 10, padding: "12px 14px",
-                  background: "white", borderRadius: 8,
-                  border: "1px solid #e0e0e0",
-                  fontSize: 12,
-                }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4, color: "#333" }}>
-                    {e.entity_id.split(".")[1]?.replace(/_/g, " ") ?? e.entity_id}
-                  </div>
-                  <div style={{ color: "#666", fontSize: 11 }}>
-                    {e.alias ? `alias: ${e.alias}` : e.entity_id}
-                  </div>
-                  {state.capability === "read-write" && (
-                    <div style={{ marginTop: 8, display: "flex", gap: 4 }}>
-                      <div style={{ padding: "2px 8px", background: "var(--accent)", color: "#fff", borderRadius: 4, fontSize: 10 }}>
-                        On
-                      </div>
-                      <div style={{ padding: "2px 8px", background: "#e0e0e0", color: "#666", borderRadius: 4, fontSize: 10 }}>
-                        Off
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-              {state.entities.length > 3 && (
-                <div style={{ fontSize: 11, color: "#999", textAlign: "center" }}>
-                  +{state.entities.length - 3} more
-                </div>
-              )}
-            </div>
-          )}
-
-          {!hasEntities && (
-            <div style={{
-              marginTop: 18, padding: "20px 14px", background: "#f5f5f5",
-              borderRadius: 8, border: "1px dashed #ccc", textAlign: "center",
-              fontSize: 11, color: "#999",
-            }}>
-              Select an entity to preview
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Summary kv */}
-      {hasEntities && (
-        <div>
-          <div className="preview-label" style={{ marginBottom: 8 }}>Widget summary</div>
-          <dl className="kv-compact">
-            <dt>Entities</dt>
-            <dd>{state.entities.length}</dd>
-            <dt>Access</dt>
-            <dd>{state.capability === "read-write" ? "View and control" : "View only"}</dd>
-            {state.originMode === "specific" && state.selectedOriginUrl && (
-              <><dt>Origin</dt><dd className="mono" style={{ fontSize: 11 }}>{state.selectedOriginUrl}</dd></>
-            )}
-            {state.originMode === "any" && <><dt>Origin</dt><dd>Any website</dd></>}
-            <dt>Expires</dt>
-            <dd>{state.expiryOption === "never" ? "Never" : state.expiryOption === "custom" ? state.expiryCustomDate || "-" : fmtExpiry(state.expiryOption)}</dd>
-          </dl>
-        </div>
-      )}
     </div>
   );
 }
@@ -484,52 +386,66 @@ function Step2({ state, onChange }: { state: WizardState; onChange: (u: Partial<
 // ---------------------------------------------------------------------------
 
 const ORIGIN_CUSTOM = "__custom__";
-const HIDDEN_ORIGINS_KEY = "hrv_hidden_origins";
-
-function loadHiddenOrigins(): Set<string> {
-  try { return new Set(JSON.parse(localStorage.getItem(HIDDEN_ORIGINS_KEY) ?? "[]")); }
-  catch { return new Set(); }
-}
-
-function saveHiddenOrigins(set: Set<string>) {
-  try { localStorage.setItem(HIDDEN_ORIGINS_KEY, JSON.stringify(Array.from(set))); }
-  catch { /* ignore */ }
-}
 
 function Step3({ state, onChange }: { state: WizardState; onChange: (u: Partial<WizardState>) => void }) {
-  const [allOrigins,    setAllOrigins]    = useState<string[]>([]);
-  const [hiddenOrigins, setHiddenOrigins] = useState<Set<string>>(loadHiddenOrigins);
-  const [usingCustom,   setUsingCustom]   = useState(false);
+  const [knownOrigins,   setKnownOrigins]   = useState<string[]>(loadKnownOrigins);
+  const [usingCustom,    setUsingCustom]    = useState(false);
+  const [customInput,    setCustomInput]    = useState("");
+  const [dropdownSel,    setDropdownSel]    = useState("");
+  const [urlError,       setUrlError]       = useState<string | null>(null);
+  const [pendingReplace, setPendingReplace] = useState<{ url: string; newOrigin: string; path: string | null } | null>(null);
   const showWarning = state.originMode === "any" && state.capability === "read-write";
 
-  useEffect(() => {
-    api.tokens.list().then(tokens => {
-      const seen = new Set<string>();
-      tokens.forEach(t => {
-        if (!t.origins.allow_any) {
-          t.origins.allowed.forEach(o => {
-            if (t.origins.allow_paths.length > 0) {
-              t.origins.allow_paths.forEach(p => seen.add(`${o}${p}`));
-            } else { seen.add(o); }
-          });
-        }
-      });
-      setAllOrigins(Array.from(seen));
-    }).catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const originUrls = state.originUrls;
+  const baseOrigin = originUrls.length > 0 ? (() => { try { return new URL(originUrls[0]).origin; } catch { return ""; } })() : "";
+  const dropdownItems = knownOrigins.filter(o => {
+    if (originUrls.includes(o)) return false;
+    if (!baseOrigin) return true;
+    try { return new URL(o).origin === baseOrigin; } catch { return false; }
+  });
+  const hasDropdown = dropdownItems.length > 0;
 
-  const existingOrigins = allOrigins.filter(o => !hiddenOrigins.has(o));
-  const hasExisting = existingOrigins.length > 0;
-  const showTextInput = !hasExisting || usingCustom;
-  const selectVal = usingCustom ? ORIGIN_CUSTOM : (state.selectedOriginUrl || "");
-  const canDelete = !usingCustom && !!state.selectedOriginUrl;
+  const applyUrl = (url: string, newOrigin: string, path: string | null) => {
+    const differentHost = !!baseOrigin && baseOrigin !== newOrigin;
+    const newList = differentHost
+      ? [url]
+      : [...originUrls.filter(u => u !== url), url];
+    onChange({ originUrls: newList });
+    addKnownOrigin(url);
+    setKnownOrigins(loadKnownOrigins());
+    setDropdownSel("");
+    setUsingCustom(false);
+    setCustomInput("");
+    setUrlError(null);
+    setPendingReplace(null);
+  };
 
-  const handleDeleteOrigin = () => {
-    const next = new Set(hiddenOrigins);
-    next.add(state.selectedOriginUrl);
-    setHiddenOrigins(next);
-    saveHiddenOrigins(next);
-    onChange({ selectedOriginUrl: "" });
+  const addUrl = (url: string) => {
+    const trimmed = url.trim();
+    if (!trimmed) return;
+    const err = validateOriginUrl(trimmed);
+    if (err) { setUrlError(err); return; }
+    setUrlError(null);
+    const u = new URL(trimmed);
+    const newOrigin = u.origin;
+    const path = (u.pathname && u.pathname !== "/") ? u.pathname : null;
+    // Strip query string and fragment - only origin+path are used for matching.
+    const normalized = path ? `${newOrigin}${path}` : newOrigin;
+    if (baseOrigin && baseOrigin !== newOrigin && originUrls.length > 0) {
+      setPendingReplace({ url: normalized, newOrigin, path });
+      return;
+    }
+    applyUrl(normalized, newOrigin, path);
+  };
+
+  const removeUrl = (url: string) => {
+    onChange({ originUrls: originUrls.filter(u => u !== url) });
+  };
+
+  const handleDeleteFromDropdown = () => {
+    removeKnownOrigin(dropdownSel);
+    setKnownOrigins(loadKnownOrigins());
+    setDropdownSel("");
   };
 
   return (
@@ -546,41 +462,58 @@ function Step3({ state, onChange }: { state: WizardState; onChange: (u: Partial<
           <div style={{ fontWeight: 600, fontSize: 14 }}>A specific website or page</div>
           {state.originMode === "specific" && (
             <div className="col" style={{ gap: 8, marginTop: 10 }}>
-              {hasExisting && (
+
+              {/* Added URLs list */}
+              {originUrls.map(url => (
+                <div key={url} className="row" style={{ gap: 6, fontSize: 13 }}>
+                  <span style={{ flex: 1 }} className="mono url-clip">{url}</span>
+                  <button type="button" onClick={() => removeUrl(url)} className="btn btn-sm btn-danger">Remove</button>
+                </div>
+              ))}
+
+              {/* Dropdown row */}
+              {hasDropdown && (
                 <div className="row" style={{ gap: 6 }}>
                   <select
-                    value={selectVal}
+                    value={usingCustom ? ORIGIN_CUSTOM : dropdownSel}
                     onChange={e => {
-                      if (e.target.value === ORIGIN_CUSTOM) { setUsingCustom(true); onChange({ selectedOriginUrl: "" }); }
-                      else { setUsingCustom(false); onChange({ selectedOriginUrl: e.target.value }); }
+                      if (e.target.value === ORIGIN_CUSTOM) { setUsingCustom(true); setDropdownSel(""); }
+                      else { setDropdownSel(e.target.value); setUsingCustom(false); }
                     }}
                     className="input"
                     style={{ flex: 1, fontSize: 13 }}
                   >
-                    <option value="">Select an origin...</option>
-                    {existingOrigins.map(o => <option key={o} value={o}>{o}</option>)}
+                    <option value="">Select a URL...</option>
+                    {dropdownItems.map(o => <option key={o} value={o}>{displayOriginLabel(o)}</option>)}
                     <option value={ORIGIN_CUSTOM}>Enter a new URL...</option>
                   </select>
-                  {canDelete && (
-                    <button
-                      type="button"
-                      onClick={handleDeleteOrigin}
-                      className="btn btn-sm btn-danger"
-                    >
-                      Remove
-                    </button>
+                  {dropdownSel && !usingCustom && (
+                    <>
+                      <button type="button" onClick={() => addUrl(dropdownSel)} className="btn btn-sm">Add URL</button>
+                      <button type="button" onClick={handleDeleteFromDropdown} className="btn btn-sm btn-danger">Delete URL</button>
+                    </>
                   )}
                 </div>
               )}
-              {showTextInput && (
-                <input
-                  value={state.selectedOriginUrl}
-                  onChange={e => onChange({ selectedOriginUrl: e.target.value })}
-                  placeholder="https://example.com"
-                  autoFocus={hasExisting}
-                  className="input"
-                  style={{ fontSize: 13 }}
-                />
+
+              {/* Custom input row */}
+              {(usingCustom || !hasDropdown) && (
+                <div className="row" style={{ gap: 6 }}>
+                  <input
+                    value={customInput}
+                    onChange={e => setCustomInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") addUrl(customInput); }}
+                    placeholder="https://example.com"
+                    autoFocus={hasDropdown}
+                    className="input"
+                    style={{ flex: 1, fontSize: 13 }}
+                  />
+                  <button type="button" onClick={() => addUrl(customInput)} disabled={!customInput.trim()} className="btn btn-sm">Add URL</button>
+                </div>
+              )}
+
+              {urlError && (
+                <div style={{ fontSize: 12, color: "var(--danger)" }}>{urlError}</div>
               )}
               <p className="muted" style={{ fontSize: 11 }}>
                 Site only (https://example.com) or a specific page (https://example.com/page.html).
@@ -609,6 +542,17 @@ function Step3({ state, onChange }: { state: WizardState; onChange: (u: Partial<
           <strong>Security warning:</strong> This allows anyone on the internet to control your device from any website. Only proceed if you understand this risk.
         </div>
       )}
+
+      {pendingReplace && (
+        <ConfirmDialog
+          title="Replace website?"
+          message={`Changing to ${pendingReplace.newOrigin} will remove all existing URLs for ${baseOrigin}. Continue?`}
+          confirmLabel="Replace"
+          confirmDestructive
+          onConfirm={() => applyUrl(pendingReplace.url, pendingReplace.newOrigin, pendingReplace.path)}
+          onCancel={() => setPendingReplace(null)}
+        />
+      )}
     </div>
   );
 }
@@ -625,6 +569,12 @@ function Step4({ state, onChange }: { state: WizardState; onChange: (u: Partial<
     { value: "1y",     label: "1 year"        },
     { value: "custom", label: "Custom date"   },
   ];
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  const customDateInvalid = state.expiryOption === "custom"
+    && state.expiryCustomDate !== ""
+    && state.expiryCustomDate <= today;
+
   return (
     <div className="col" style={{ gap: 12 }}>
       <p style={{ fontSize: 14, fontWeight: 600 }}>When should this widget stop working?</p>
@@ -645,14 +595,19 @@ function Step4({ state, onChange }: { state: WizardState; onChange: (u: Partial<
               <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>({fmtExpiry(value)})</span>
             )}
             {value === "custom" && state.expiryOption === "custom" && (
-              <input
-                type="date"
-                value={state.expiryCustomDate}
-                onChange={e => onChange({ expiryCustomDate: e.target.value })}
-                min={new Date().toISOString().split("T")[0]}
-                className="input"
-                style={{ marginLeft: 10, fontSize: 13 }}
-              />
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                <input
+                  type="date"
+                  value={state.expiryCustomDate}
+                  onChange={e => onChange({ expiryCustomDate: e.target.value })}
+                  min={tomorrow}
+                  className="input"
+                  style={{ marginLeft: 10, fontSize: 13, borderColor: customDateInvalid ? "var(--danger)" : undefined }}
+                />
+                {customDateInvalid && (
+                  <span style={{ fontSize: 12, color: "var(--danger)" }}>Date must be in the future.</span>
+                )}
+              </span>
             )}
           </div>
         </label>
@@ -705,6 +660,19 @@ function Step5({ state, onChange }: { state: WizardState; onChange: (u: Partial<
 // Step 6: Done
 // ---------------------------------------------------------------------------
 
+const LABEL_ILLEGAL_WIZ = /[\x00-\x1f<>"&]/;
+
+function validateLabelWiz(label: string, otherLabels: string[]): string | null {
+  const t = label.trim();
+  if (!t) return "Name is required.";
+  if (t.length > 100) return "Name must be 100 characters or fewer.";
+  if (LABEL_ILLEGAL_WIZ.test(t)) return "Name contains invalid characters.";
+  if (otherLabels.some(l => l.trim().toLowerCase() === t.toLowerCase())) {
+    return "A widget with this name already exists.";
+  }
+  return null;
+}
+
 function Step6({ token, tokenSecret, originMode, originUrl }: {
   token: Token;
   tokenSecret: string | null;
@@ -716,6 +684,14 @@ function Step6({ token, tokenSecret, originMode, originUrl }: {
   const [acknowledged, setAcknowledged] = useState(!tokenSecret);
   const [widgetName,   setWidgetName]   = useState(token.label);
   const [nameSaving,   setNameSaving]   = useState(false);
+  const [nameError,    setNameError]    = useState<string | null>(null);
+  const [allLabels,    setAllLabels]    = useState<string[]>([]);
+
+  useEffect(() => {
+    api.tokens.list().then(ts => {
+      setAllLabels(ts.filter(t => t.token_id !== token.token_id).map(t => t.label));
+    }).catch(() => {});
+  }, [token.token_id]);
 
   const haUrl = window.location.origin;
   const cardSnippet = tab === "web"
@@ -724,9 +700,13 @@ function Step6({ token, tokenSecret, originMode, originUrl }: {
   const hostDisplay = originMode === "any" ? "Anywhere" : (originUrl || haUrl);
 
   const saveWidgetName = async (name: string) => {
-    if (!name.trim() || name === token.label) return;
+    const trimmed = name.trim();
+    const err = validateLabelWiz(trimmed, allLabels);
+    if (err) { setNameError(err); return; }
+    setNameError(null);
+    if (!trimmed || trimmed === token.label) return;
     setNameSaving(true);
-    try { await api.tokens.update(token.token_id, { label: name.trim() }); }
+    try { await api.tokens.update(token.token_id, { label: trimmed }); }
     catch { /* non-fatal */ }
     finally { setNameSaving(false); }
   };
@@ -760,13 +740,18 @@ function Step6({ token, tokenSecret, originMode, originUrl }: {
             <label style={{ fontSize: 12, fontWeight: 600 }}>Widget name</label>
             <input
               value={widgetName}
-              onChange={e => setWidgetName(e.target.value)}
+              maxLength={100}
+              onChange={e => {
+                setWidgetName(e.target.value);
+                if (nameError !== null) setNameError(validateLabelWiz(e.target.value.trim(), allLabels));
+              }}
               onBlur={e => saveWidgetName(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }}
               disabled={nameSaving}
               className="input"
-              style={{ fontSize: 14 }}
+              style={{ fontSize: 14, borderColor: nameError ? "var(--danger)" : undefined }}
             />
+            {nameError && <div style={{ fontSize: 12, color: "var(--danger)" }}>{nameError}</div>}
           </div>
 
           <div className="muted" style={{ fontSize: 13 }}>
@@ -830,7 +815,7 @@ function freshState(): WizardState {
     entities: [],
     capability: mem.capability ?? "read",
     originMode: "specific",
-    selectedOriginUrl: mem.selectedOriginUrl ?? "",
+    originUrls: mem.originUrls ?? [],
     expiryOption: (mem.expiryOption as WizardState["expiryOption"]) ?? "never",
     expiryCustomDate: "",
     themeUrl: mem.themeUrl ?? "",
@@ -864,17 +849,19 @@ export function Wizard({ onClose }: WizardProps) {
   const canProceed = (): boolean => {
     if (step === 1) return wState.entities.length > 0;
     if (step === 3 && wState.originMode === "specific") {
-      try {
-        const u = new URL(wState.selectedOriginUrl);
-        return (u.protocol === "http:" || u.protocol === "https:") && u.host.length > 0;
-      } catch { return false; }
+      return wState.originUrls.length > 0;
+    }
+    if (step === 4 && wState.expiryOption === "custom") {
+      const today = new Date().toISOString().slice(0, 10);
+      return wState.expiryCustomDate > today;
     }
     return true;
   };
 
   const handleNext = async () => {
-    if (step === 3 && wState.originMode === "specific" && wState.selectedOriginUrl) {
-      saveMemory({ selectedOriginUrl: wState.selectedOriginUrl });
+    if (step === 3 && wState.originMode === "specific" && wState.originUrls.length > 0) {
+      saveMemory({ originUrls: wState.originUrls });
+      wState.originUrls.forEach(u => addKnownOrigin(u));
     }
 
     if (step === 5 && !wState.previewTokenId) {
@@ -897,10 +884,13 @@ export function Wizard({ onClose }: WizardProps) {
           capabilities: wState.capability,
           exclude_attributes: [],
         }));
-        const { origin: originHost, path: originPath } = splitOriginUrl(wState.selectedOriginUrl);
+        const originHost = wState.originUrls.length > 0 ? splitOriginUrl(wState.originUrls[0]).origin : "";
+        const originPaths = wState.originUrls
+          .map(u => splitOriginUrl(u).path)
+          .filter((p): p is string => p !== null);
         const origins = wState.originMode === "any"
           ? { allow_any: true, allowed: [], allow_paths: [] }
-          : { allow_any: false, allowed: [originHost], allow_paths: originPath ? [originPath] : [] };
+          : { allow_any: false, allowed: originHost ? [originHost] : [], allow_paths: originPaths };
         const expires = expiresAt(wState.expiryOption, wState.expiryCustomDate);
         const token = await api.tokens.create({
           label: wState.entities.map(e => e.entity_id).join(", "),
@@ -933,6 +923,8 @@ export function Wizard({ onClose }: WizardProps) {
     }
   };
 
+  const isDone = step === 6 && !!wState.generatedToken;
+
   return (
     <div className="overlay" role="presentation" onClick={handleCloseRequest}>
       <div
@@ -942,81 +934,94 @@ export function Wizard({ onClose }: WizardProps) {
         className="wizard"
         onClick={e => e.stopPropagation()}
       >
-        {/* Left: main wizard panel */}
-        <div className="wizard-main">
-          {/* Header */}
-          <div className="wizard-head">
-            <h2>{step === 6 && wState.generatedToken ? "Your widget is ready" : "Create Widget"}</h2>
-            <button
-              onClick={handleCloseRequest}
-              aria-label="Close wizard"
-              className="btn btn-ghost btn-sm"
-            >
-              <Icon name="close" size={16} />
-            </button>
+        {/* Header */}
+        <div className="wizard-head">
+          <div className="wizard-head-brand">
+            <Icon name="leaf" size={18} />
           </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="wizard-head-title">
+              {isDone ? "Widget ready" : "New widget"}
+            </div>
+            <div className="wizard-head-sub">
+              Step {step} of {TOTAL_STEPS} - {STEP_LABELS[step - 1]}
+            </div>
+          </div>
+          <button
+            onClick={handleCloseRequest}
+            aria-label="Close wizard"
+            className="icon-btn"
+            style={{ flexShrink: 0 }}
+          >
+            <Icon name="close" size={15} />
+          </button>
+        </div>
 
-          {/* Stepper */}
-          <div style={{ padding: "12px 28px", borderBottom: "1px solid var(--divider)", flexShrink: 0, overflowX: "auto" }}>
+        {/* Stepper */}
+        {!isDone && (
+          <div style={{ padding: "10px 22px", borderBottom: "1px solid var(--divider)", flexShrink: 0, overflowX: "auto" }}>
             <StepIndicator current={step} />
           </div>
+        )}
 
-          {error && (
-            <div style={{ padding: "0 28px" }}>
-              <ErrorBanner message={error} onDismiss={() => setError(null)} />
-            </div>
-          )}
-
-          {/* Body */}
-          <div className="wizard-body">
-            {step === 1 && <Step1 state={wState} onChange={patchState} />}
-            {step === 2 && <Step2 state={wState} onChange={patchState} />}
-            {step === 3 && <Step3 state={wState} onChange={patchState} />}
-            {step === 4 && <Step4 state={wState} onChange={patchState} />}
-            {step === 5 && <Step5 state={wState} onChange={patchState} />}
-            {step === 6 && wState.generatedToken && (
-              <Step6
-                token={wState.generatedToken}
-                tokenSecret={wState.tokenSecret}
-                originMode={wState.originMode}
-                originUrl={wState.selectedOriginUrl}
-              />
-            )}
+        {error && (
+          <div style={{ padding: "0 22px 0" }}>
+            <ErrorBanner message={error} onDismiss={() => setError(null)} />
           </div>
+        )}
 
-          {/* Footer */}
-          <div className="wizard-foot">
-            {step === 6 && wState.generatedToken ? (
+        {/* Body */}
+        <div className="wizard-body">
+          {step === 1 && <Step1 state={wState} onChange={patchState} />}
+          {step === 2 && <Step2 state={wState} onChange={patchState} />}
+          {step === 3 && <Step3 state={wState} onChange={patchState} />}
+          {step === 4 && <Step4 state={wState} onChange={patchState} />}
+          {step === 5 && <Step5 state={wState} onChange={patchState} />}
+          {isDone && (
+            <Step6
+              token={wState.generatedToken!}
+              tokenSecret={wState.tokenSecret}
+              originMode={wState.originMode}
+              originUrl={wState.originUrls[0] ?? ""}
+            />
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="wizard-foot">
+          {isDone ? (
+            <>
+              <div className="spacer" />
               <button
                 onClick={() => onClose(wState.generatedToken!.token_id)}
                 className="btn btn-primary"
-                style={{ flex: 1 }}
               >
-                Go to widget
+                Go to widget <Icon name="chevRight" size={14} />
               </button>
-            ) : (
-              <>
-                <button onClick={() => setStep(s => Math.max(1, s - 1))} disabled={step === 1} className="btn btn-ghost">
+            </>
+          ) : (
+            <>
+              <button onClick={handleCloseRequest} className="btn btn-ghost">
+                Cancel
+              </button>
+              <div className="spacer" />
+              {step > 1 && (
+                <button onClick={() => setStep(s => Math.max(1, s - 1))} className="btn">
                   <Icon name="chevLeft" size={14} /> Back
                 </button>
-                <div className="spacer" />
-                <button
-                  onClick={handleNext}
-                  disabled={!canProceed() || loading}
-                  className={`btn ${canProceed() ? "btn-primary" : ""}`}
-                  style={{ display: "flex", alignItems: "center", gap: 8 }}
-                >
-                  {loading && <Spinner size={16} label="Generating..." />}
-                  {step === 5 ? "Generate" : "Continue"}
-                  {step !== 5 && !loading && <Icon name="chevRight" size={14} />}
-                </button>
-              </>
-            )}
-          </div>
+              )}
+              <button
+                onClick={handleNext}
+                disabled={!canProceed() || loading}
+                className="btn btn-primary"
+              >
+                {loading && <Spinner size={16} label="Generating..." />}
+                {step === 5 ? "Generate" : "Continue"}
+                {step !== 5 && !loading && <Icon name="chevRight" size={14} />}
+              </button>
+            </>
+          )}
         </div>
-
-        {/* Right: preview pane */}
-        <WizardPreview state={wState} step={step} />
       </div>
 
       {/* Confirm discard */}

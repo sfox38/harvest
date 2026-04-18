@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -154,6 +155,26 @@ def _parse_entities(raw_list: list) -> list[EntityAccess]:
     return entities
 
 
+_LABEL_ILLEGAL = re.compile(r"[\x00-\x1f<>\"&]")
+
+
+def _validate_label(label: str, token_manager: TokenManager, exclude_token_id: str | None = None) -> str | None:
+    """Return an error string if the label is invalid, else None."""
+    stripped = label.strip()
+    if not stripped:
+        return "Name is required."
+    if len(stripped) > 100:
+        return "Name must be 100 characters or fewer."
+    if _LABEL_ILLEGAL.search(stripped):
+        return "Name contains invalid characters."
+    for t in token_manager.get_all():
+        if t.token_id == exclude_token_id:
+            continue
+        if t.label.strip().lower() == stripped.lower():
+            return "A widget with this name already exists."
+    return None
+
+
 def _deep_merge(base: dict, override: dict) -> dict:
     """Recursively merge override into base, returning a new dict.
 
@@ -232,9 +253,14 @@ class HarvestTokensView(HomeAssistantView):
         except (KeyError, TypeError, ValueError) as exc:
             raise web.HTTPBadRequest(reason=f"Invalid request body: {exc}")
 
+        raw_label = str(body.get("label", "Unnamed"))
+        label_err = _validate_label(raw_label, self._token_manager)
+        if label_err:
+            raise web.HTTPBadRequest(reason=label_err)
+
         try:
             token = await self._token_manager.create(
-                label=str(body.get("label", "Unnamed")),
+                label=raw_label.strip(),
                 created_by=user.id,
                 origins=origins,
                 entities=entities,
@@ -302,7 +328,11 @@ class HarvestTokenDetailView(HomeAssistantView):
 
         updates: dict = {}
         if "label" in body:
-            updates["label"] = str(body["label"])
+            raw_label = str(body["label"])
+            label_err = _validate_label(raw_label, self._token_manager, exclude_token_id=token_id)
+            if label_err:
+                raise web.HTTPBadRequest(reason=label_err)
+            updates["label"] = raw_label.strip()
         if "origins" in body:
             updates["origins"] = _parse_origins(body["origins"])
         if "entities" in body:
