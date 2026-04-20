@@ -12,11 +12,10 @@ from homeassistant.core import HomeAssistant
 from .const import DOMAIN, PANEL_PATH, PANEL_ASSETS_PATH
 
 
-def _panel_build_version(hass: HomeAssistant) -> str:
-    """Read the build number written by the frontend build script."""
-    path = hass.config.path("custom_components", DOMAIN, "panel", "panel_version.txt")
+def _read_panel_version(path: str) -> str:
     try:
-        return open(path).read().strip()  # noqa: WPS515
+        with open(path) as f:
+            return f.read().strip()
     except OSError:
         return "0"
 
@@ -46,6 +45,9 @@ async def register_panel(hass: HomeAssistant) -> None:
     except Exception:
         pass
 
+    version_path = hass.config.path("custom_components", DOMAIN, "panel", "panel_version.txt")
+    build_version = await hass.async_add_executor_job(_read_panel_version, version_path)
+
     async_register_built_in_panel(
         hass,
         component_name="custom",
@@ -54,7 +56,7 @@ async def register_panel(hass: HomeAssistant) -> None:
         frontend_url_path=PANEL_PATH,
         config={"_panel_custom": {
             "name": "ha-panel-harvest",
-            "js_url": f"/{PANEL_ASSETS_PATH}/panel.js?v={_panel_build_version(hass)}",
+            "js_url": f"/{PANEL_ASSETS_PATH}/panel.js?v={build_version}",
             "embed_iframe": False,
             "trust_external": False,
         }},

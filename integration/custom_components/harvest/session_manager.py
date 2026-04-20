@@ -127,15 +127,17 @@ class SessionManager:
 
     def get_all_for_token(self, token_id: str) -> list[Session]:
         """Return all active sessions for a given token."""
+        now = datetime.now(tz=timezone.utc)
         session_ids = self._token_sessions.get(token_id, set())
         return [
             s for sid in session_ids
-            if (s := self._sessions.get(sid)) is not None and not self.is_expired(s)
+            if (s := self._sessions.get(sid)) is not None and not self.is_expired(s, now)
         ]
 
     def get_all(self) -> list[Session]:
         """Return all active sessions across all tokens."""
-        return [s for s in self._sessions.values() if not self.is_expired(s)]
+        now = datetime.now(tz=timezone.utc)
+        return [s for s in self._sessions.values() if not self.is_expired(s, now)]
 
     # ------------------------------------------------------------------
     # Renewal
@@ -281,28 +283,33 @@ class SessionManager:
 
         Used by ws_proxy.py to fan out state updates. O(n) in session count.
         """
+        now = datetime.now(tz=timezone.utc)
         return [
             s for s in self._sessions.values()
-            if entity_id in s.subscribed_entity_ids and not self.is_expired(s)
+            if entity_id in s.subscribed_entity_ids and not self.is_expired(s, now)
         ]
 
     # ------------------------------------------------------------------
     # Introspection
     # ------------------------------------------------------------------
 
-    def is_expired(self, session: Session) -> bool:
+    def is_expired(self, session: Session, now: datetime | None = None) -> bool:
         """Return True if the session's expires_at has passed."""
-        return datetime.now(tz=timezone.utc) >= session.expires_at
+        if now is None:
+            now = datetime.now(tz=timezone.utc)
+        return now >= session.expires_at
 
     def count_active(self) -> int:
         """Return the total count of active sessions."""
-        return sum(1 for s in self._sessions.values() if not self.is_expired(s))
+        now = datetime.now(tz=timezone.utc)
+        return sum(1 for s in self._sessions.values() if not self.is_expired(s, now))
 
     def count_for_token(self, token_id: str) -> int:
         """Return the count of active sessions for a specific token."""
+        now = datetime.now(tz=timezone.utc)
         return sum(
             1 for sid in self._token_sessions.get(token_id, set())
-            if (s := self._sessions.get(sid)) is not None and not self.is_expired(s)
+            if (s := self._sessions.get(sid)) is not None and not self.is_expired(s, now)
         )
 
     # ------------------------------------------------------------------

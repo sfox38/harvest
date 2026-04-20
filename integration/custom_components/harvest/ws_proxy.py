@@ -59,7 +59,7 @@ def _fire(coro: object) -> None:
         try:
             await c  # type: ignore[misc]
         except Exception:
-            _LOGGER.debug("Fire-and-forget task raised an exception", exc_info=True)
+            _LOGGER.warning("Fire-and-forget task raised an exception", exc_info=True)
     asyncio.create_task(_wrap(coro))
 
 
@@ -105,6 +105,7 @@ class HarvestWsView(HomeAssistantView):
         event_bus: EventBus,
         action_manager: HarvestActionManager,
         config: dict,
+        sensors: object = None,
     ) -> None:
         self._hass = hass
         self._token_manager = token_manager
@@ -114,6 +115,7 @@ class HarvestWsView(HomeAssistantView):
         self._event_bus = event_bus
         self._action_manager = action_manager
         self._config = config
+        self._sensors = sensors
 
     async def get(self, request: Request) -> WebSocketResponse:
         """Handle incoming WebSocket upgrade.
@@ -298,6 +300,8 @@ class HarvestWsView(HomeAssistantView):
             timestamp=datetime.now(tz=timezone.utc),
             referer=referer,
         ))
+        if self._sensors is not None:
+            self._sensors.push_token_update(token.token_id)
 
         # Register HA state listeners. listener_unsubs maps real_entity_id -> unsub callable.
         listener_unsubs: dict[str, Callable] = {}
@@ -330,6 +334,8 @@ class HarvestWsView(HomeAssistantView):
                 timestamp=datetime.now(tz=timezone.utc),
                 referer=referer,
             ))
+            if self._sensors is not None:
+                self._sensors.push_token_update(token.token_id)
 
     async def _send_initial_state(
         self,
@@ -569,6 +575,8 @@ class HarvestWsView(HomeAssistantView):
             success=success,
             timestamp=datetime.now(tz=timezone.utc),
         ))
+        if self._sensors is not None:
+            self._sensors.push_token_update(token.token_id)
 
     async def _handle_subscribe(
         self,

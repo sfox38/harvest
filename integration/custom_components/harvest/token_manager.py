@@ -27,6 +27,7 @@ from .const import (
     BASE62_ALPHABET,
     CONF_ABSOLUTE_SESSION_LIFETIME,
     CONF_MAX_ENTITIES_HARD_CAP,
+    CONF_MAX_ENTITIES_PER_TOKEN,
     DEFAULTS,
     ERR_ENTITY_INCOMPATIBLE,
     ERR_ENTITY_NOT_IN_TOKEN,
@@ -235,12 +236,19 @@ class TokenManager:
         at save time since they would never match after Referer normalisation.
         Raises ValueError for invalid path entries.
         """
+        soft_limit = self._config.get(
+            CONF_MAX_ENTITIES_PER_TOKEN, DEFAULTS[CONF_MAX_ENTITIES_PER_TOKEN]
+        )
         hard_cap = self._config.get(
             CONF_MAX_ENTITIES_HARD_CAP, DEFAULTS[CONF_MAX_ENTITIES_HARD_CAP]
         )
         if len(entities) > hard_cap:
             raise ValueError(
                 f"Entity count {len(entities)} exceeds hard cap {hard_cap}."
+            )
+        if len(entities) > soft_limit:
+            raise ValueError(
+                f"Entity count {len(entities)} exceeds the configured limit {soft_limit}."
             )
 
         self._validate_allow_paths(origins.allow_paths)
@@ -401,6 +409,9 @@ class TokenManager:
 
         # Validate entity count if entities are being updated.
         if "entities" in updates:
+            soft_limit = self._config.get(
+                CONF_MAX_ENTITIES_PER_TOKEN, DEFAULTS[CONF_MAX_ENTITIES_PER_TOKEN]
+            )
             hard_cap = self._config.get(
                 CONF_MAX_ENTITIES_HARD_CAP, DEFAULTS[CONF_MAX_ENTITIES_HARD_CAP]
             )
@@ -408,6 +419,10 @@ class TokenManager:
             if len(new_entities) > hard_cap:
                 raise ValueError(
                     f"Entity count {len(new_entities)} exceeds hard cap {hard_cap}."
+                )
+            if len(new_entities) > soft_limit:
+                raise ValueError(
+                    f"Entity count {len(new_entities)} exceeds the configured limit {soft_limit}."
                 )
 
         for field_name, value in updates.items():
@@ -599,6 +614,8 @@ class TokenManager:
         Previous documentation claiming it was stored as a hash was incorrect -
         HMAC verification is impossible without the original secret.
         """
+        if not isinstance(timestamp, int):
+            return False
         now_ts = int(datetime.now(tz=timezone.utc).timestamp())
         if abs(now_ts - timestamp) > 60:
             return False

@@ -169,6 +169,7 @@ export class HarvestClient {
   unregisterCard(entityId) {
     this.#cards.delete(entityId);
     this.#pendingEntityIds.delete(entityId);
+    this.#entityStates.delete(entityId);
 
     if (this.#ws !== null && this.#ws.readyState === WebSocket.OPEN && this.#sessionId) {
       this.#sendJson({

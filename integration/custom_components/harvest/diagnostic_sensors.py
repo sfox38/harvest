@@ -183,7 +183,10 @@ class HarvestRunningSensor(BinarySensorEntity):
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_icon = "mdi:leaf"
     _attr_should_poll = False
-    _attr_is_on = True  # Set to True on setup; __init__.py sets False on teardown.
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._attr_is_on = True  # instance attribute - avoids shared class-level mutation
 
     def set_running(self, running: bool) -> None:
         """Update the running state and push to HA."""
@@ -315,10 +318,9 @@ class HarvestTokenLastSeenSensor(_TokenSensorBase):
         self._attr_name = f"HArvest {label_slug} Last Seen"
 
     async def async_update(self) -> None:
-        # Query the most recent successful auth event for this token.
         events, _ = await self._activity_store.query_activity(
             token_id=self._token_id,
-            event_types=["auth"],
+            display_type_filter="AUTH_OK",
             limit=1,
             offset=0,
         )
@@ -340,7 +342,7 @@ class HarvestTokenLastOriginSensor(_TokenSensorBase):
     async def async_update(self) -> None:
         events, _ = await self._activity_store.query_activity(
             token_id=self._token_id,
-            event_types=["auth"],
+            display_type_filter="AUTH_OK",
             limit=1,
             offset=0,
         )
@@ -362,12 +364,9 @@ class HarvestTokenCommandsTodaySensor(_TokenSensorBase):
         self._attr_name = f"HArvest {label_slug} Commands Today"
 
     async def async_update(self) -> None:
-        # count_today() is global; query per-token from commands table instead.
         from datetime import datetime, timezone
-        from .activity_store import _days_ago_iso  # shared helper
         import zoneinfo
 
-        # Build midnight-in-HA-timezone cutoff string. Fall back to UTC if unknown.
         try:
             tz = zoneinfo.ZoneInfo(self._activity_store._hass.config.time_zone)
         except Exception:
@@ -377,9 +376,9 @@ class HarvestTokenCommandsTodaySensor(_TokenSensorBase):
         midnight_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
         midnight_utc = midnight_local.astimezone(timezone.utc)
 
-        events, total = await self._activity_store.query_activity(
+        _events, total = await self._activity_store.query_activity(
             token_id=self._token_id,
-            event_types=["command"],
+            display_type_filter="COMMAND",
             since=midnight_utc,
             limit=1,
         )

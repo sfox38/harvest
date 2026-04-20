@@ -190,11 +190,19 @@ class ActivityStore:
 
         # Determine which tables to include based on the display type filter.
         # Each mapping entry: (include_table, extra_where_clause, extra_params)
-        include_auth    = display_type_filter in (None, "AUTH_OK", "AUTH_FAIL", "RATE_LIMITED")
+        include_auth    = display_type_filter in (None, "AUTH_OK", "AUTH_FAIL", "RATE_LIMITED", "SUSPICIOUS")
         include_command = display_type_filter in (None, "COMMAND")
         include_session = display_type_filter in (None, "SESSION_END", "RENEWAL")
         # errors table has no token_id column - exclude it when filtering by token.
-        include_error   = display_type_filter is None and token_id is None
+        include_error = (
+            token_id is None
+            and display_type_filter in (None, "SUSPICIOUS", "SUSPICIOUS_ORIGIN", "FLOOD_PROTECTION")
+        )
+        error_codes: list[str] | None = None
+        if display_type_filter == "SUSPICIOUS":
+            error_codes = ["SUSPICIOUS_ORIGIN", "FLOOD_PROTECTION"]
+        elif display_type_filter in ("SUSPICIOUS_ORIGIN", "FLOOD_PROTECTION"):
+            error_codes = [display_type_filter]
         include_lifecycle = display_type_filter in (None, "TOKEN_CREATED", "TOKEN_REVOKED", "TOKEN_DELETED")
 
         # Extra WHERE for fine-grained auth result filtering.
@@ -205,6 +213,8 @@ class ActivityStore:
             auth_extra = " AND result = 'failed'"
         elif display_type_filter == "RATE_LIMITED":
             auth_extra = " AND result = 'rate_limited'"
+        elif display_type_filter == "SUSPICIOUS":
+            auth_extra = " AND result = 'rate_limited'"
 
         # Extra WHERE for session event type filtering.
         session_extra = ""
@@ -212,11 +222,6 @@ class ActivityStore:
             session_extra = " AND event_type IN ('disconnected', 'terminated')"
         elif display_type_filter == "RENEWAL":
             session_extra = " AND event_type = 'renewal'"
-
-        # Extra WHERE for lifecycle type filtering.
-        lifecycle_extra = ""
-        if display_type_filter in ("TOKEN_CREATED", "TOKEN_REVOKED", "TOKEN_DELETED"):
-            lifecycle_extra = f" AND display_type = '{display_type_filter}'"
 
         union_parts: list[str] = []
         params: list = []
@@ -253,7 +258,7 @@ class ActivityStore:
             params.extend(p)
 
         if include_error:
-            clause, p = _build_error_clause(since_ts, until_ts)
+            clause, p = _build_error_clause(since_ts, until_ts, error_codes)
             union_parts.append(
                 "SELECT 'error' AS raw_type, NULL AS token_id, NULL AS origin, NULL AS source_ip, "
                 "NULL AS entity_id, code AS action, message AS result, "
@@ -263,12 +268,13 @@ class ActivityStore:
             params.extend(p)
 
         if include_lifecycle:
-            clause, p = _build_lifecycle_clause(token_id, since_ts, until_ts)
+            lc_type = display_type_filter if display_type_filter in ("TOKEN_CREATED", "TOKEN_REVOKED", "TOKEN_DELETED") else None
+            clause, p = _build_lifecycle_clause(token_id, since_ts, until_ts, lc_type)
             union_parts.append(
                 "SELECT 'lifecycle' AS raw_type, token_id, NULL AS origin, NULL AS source_ip, "
                 "NULL AS entity_id, NULL AS action, display_type AS result, "
                 "reason AS error_code, NULL AS session_id, timestamp, NULL AS referer "
-                f"FROM token_lifecycle{clause}{lifecycle_extra}"
+                f"FROM token_lifecycle{clause}"
             )
             params.extend(p)
 
@@ -292,7 +298,7 @@ class ActivityStore:
         events = [
             {
                 "id": i,
-                "type": _map_display_type(r[0], r[6] or ""),
+                "type": _map_display_type(r[0], r[6] or "", r[5] or ""),
                 "timestamp": r[9],
                 "token_id":  r[1] or None,
                 "token_label": None,  # no join available; frontend shows token_id
@@ -703,17 +709,43 @@ def _build_session_clause(
     return _build_auth_clause(token_id, since, until)
 
 
-def _build_error_clause(since: str | None, until: str | None) -> tuple[str, list]:
-    return _build_auth_clause(None, since, until)
+def _build_error_clause(
+    since: str | None, until: str | None, codes: list[str] | None = None
+) -> tuple[str, list]:
+    conds, params = [], []
+    if since:
+        conds.append("timestamp >= ?")
+        params.append(since)
+    if until:
+        conds.append("timestamp <= ?")
+        params.append(until)
+    if codes:
+        placeholders = ", ".join("?" * len(codes))
+        conds.append(f"code IN ({placeholders})")
+        params.extend(codes)
+    return _where(conds), params
 
 
 def _build_lifecycle_clause(
-    token_id: str | None, since: str | None, until: str | None
+    token_id: str | None, since: str | None, until: str | None, display_type: str | None = None
 ) -> tuple[str, list]:
-    return _build_auth_clause(token_id, since, until)
+    conds, params = [], []
+    if token_id:
+        conds.append("token_id = ?")
+        params.append(token_id)
+    if since:
+        conds.append("timestamp >= ?")
+        params.append(since)
+    if until:
+        conds.append("timestamp <= ?")
+        params.append(until)
+    if display_type:
+        conds.append("display_type = ?")
+        params.append(display_type)
+    return _where(conds), params
 
 
-def _map_display_type(raw_type: str, result: str) -> str:
+def _map_display_type(raw_type: str, result: str, action_or_code: str = "") -> str:
     """Map internal table type + result value to a display event type for the panel."""
     if raw_type == "auth":
         if result == "ok":
@@ -732,5 +764,5 @@ def _map_display_type(raw_type: str, result: str) -> str:
     if raw_type == "lifecycle":
         return result   # display_type stored directly: TOKEN_REVOKED, TOKEN_DELETED
     if raw_type == "error":
-        return "ERROR"
+        return action_or_code if action_or_code else "ERROR"
     return raw_type.upper()  # unknown types pass through as-is

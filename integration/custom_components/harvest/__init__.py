@@ -68,6 +68,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass, token_manager, session_manager,
         rate_limiter, activity_store, event_bus,
         action_manager, config,
+        sensors=sensors,
     )
     hass.http.register_view(ws_view)
 
@@ -82,12 +83,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # The spec has no separate sensor.py / binary_sensor.py platform files, so
     # sensor entities are added directly via EntityComponent, which is a valid
     # HA pattern for integrations that manage their own entity lifecycle.
-    global_sensor_entities = sensors.create_global_sensors()
+    all_sensor_entities = sensors.create_global_sensors()
 
-    sensor_entities = [e for e in global_sensor_entities
-                       if not hasattr(e, "is_on")]
-    binary_entities = [e for e in global_sensor_entities
-                       if hasattr(e, "is_on")]
+    # Create per-token sensors for tokens already in storage at startup.
+    for token in token_manager.get_all():
+        all_sensor_entities.extend(sensors.create_token_sensors(token.token_id, token.label))
+
+    sensor_entities = [e for e in all_sensor_entities if not hasattr(e, "is_on")]
+    binary_entities = [e for e in all_sensor_entities if hasattr(e, "is_on")]
 
     if sensor_entities:
         sensor_component = EntityComponent(

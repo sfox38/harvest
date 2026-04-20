@@ -27,13 +27,13 @@ export interface SessionConfig {
 }
 
 export interface ActiveScheduleWindow {
-  start: string; // "HH:MM"
-  end: string;   // "HH:MM"
+  days: string[]; // "mon", "tue", "wed", "thu", "fri", "sat", "sun"
+  start: string;  // "HH:MM"
+  end: string;    // "HH:MM"
 }
 
 export interface ActiveSchedule {
   timezone: string;
-  days: number[];   // 0=Mon ... 6=Sun
   windows: ActiveScheduleWindow[];
 }
 
@@ -57,7 +57,7 @@ export interface Token {
   token_secret: boolean; // true when HMAC is enabled; plaintext never returned
   origins: OriginConfig;
   entities: EntityAccess[];
-  rate_limit: RateLimitConfig;
+  rate_limits: RateLimitConfig;
   session: SessionConfig;
   max_sessions: number | null;
   active_schedule: ActiveSchedule | null;
@@ -98,7 +98,8 @@ export type ActivityEventType =
   | "RENEWAL"
   | "SUSPICIOUS_ORIGIN"
   | "FLOOD_PROTECTION"
-  | "RATE_LIMITED";
+  | "RATE_LIMITED"
+  | "ERROR";
 
 export interface ActivityEvent {
   id: number;

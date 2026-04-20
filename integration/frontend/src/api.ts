@@ -136,7 +136,7 @@ export const api = {
     create: (data: Partial<Token>): Promise<Token> =>
       _post<Token>("/tokens", data),
 
-    createPreview: (data: { entity_ids: string[]; capabilities: "read" | "read-write" }): Promise<{ token_id: string; expires_at: string }> =>
+    createPreview: (data: { entity_id: string; capabilities: "read" | "read-write" }): Promise<{ token_id: string; expires: string | null }> =>
       _post("/tokens/preview", data),
 
     update: (tokenId: string, data: Partial<Token>): Promise<Token> =>

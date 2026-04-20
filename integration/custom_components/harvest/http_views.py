@@ -122,9 +122,11 @@ def _parse_origins(raw: dict) -> OriginConfig:
 
 
 def _parse_rate_limits(raw: dict) -> RateLimitConfig:
+    from .const import CONF_DEFAULT_RATE_LIMITS, DEFAULTS
+    rl_defaults = DEFAULTS[CONF_DEFAULT_RATE_LIMITS]
     return RateLimitConfig(
-        max_push_per_second=int(raw.get("max_push_per_second", 1)),
-        max_commands_per_minute=int(raw.get("max_commands_per_minute", 30)),
+        max_push_per_second=int(raw.get("max_push_per_second", rl_defaults["max_push_per_second"])),
+        max_commands_per_minute=int(raw.get("max_commands_per_minute", rl_defaults["max_commands_per_minute"])),
         override_defaults=bool(raw.get("override_defaults", False)),
     )
 
@@ -139,15 +141,23 @@ def _parse_session_config(raw: dict) -> SessionConfig:
 
 
 _VALID_CAPABILITIES = ("read", "read-write")
+_ENTITY_ID_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 
 def _parse_entities(raw_list: list) -> list[EntityAccess]:
+    from .entity_compatibility import get_support_tier
     entities = []
     for e in raw_list:
+        entity_id = str(e["entity_id"])
+        if not _ENTITY_ID_RE.match(entity_id):
+            raise ValueError(f"Invalid entity_id {entity_id!r}; must match domain.slug.")
+        domain = entity_id.split(".")[0]
+        if get_support_tier(domain) == 3:
+            raise ValueError(f"Domain '{domain}' is not supported (Tier 3).")
         cap = str(e.get("capabilities", "read"))
         if cap not in _VALID_CAPABILITIES:
             raise ValueError(f"Invalid capabilities {cap!r}; must be one of {_VALID_CAPABILITIES}")
         entities.append(EntityAccess(
-            entity_id=str(e["entity_id"]),
+            entity_id=entity_id,
             capabilities=cap,
             alias=e.get("alias") or None,
             exclude_attributes=list(e.get("exclude_attributes", [])),
@@ -190,18 +200,33 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
+_VALID_DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+_HH_MM_RE = re.compile(r"^\d{2}:\d{2}$")
+
+
 def _parse_schedule(raw: dict | None) -> ActiveSchedule | None:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
     if not raw:
         return None
-    windows = [
-        ActiveScheduleWindow(
-            days=list(w["days"]),
-            start=str(w["start"]),
-            end=str(w["end"]),
-        )
-        for w in raw.get("windows", [])
-    ]
-    return ActiveSchedule(timezone=str(raw["timezone"]), windows=windows)
+    tz_str = str(raw["timezone"])
+    try:
+        ZoneInfo(tz_str)
+    except (ZoneInfoNotFoundError, KeyError):
+        raise ValueError(f"Invalid timezone: {tz_str!r}")
+    windows = []
+    for w in raw.get("windows", []):
+        days = list(w["days"])
+        for d in days:
+            if d not in _VALID_DAYS:
+                raise ValueError(f"Invalid day {d!r}; must be one of {sorted(_VALID_DAYS)}.")
+        start = str(w["start"])
+        end = str(w["end"])
+        if not _HH_MM_RE.match(start):
+            raise ValueError(f"Invalid start time {start!r}; must be HH:MM.")
+        if not _HH_MM_RE.match(end):
+            raise ValueError(f"Invalid end time {end!r}; must be HH:MM.")
+        windows.append(ActiveScheduleWindow(days=days, start=start, end=end))
+    return ActiveSchedule(timezone=tz_str, windows=windows)
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +262,8 @@ class HarvestTokensView(HomeAssistantView):
         user = request.get("hass_user")
         if user is None:
             raise web.HTTPUnauthorized()
+        if not user.is_admin:
+            raise web.HTTPForbidden()
 
         try:
             body = await request.json()
@@ -344,8 +371,13 @@ class HarvestTokenDetailView(HomeAssistantView):
         if "expires" in body:
             updates["expires"] = _parse_dt(body["expires"])
         if "max_sessions" in body:
-            updates["max_sessions"] = body["max_sessions"]
+            ms = body["max_sessions"]
+            if ms is not None and not isinstance(ms, int):
+                raise web.HTTPBadRequest(reason="max_sessions must be an integer or null.")
+            updates["max_sessions"] = ms
         if "allowed_ips" in body:
+            if not isinstance(body["allowed_ips"], list):
+                raise web.HTTPBadRequest(reason="allowed_ips must be a list.")
             updates["allowed_ips"] = list(body["allowed_ips"])
         if "active_schedule" in body:
             updates["active_schedule"] = _parse_schedule(body["active_schedule"])
@@ -363,6 +395,11 @@ class HarvestTokenDetailView(HomeAssistantView):
         Query param action=revoke: revokes an active token.
         No action param: deletes a revoked/expired token permanently.
         """
+        user = request.get("hass_user")
+        if user is None:
+            raise web.HTTPUnauthorized()
+        if not user.is_admin:
+            raise web.HTTPForbidden()
         action = request.query.get("action")
 
         if action == "revoke":
@@ -492,8 +529,11 @@ class HarvestActivityView(HomeAssistantView):
             until = _parse_dt(request.query.get("until"))
         except ValueError as exc:
             raise web.HTTPBadRequest(reason=str(exc))
-        limit = int(request.query.get("limit", "50"))
-        offset = int(request.query.get("offset", "0"))
+        try:
+            limit = max(1, min(500, int(request.query.get("limit", "50"))))
+            offset = max(0, int(request.query.get("offset", "0")))
+        except ValueError:
+            raise web.HTTPBadRequest(reason="limit and offset must be integers.")
 
         events, total = await self._activity_store.query_activity(
             token_id=token_id,
@@ -556,7 +596,10 @@ class HarvestAggregatesView(HomeAssistantView):
         self._activity_store = activity_store
 
     async def get(self, request: web.Request) -> web.Response:
-        hours = int(request.query.get("hours", "24"))
+        try:
+            hours = max(1, min(8760, int(request.query.get("hours", "24"))))
+        except ValueError:
+            raise web.HTTPBadRequest(reason="hours must be an integer.")
         token_id = request.query.get("token_id") or None
         data = await self._activity_store.query_aggregates(hours=hours, token_id=token_id)
         return self.json(data)
@@ -587,18 +630,24 @@ class HarvestActionsView(HomeAssistantView):
         user = request.get("hass_user")
         if user is None:
             raise web.HTTPUnauthorized()
+        if not user.is_admin:
+            raise web.HTTPForbidden()
 
         try:
             body = await request.json()
         except Exception:
             raise web.HTTPBadRequest(reason="Invalid JSON body.")
 
+        _svc_re = re.compile(r"^[a-z0-9_]+$")
         try:
-            service_calls = [
-                ServiceCall(domain=str(sc["domain"]), service=str(sc["service"]), data=sc.get("data", {}))
-                for sc in body.get("service_calls", [])
-            ]
-        except (KeyError, TypeError) as exc:
+            service_calls = []
+            for sc in body.get("service_calls", []):
+                domain = str(sc["domain"])
+                service = str(sc["service"])
+                if not _svc_re.match(domain) or not _svc_re.match(service):
+                    raise ValueError(f"Invalid domain/service format: {domain!r}/{service!r}")
+                service_calls.append(ServiceCall(domain=domain, service=service, data=sc.get("data", {})))
+        except (KeyError, TypeError, ValueError) as exc:
             raise web.HTTPBadRequest(reason=f"Invalid service_calls: {exc}")
 
         try:
@@ -749,6 +798,7 @@ class HarvestEntitiesView(HomeAssistantView):
         self._hass = hass
 
     async def get(self, _request: web.Request) -> web.Response:
+        from .entity_compatibility import get_support_tier
         return self.json([
             {
                 "entity_id": s.entity_id,
@@ -757,6 +807,7 @@ class HarvestEntitiesView(HomeAssistantView):
                 "state": s.state,
             }
             for s in self._hass.states.async_all()
+            if get_support_tier(s.domain) != 3
         ])
 
 
@@ -780,8 +831,13 @@ class HarvestAliasView(HomeAssistantView):
         self._token_manager = token_manager
 
     async def post(self, request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+            entity_id = str(body.get("entity_id", ""))
+        except Exception:
+            entity_id = ""
         alias = self._token_manager.generate_alias()
-        return self.json({"alias": alias})
+        return self.json({"entity_id": entity_id, "alias": alias})
 
 
 class HarvestPreviewTokenView(HomeAssistantView):

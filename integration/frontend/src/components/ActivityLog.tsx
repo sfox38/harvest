@@ -17,12 +17,12 @@ import { Icon } from "./Icon";
 
 type TypeTab = "all" | "commands" | "auth_ok" | "auth_fail" | "suspicious";
 
-const TYPE_TABS: { value: TypeTab; label: string; types: ActivityEventType[] }[] = [
+const TYPE_TABS: { value: TypeTab; label: string; types: ActivityEventType[]; filterParam?: string }[] = [
   { value: "all",        label: "All",        types: [] },
   { value: "commands",   label: "Commands",   types: ["COMMAND"] },
   { value: "auth_ok",    label: "Auth OK",    types: ["AUTH_OK"] },
   { value: "auth_fail",  label: "Auth fail",  types: ["AUTH_FAIL"] },
-  { value: "suspicious", label: "Suspicious", types: ["SUSPICIOUS_ORIGIN", "FLOOD_PROTECTION", "RATE_LIMITED"] },
+  { value: "suspicious", label: "Suspicious", types: ["SUSPICIOUS_ORIGIN", "FLOOD_PROTECTION", "RATE_LIMITED"], filterParam: "SUSPICIOUS" },
 ];
 
 type TimeRange = "5m" | "1h" | "6h" | "1d" | "1w" | "1mo" | "all";
@@ -92,7 +92,9 @@ export function ActivityLog({ onSelectToken, initialTypeFilter }: ActivityLogPro
     setError(null);
     const params: Parameters<typeof api.activity.list>[0] = { offset, limit: PAGE_LIMIT };
     if (sinceIso) params.since = sinceIso;
-    if (activeTab.types.length === 1) {
+    if (activeTab.filterParam) {
+      params.event_type = activeTab.filterParam as ActivityEventType;
+    } else if (activeTab.types.length === 1) {
       params.event_type = activeTab.types[0];
     }
     api.activity.list(params)
@@ -108,7 +110,11 @@ export function ActivityLog({ onSelectToken, initialTypeFilter }: ActivityLogPro
     try {
       const p: Record<string, string> = {};
       if (sinceIso) p.since = sinceIso;
-      if (activeTab.types.length === 1) p.event_type = activeTab.types[0];
+      if (activeTab.filterParam) {
+        p.event_type = activeTab.filterParam;
+      } else if (activeTab.types.length === 1) {
+        p.event_type = activeTab.types[0];
+      }
       await api.activity.exportCsv(p);
     } catch (e) {
       setError(String(e));
