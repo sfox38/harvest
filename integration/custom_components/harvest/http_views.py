@@ -599,7 +599,13 @@ class HarvestAggregatesView(HomeAssistantView):
             raise web.HTTPBadRequest(reason="hours must be an integer.")
         token_id = request.query.get("token_id") or None
         data = await self._activity_store.query_aggregates(hours=hours, token_id=token_id)
-        return self.json(data)
+        buckets = data.get("hours", [])
+        return self.json([{
+            "hour": b.get("hour", ""),
+            "commands": b.get("command_count", 0),
+            "sessions": b.get("peak_sessions", 0),
+            "auth_failures": b.get("auth_fail_count", 0),
+        } for b in buckets])
 
 
 # ---------------------------------------------------------------------------

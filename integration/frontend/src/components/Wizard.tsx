@@ -7,7 +7,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import type { Token, EntityAccess } from "../types";
+import type { Token } from "../types";
 import { api } from "../api";
 import { CopyablePre, CopyButton, Spinner, ErrorBanner, ConfirmDialog } from "./Shared";
 import { Icon } from "./Icon";
@@ -70,6 +70,8 @@ interface WizardProps {
 const TOTAL_STEPS = 6;
 const DEFAULT_WIDGET_SCRIPT_URL = "https://cdn.jsdelivr.net/gh/sfox38/harvest@latest/widget/dist/harvest.min.js";
 const STEP_LABELS = ["Entities", "Permissions", "Origin", "Expiry", "Appearance", "Done"];
+const MAX_COMPANIONS = 4;
+const COMPANION_ALLOWED_DOMAINS = new Set(["light", "switch", "binary_sensor", "input_boolean", "cover", "remote", "lock"]);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -100,32 +102,48 @@ function fmtExpiry(option: string): string {
   return `until ${d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`;
 }
 
-function buildCardSnippet(token: Token, useAliases: boolean, haUrl: string): string {
-  const attrs = `ha-url="${haUrl}" token="${token.token_id}"`;
-  const cards = token.entities.map((e: EntityAccess) => {
+function buildCardSnippetFromState(entities: SelectedEntity[], useAliases: boolean, tokenId: string, haUrl: string): string {
+  const groupAttrs = `ha-url="${haUrl}" token="${tokenId}"`;
+  const isGroup = entities.length > 1;
+
+  function cardLine(e: SelectedEntity, indent = ""): string {
     const entityAttr = useAliases && e.alias ? `alias="${e.alias}"` : `entity="${e.entity_id}"`;
-    return `  <hrv-card ${entityAttr}></hrv-card>`;
-  });
-  const isGroup = token.entities.length > 1;
-  if (isGroup) return `<hrv-group ${attrs}>\n${cards.join("\n")}\n</hrv-group>`;
-  const entityAttr = useAliases && token.entities[0]?.alias
-    ? `alias="${token.entities[0].alias}"`
-    : `entity="${token.entities[0]?.entity_id ?? ""}"`;
-  return `<hrv-card ${attrs} ${entityAttr}></hrv-card>`;
+    const cl = e.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
+    const companionAttr = cl.length > 0 ? ` companion="${cl.join(", ")}"` : "";
+    return `${indent}<hrv-card ${entityAttr}${companionAttr}></hrv-card>`;
+  }
+
+  if (isGroup) {
+    return `<hrv-group ${groupAttrs}>\n${entities.map(e => cardLine(e, "  ")).join("\n")}\n</hrv-group>`;
+  }
+  const e = entities[0];
+  if (!e) return "";
+  const sEntityAttr = useAliases && e.alias ? `alias="${e.alias}"` : `entity="${e.entity_id}"`;
+  const sCl = e.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
+  const sCompanionAttr = sCl.length > 0 ? ` companion="${sCl.join(", ")}"` : "";
+  return `<hrv-card ${groupAttrs} ${sEntityAttr}${sCompanionAttr}></hrv-card>`;
 }
 
-function buildWordPressSnippet(token: Token, useAliases: boolean, haUrl: string): string {
-  const groupAttrs = `data-ha-url="${haUrl}" data-token="${token.token_id}"`;
-  const cards = token.entities.map((e: EntityAccess) => {
-    const attr = useAliases && e.alias ? `data-alias="${e.alias}"` : `data-entity="${e.entity_id}"`;
-    return `  <div class="hrv-mount" ${attr}></div>`;
-  });
-  const isGroup = token.entities.length > 1;
-  if (isGroup) return `<div class="hrv-group" ${groupAttrs}>\n${cards.join("\n")}\n</div>`;
-  const entityAttr = useAliases && token.entities[0]?.alias
-    ? `data-alias="${token.entities[0].alias}"`
-    : `data-entity="${token.entities[0]?.entity_id ?? ""}"`;
-  return `<div class="hrv-mount" ${groupAttrs} ${entityAttr}></div>`;
+function buildWordPressSnippetFromState(entities: SelectedEntity[], useAliases: boolean, tokenId: string, haUrl: string): string {
+  const groupAttrs = `data-ha-url="${haUrl}" data-token="${tokenId}"`;
+  const isGroup = entities.length > 1;
+
+  function mountLine(e: SelectedEntity, indent = ""): string {
+    const entityAttr = useAliases && e.alias ? `data-alias="${e.alias}"` : `data-entity="${e.entity_id}"`;
+    const cl = e.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
+    const companionAttr = cl.length > 0 ? ` data-companion="${cl.join(", ")}"` : "";
+    return `${indent}<div class="hrv-mount" ${entityAttr}${companionAttr}></div>`;
+  }
+
+  if (isGroup) {
+    return `<div class="hrv-group" ${groupAttrs}>\n${entities.map(e => mountLine(e, "  ")).join("\n")}\n</div>`;
+  }
+  const e = entities[0];
+  if (!e) return "";
+  const entityAttr = useAliases && e.alias ? `data-alias="${e.alias}"` : `data-entity="${e.entity_id}"`;
+  const cl = e.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
+  const companionAttr = cl.length > 0 ? ` data-companion="${cl.join(", ")}"` : "";
+  return `<div class="hrv-mount" ${groupAttrs} ${entityAttr}${companionAttr}></div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -163,9 +181,11 @@ interface EntityAutocompleteProps {
   onChange: (v: string) => void;
   onSelect: (entityId: string) => void;
   disabled?: boolean;
+  filterDomains?: Set<string>;
+  placeholder?: string;
 }
 
-function EntityAutocomplete({ value, onChange, onSelect, disabled }: EntityAutocompleteProps) {
+function EntityAutocomplete({ value, onChange, onSelect, disabled, filterDomains, placeholder }: EntityAutocompleteProps) {
   const [open, setOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(0);
   const [dropdownRect, setDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
@@ -175,9 +195,12 @@ function EntityAutocomplete({ value, onChange, onSelect, disabled }: EntityAutoc
     if (!value.trim()) return [];
     const q = value.toLowerCase();
     return getEntityCache()
-      .filter(e => e.entity_id.toLowerCase().includes(q) || e.friendly_name.toLowerCase().includes(q))
+      .filter(e => {
+        if (filterDomains && !filterDomains.has(e.domain)) return false;
+        return e.entity_id.toLowerCase().includes(q) || e.friendly_name.toLowerCase().includes(q);
+      })
       .slice(0, 8);
-  }, [value]);
+  }, [value, filterDomains]);
 
   useEffect(() => { setHighlighted(0); }, [matches.length]);
 
@@ -215,7 +238,7 @@ function EntityAutocomplete({ value, onChange, onSelect, disabled }: EntityAutoc
           else if (e.key === "Escape") { setOpen(false); }
         }}
         disabled={disabled}
-        placeholder="Search entity ID or friendly name..."
+        placeholder={placeholder ?? "Search entity ID or friendly name..."}
         className="input"
         style={{ width: "100%", boxSizing: "border-box" }}
         aria-label="Search entities"
@@ -254,12 +277,83 @@ function EntityAutocomplete({ value, onChange, onSelect, disabled }: EntityAutoc
 }
 
 // ---------------------------------------------------------------------------
+// CompanionPicker
+// ---------------------------------------------------------------------------
+
+interface CompanionPickerProps {
+  companions: { entity_id: string; alias: string | null }[];
+  excludeIds: string[];
+  onChange: (c: { entity_id: string; alias: string | null }[]) => void;
+}
+
+function CompanionPicker({ companions, excludeIds, onChange }: CompanionPickerProps) {
+  const [input, setInput] = useState("");
+  const [loadingAlias, setLoadingAlias] = useState<string | null>(null);
+  const canAdd = companions.length < MAX_COMPANIONS;
+
+  const addCompanion = async (entityId: string) => {
+    if (companions.some(c => c.entity_id === entityId)) return;
+    if (excludeIds.includes(entityId)) return;
+    if (!canAdd) return;
+    setLoadingAlias(entityId);
+    let alias: string | null = null;
+    try {
+      const result = await api.tokens.generateAlias(entityId);
+      alias = result.alias;
+    } catch { /* alias stays null */ }
+    finally { setLoadingAlias(null); }
+    onChange([...companions, { entity_id: entityId, alias }]);
+  };
+
+  const removeCompanion = (entityId: string) => {
+    onChange(companions.filter(c => c.entity_id !== entityId));
+  };
+
+  return (
+    <div className="col" style={{ gap: 6, paddingLeft: 12, borderLeft: "2px solid var(--border)", marginTop: 2 }}>
+      <div className="muted" style={{ fontSize: 11 }}>
+        Companions ({companions.length}/{MAX_COMPANIONS}) - secondary entities shown alongside this card.
+        Allowed domains: light, switch, lock, cover, binary sensor, input boolean, remote.
+      </div>
+      {canAdd && (
+        <EntityAutocomplete
+          value={input}
+          onChange={setInput}
+          onSelect={id => { addCompanion(id); setInput(""); }}
+          disabled={loadingAlias !== null}
+          filterDomains={COMPANION_ALLOWED_DOMAINS}
+          placeholder="Add companion entity..."
+        />
+      )}
+      {loadingAlias && (
+        <div className="row muted" style={{ gap: 6, fontSize: 11 }}>
+          <Spinner size={12} /> Generating alias for {loadingAlias}...
+        </div>
+      )}
+      {companions.map(c => (
+        <div key={c.entity_id} className="chip" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ flex: 1, fontSize: 12 }}>{c.entity_id}</span>
+          {c.alias && <span className="muted" style={{ fontSize: 10 }}>alias: {c.alias}</span>}
+          <button
+            onClick={() => removeCompanion(c.entity_id)}
+            className="btn btn-sm btn-ghost"
+            style={{ padding: "1px 4px" }}
+            aria-label={`Remove companion ${c.entity_id}`}
+          ><Icon name="close" size={10} /></button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Step 1: Pick entities
 // ---------------------------------------------------------------------------
 
 function Step1({ state, onChange }: { state: WizardState; onChange: (u: Partial<WizardState>) => void }) {
   const [entityInput, setEntityInput] = useState("");
   const [loadingAlias, setLoadingAlias] = useState<string | null>(null);
+  const [expandedCompanions, setExpandedCompanions] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (getEntityCache().length === 0) loadEntityCache();
@@ -284,8 +378,24 @@ function Step1({ state, onChange }: { state: WizardState; onChange: (u: Partial<
   };
 
   const removeEntity = (entityId: string) => {
+    setExpandedCompanions(prev => { const n = new Set(prev); n.delete(entityId); return n; });
     onChange({ entities: state.entities.filter(e => e.entity_id !== entityId) });
   };
+
+  const updateCompanions = (entityId: string, companions: { entity_id: string; alias: string | null }[]) => {
+    onChange({ entities: state.entities.map(e => e.entity_id === entityId ? { ...e, companions } : e) });
+  };
+
+  const toggleExpand = (entityId: string) => {
+    setExpandedCompanions(prev => {
+      const n = new Set(prev);
+      if (n.has(entityId)) n.delete(entityId); else n.add(entityId);
+      return n;
+    });
+  };
+
+  const primaryIds = state.entities.map(e => e.entity_id);
+  const showPicker = !(state.mode === "single" && state.entities.length === 1);
 
   return (
     <div className="col" style={{ gap: 16 }}>
@@ -298,16 +408,20 @@ function Step1({ state, onChange }: { state: WizardState; onChange: (u: Partial<
       </div>
 
       <p className="muted" style={{ fontSize: 13 }}>
-        Enter entity IDs from your Home Assistant instance.
-        {state.mode === "group" ? " Add multiple entities for a group widget." : ""}
+        {state.mode === "single"
+          ? "Choose one entity. Optionally add companion entities shown alongside it."
+          : "Add multiple entities for a group widget. Each card can have companion entities."}
       </p>
 
-      <EntityAutocomplete
-        value={entityInput}
-        onChange={setEntityInput}
-        onSelect={id => { selectEntity(id); setEntityInput(""); }}
-        disabled={loadingAlias !== null}
-      />
+      {showPicker && (
+        <EntityAutocomplete
+          value={entityInput}
+          onChange={setEntityInput}
+          onSelect={id => { selectEntity(id); setEntityInput(""); }}
+          disabled={loadingAlias !== null}
+          placeholder={state.mode === "single" ? "Search entity ID or friendly name..." : "Add entity to group..."}
+        />
+      )}
 
       {loadingAlias && (
         <div className="row muted" style={{ gap: 8, fontSize: 12 }}>
@@ -316,26 +430,50 @@ function Step1({ state, onChange }: { state: WizardState; onChange: (u: Partial<
       )}
 
       {state.entities.length > 0 && (
-        <div className="col" style={{ gap: 6 }}>
-          <div className="muted" style={{ fontSize: 12, fontWeight: 600 }}>
-            Selected ({state.entities.length}):
-          </div>
-          {state.entities.map(e => (
-            <div key={e.entity_id} className="chip" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{e.entity_id}</span>
-              {e.alias && (
-                <span className="muted" style={{ fontSize: 11 }}>alias: {e.alias}</span>
-              )}
-              <button
-                onClick={() => removeEntity(e.entity_id)}
-                className="btn btn-sm btn-ghost"
-                style={{ padding: "1px 4px" }}
-                aria-label={`Remove ${e.entity_id}`}
-              >
-                <Icon name="close" size={12} />
-              </button>
+        <div className="col" style={{ gap: 8 }}>
+          {state.mode === "group" && (
+            <div className="muted" style={{ fontSize: 12, fontWeight: 600 }}>
+              Entities ({state.entities.length}):
             </div>
-          ))}
+          )}
+          {state.entities.map(e => {
+            const isExpanded = state.mode === "single" || expandedCompanions.has(e.entity_id);
+            const companionCount = e.companions.length;
+            return (
+              <div key={e.entity_id} className="col" style={{ gap: 6, border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}>
+                <div className="row" style={{ alignItems: "center", gap: 8 }}>
+                  <span style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{e.entity_id}</span>
+                  {e.alias && <span className="muted" style={{ fontSize: 11 }}>alias: {e.alias}</span>}
+                  {state.mode === "group" && (
+                    <button
+                      className="btn btn-sm btn-ghost"
+                      onClick={() => toggleExpand(e.entity_id)}
+                      style={{ fontSize: 11 }}
+                    >
+                      {isExpanded
+                        ? "Hide companions"
+                        : companionCount > 0
+                          ? `${companionCount} companion${companionCount > 1 ? "s" : ""}`
+                          : "Add companions"}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => removeEntity(e.entity_id)}
+                    className="btn btn-sm btn-ghost"
+                    style={{ padding: "1px 4px" }}
+                    aria-label={`Remove ${e.entity_id}`}
+                  ><Icon name="close" size={12} /></button>
+                </div>
+                {isExpanded && (
+                  <CompanionPicker
+                    companions={e.companions}
+                    excludeIds={primaryIds}
+                    onChange={cs => updateCompanions(e.entity_id, cs)}
+                  />
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -673,12 +811,13 @@ function validateLabelWiz(label: string, otherLabels: string[]): string | null {
   return null;
 }
 
-function Step6({ token, tokenSecret, originMode, originUrl, overrideHost }: {
+function Step6({ token, tokenSecret, originMode, originUrl, overrideHost, selectedEntities }: {
   token: Token;
   tokenSecret: string | null;
   originMode: "specific" | "any";
   originUrl: string;
   overrideHost: string;
+  selectedEntities: SelectedEntity[];
 }) {
   const [useAliases,   setUseAliases]   = useState(false);
   const [tab,          setTab]          = useState<"web" | "wordpress">("web");
@@ -696,8 +835,8 @@ function Step6({ token, tokenSecret, originMode, originUrl, overrideHost }: {
 
   const haUrl = overrideHost || window.location.origin;
   const cardSnippet = tab === "web"
-    ? buildCardSnippet(token, useAliases, haUrl)
-    : buildWordPressSnippet(token, useAliases, haUrl);
+    ? buildCardSnippetFromState(selectedEntities, useAliases, token.token_id, haUrl)
+    : buildWordPressSnippetFromState(selectedEntities, useAliases, token.token_id, haUrl);
   const hostDisplay = originMode === "any" ? "Anywhere" : (originUrl || haUrl);
 
   const saveWidgetName = async (name: string) => {
@@ -793,7 +932,7 @@ function Step6({ token, tokenSecret, originMode, originUrl, overrideHost }: {
               type="checkbox"
               checked={useAliases}
               onChange={e => setUseAliases(e.target.checked)}
-              disabled={token.entities.every((e: EntityAccess) => !e.alias)}
+              disabled={selectedEntities.every(e => !e.alias && e.companions.every(c => !c.alias))}
             />
             Show as aliases
             <span className="muted" style={{ fontSize: 11, cursor: "help" }} title="Aliases hide your real entity IDs from the page source. Both formats work against the same token.">(?)
@@ -876,8 +1015,12 @@ export function Wizard({ onClose }: WizardProps) {
 
     if (step === 5 && !wState.previewTokenId) {
       try {
+        const allEntityIds = [
+          ...wState.entities.map(e => e.entity_id),
+          ...Array.from(new Set(wState.entities.flatMap(e => e.companions.map(c => c.entity_id)))),
+        ];
         const preview = await api.tokens.createPreview({
-          entity_ids: wState.entities.map(e => e.entity_id),
+          entity_ids: allEntityIds,
           capabilities: wState.capability,
         });
         patchState({ previewTokenId: preview.token_id });
@@ -888,12 +1031,27 @@ export function Wizard({ onClose }: WizardProps) {
       setLoading(true);
       setError(null);
       try {
-        const entityPayload = wState.entities.map(e => ({
+        // Primary entities first, then companions (de-duplicated; companions excluded if already primary).
+        const primaryMap = new Map(wState.entities.map(e => [e.entity_id, {
           entity_id: e.entity_id,
           alias: e.alias,
           capabilities: wState.capability,
-          exclude_attributes: [],
-        }));
+          exclude_attributes: [] as string[],
+        }]));
+        const companionMap = new Map<string, { entity_id: string; alias: string | null; capabilities: "read" | "read-write"; exclude_attributes: string[] }>();
+        for (const e of wState.entities) {
+          for (const c of e.companions) {
+            if (!primaryMap.has(c.entity_id) && !companionMap.has(c.entity_id)) {
+              companionMap.set(c.entity_id, {
+                entity_id: c.entity_id,
+                alias: c.alias,
+                capabilities: wState.capability,
+                exclude_attributes: [],
+              });
+            }
+          }
+        }
+        const entityPayload = [...primaryMap.values(), ...companionMap.values()];
         const originHost = wState.originUrls.length > 0 ? splitOriginUrl(wState.originUrls[0]).origin : "";
         const originPaths = wState.originUrls
           .map(u => splitOriginUrl(u).path)
@@ -994,6 +1152,7 @@ export function Wizard({ onClose }: WizardProps) {
               originMode={wState.originMode}
               originUrl={wState.originUrls[0] ?? ""}
               overrideHost={overrideHost}
+              selectedEntities={wState.entities}
             />
           )}
         </div>
