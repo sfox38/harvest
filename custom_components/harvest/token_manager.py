@@ -521,11 +521,12 @@ class TokenManager:
             if origin not in token.origins.allowed:
                 return token, ERR_ORIGIN_DENIED
 
-        # 7. Page path matching (widget sends window.location.pathname in auth message).
-        if token.origins.allow_paths and page_path:
-            normalised = _normalise_page_path(page_path)
-            if normalised not in token.origins.allow_paths:
-                return token, ERR_ORIGIN_DENIED
+            # 7. Page path matching (widget sends window.location.pathname in auth message).
+            # Only enforced when allow_any is False - paths are tied to a specific origin.
+            if token.origins.allow_paths and page_path:
+                normalised = _normalise_page_path(page_path)
+                if normalised not in token.origins.allow_paths:
+                    return token, ERR_ORIGIN_DENIED
 
         # 8. Resolve all entity refs.
         for ref in entity_refs:

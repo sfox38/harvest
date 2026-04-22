@@ -76,30 +76,35 @@ function buildCardSnippet(token: Token, useAliases: boolean, mode: CardMode, haU
   return `<hrv-card ${groupAttrs} ${entityAttr}${companionAttr}></hrv-card>`;
 }
 
-function buildWordPressSnippet(token: Token, useAliases: boolean, mode: CardMode, haUrl: string): string {
+function buildWordPressSnippet(token: Token, useAliases: boolean, mode: CardMode): string {
   const groups = groupEntities(token.entities);
 
-  function mountLine(g: PrimaryWithCompanions, indent = ""): string {
-    const attr = useAliases && g.primary.alias ? `data-alias="${g.primary.alias}"` : `data-entity="${g.primary.entity_id}"`;
+  function shortcodeLine(g: PrimaryWithCompanions, indent = ""): string {
+    const attr = useAliases && g.primary.alias ? `alias="${g.primary.alias}"` : `entity="${g.primary.entity_id}"`;
     const cl = g.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
-    const companionAttr = cl.length > 0 ? ` data-companion="${cl.join(", ")}"` : "";
-    return `${indent}<div class="hrv-mount" ${attr}${companionAttr}></div>`;
+    const companionAttr = cl.length > 0 ? ` companion="${cl.join(",")}"` : "";
+    return `${indent}[harvest ${attr}${companionAttr}]`;
   }
 
   if (mode === "page") {
-    return groups.map(g => mountLine(g)).join("\n");
+    return groups.map(g => {
+      const attr = useAliases && g.primary.alias ? `alias="${g.primary.alias}"` : `entity="${g.primary.entity_id}"`;
+      const cl = g.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
+      const companionAttr = cl.length > 0 ? ` companion="${cl.join(",")}"` : "";
+      return `[harvest token="${token.token_id}" ${attr}${companionAttr}]`;
+    }).join("\n");
   }
 
-  const groupAttrs = `data-ha-url="${haUrl}" data-token="${token.token_id}"`;
   if (mode === "group") {
-    return `<div class="hrv-group" ${groupAttrs}>\n${groups.map(g => mountLine(g, "  ")).join("\n")}\n</div>`;
+    return `[harvest_group token="${token.token_id}"]\n${groups.map(g => shortcodeLine(g, "  ")).join("\n")}\n[/harvest_group]`;
   }
+
   const g = groups[0];
   if (!g) return "";
-  const entityAttr = useAliases && g.primary.alias ? `data-alias="${g.primary.alias}"` : `data-entity="${g.primary.entity_id}"`;
+  const entityAttr = useAliases && g.primary.alias ? `alias="${g.primary.alias}"` : `entity="${g.primary.entity_id}"`;
   const cl = g.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
-  const companionAttr = cl.length > 0 ? ` data-companion="${cl.join(", ")}"` : "";
-  return `<div class="hrv-mount" ${groupAttrs} ${entityAttr}${companionAttr}></div>`;
+  const companionAttr = cl.length > 0 ? ` companion="${cl.join(",")}"` : "";
+  return `[harvest token="${token.token_id}" ${entityAttr}${companionAttr}]`;
 }
 
 function fmtDateLong(iso: string): string {
@@ -156,7 +161,7 @@ function CodeSection({ token, setToken, setError }: { token: Token; setToken: (t
 
   const cardSnippet = tab === "web"
     ? buildCardSnippet(token, useAliases, cardMode, haUrl)
-    : buildWordPressSnippet(token, useAliases, cardMode, haUrl);
+    : buildWordPressSnippet(token, useAliases, cardMode);
 
   return (
     <Card
@@ -180,36 +185,40 @@ function CodeSection({ token, setToken, setError }: { token: Token; setToken: (t
         <button aria-pressed={cardMode === "page"} onClick={() => changeMode("page")}>Page</button>
       </div>
 
-      {/* Step 1 */}
-      <div className="code-block-group">
-        <div className="code-block-label">
-          <span className="step-pill">1</span>
-          <div>
-            <div className="code-block-title">{isPage ? "Page setup" : "Widget script"}</div>
-            <div className="muted" style={{ fontSize: 12 }}>
-              {isPage
-                ? <>Add once to your site's <code>&lt;head&gt;</code>. All widgets inherit these defaults.</>
-                : <>Add once to your site's <code>&lt;head&gt;</code>.</>}
+      {/* Step 1 - script (HTML only; WordPress plugin handles it) */}
+      {tab === "web" && (
+        <div className="code-block-group">
+          <div className="code-block-label">
+            <span className="step-pill">1</span>
+            <div>
+              <div className="code-block-title">{isPage ? "Page setup" : "Widget script"}</div>
+              <div className="muted" style={{ fontSize: 12 }}>
+                {isPage
+                  ? <>Add once to your site's <code>&lt;head&gt;</code>. All widgets inherit these defaults.</>
+                  : <>Add once to your site's <code>&lt;head&gt;</code>.</>}
+              </div>
             </div>
           </div>
+          <CopyablePre text={setupSnippet} label={isPage ? "Copy setup" : "Copy script"} />
         </div>
-        <CopyablePre text={setupSnippet} label={isPage ? "Copy setup" : "Copy script"} />
-      </div>
+      )}
 
-      {/* Step 2 */}
+      {/* Step 2 (or Step 1 for WordPress) */}
       <div className="code-block-group">
         <div className="code-block-label">
-          <span className="step-pill">2</span>
+          <span className="step-pill">{tab === "web" ? "2" : "1"}</span>
           <div>
-            <div className="code-block-title">Widget markup</div>
+            <div className="code-block-title">{tab === "wordpress" ? "Shortcode" : "Widget markup"}</div>
             <div className="muted" style={{ fontSize: 12 }}>
-              {isPage
-                ? "Drop cards anywhere on your page. Group related cards with <hrv-group> if needed."
-                : "Drop wherever this widget should render."}
+              {tab === "wordpress"
+                ? "Paste into any post or page. The HArvest plugin loads the widget script automatically."
+                : isPage
+                  ? "Drop cards anywhere on your page. Group related cards with <hrv-group> if needed."
+                  : "Drop wherever this widget should render."}
             </div>
           </div>
         </div>
-        <CopyablePre text={cardSnippet} label="Copy markup" />
+        <CopyablePre text={cardSnippet} label={tab === "wordpress" ? "Copy shortcode" : "Copy markup"} />
       </div>
 
       {/* Alias toggle */}

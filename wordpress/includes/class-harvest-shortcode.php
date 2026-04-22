@@ -18,6 +18,9 @@ defined( 'ABSPATH' ) || exit;
 
 class Harvest_Shortcode {
 
+    /** Token inherited from a wrapping [harvest_group]. */
+    private static string $group_token = '';
+
     public static function init(): void {
         add_shortcode( 'harvest',       [ self::class, 'render'       ] );
         add_shortcode( 'harvest_group', [ self::class, 'render_group' ] );
@@ -44,7 +47,11 @@ class Harvest_Shortcode {
             'harvest'
         );
 
-        // Validate required: token
+        // Inherit token from wrapping [harvest_group] when not set explicitly.
+        if ( empty( $atts['token'] ) && ! empty( self::$group_token ) ) {
+            $atts['token'] = self::$group_token;
+        }
+
         if ( empty( $atts['token'] ) ) {
             return self::render_error(
                 __( 'HArvest: missing required "token" attribute.', 'harvest' )
@@ -153,11 +160,17 @@ class Harvest_Shortcode {
 
         $attr_string = self::build_attr_string( $data_attrs );
 
-        // Process nested [harvest] shortcodes inside the group.
+        // Set group token so nested [harvest] shortcodes can inherit it.
+        self::$group_token = $atts['token'];
+        $inner = do_shortcode( $content );
+        self::$group_token = '';
+
+        Harvest_Assets::enqueue();
+
         return sprintf(
             '<div class="hrv-group"%s>%s</div>',
             $attr_string,
-            do_shortcode( $content )
+            $inner
         );
     }
 

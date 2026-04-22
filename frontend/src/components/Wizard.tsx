@@ -133,30 +133,34 @@ function buildCardSnippetFromState(
 }
 
 function buildWordPressSnippetFromState(
-  entities: SelectedEntity[], useAliases: boolean, mode: "single" | "group" | "page", tokenId: string, haUrl: string,
+  entities: SelectedEntity[], useAliases: boolean, mode: "single" | "group" | "page", tokenId: string,
 ): string {
-  function mountLine(e: SelectedEntity, indent = ""): string {
-    const entityAttr = useAliases && e.alias ? `data-alias="${e.alias}"` : `data-entity="${e.entity_id}"`;
+  function shortcodeLine(e: SelectedEntity, indent = ""): string {
+    const entityAttr = useAliases && e.alias ? `alias="${e.alias}"` : `entity="${e.entity_id}"`;
     const cl = e.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
-    const companionAttr = cl.length > 0 ? ` data-companion="${cl.join(", ")}"` : "";
-    return `${indent}<div class="hrv-mount" ${entityAttr}${companionAttr}></div>`;
+    const companionAttr = cl.length > 0 ? ` companion="${cl.join(",")}"` : "";
+    return `${indent}[harvest ${entityAttr}${companionAttr}]`;
   }
 
   if (mode === "page") {
-    const mounts = entities.map(e => mountLine(e));
-    return mounts.join("\n");
+    return entities.map(e => {
+      const entityAttr = useAliases && e.alias ? `alias="${e.alias}"` : `entity="${e.entity_id}"`;
+      const cl = e.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
+      const companionAttr = cl.length > 0 ? ` companion="${cl.join(",")}"` : "";
+      return `[harvest token="${tokenId}" ${entityAttr}${companionAttr}]`;
+    }).join("\n");
   }
 
-  const groupAttrs = `data-ha-url="${haUrl}" data-token="${tokenId}"`;
   if (mode === "group") {
-    return `<div class="hrv-group" ${groupAttrs}>\n${entities.map(e => mountLine(e, "  ")).join("\n")}\n</div>`;
+    return `[harvest_group token="${tokenId}"]\n${entities.map(e => shortcodeLine(e, "  ")).join("\n")}\n[/harvest_group]`;
   }
+
   const e = entities[0];
   if (!e) return "";
-  const entityAttr = useAliases && e.alias ? `data-alias="${e.alias}"` : `data-entity="${e.entity_id}"`;
+  const entityAttr = useAliases && e.alias ? `alias="${e.alias}"` : `entity="${e.entity_id}"`;
   const cl = e.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
-  const companionAttr = cl.length > 0 ? ` data-companion="${cl.join(", ")}"` : "";
-  return `<div class="hrv-mount" ${groupAttrs} ${entityAttr}${companionAttr}></div>`;
+  const companionAttr = cl.length > 0 ? ` companion="${cl.join(",")}"` : "";
+  return `[harvest token="${tokenId}" ${entityAttr}${companionAttr}]`;
 }
 
 // ---------------------------------------------------------------------------
@@ -786,7 +790,7 @@ function Step6({ token, tokenSecret, originMode, originUrl, overrideHost, select
     : scriptTag;
   const cardSnippet = tab === "web"
     ? buildCardSnippetFromState(selectedEntities, useAliases, cardMode, token.token_id, haUrl)
-    : buildWordPressSnippetFromState(selectedEntities, useAliases, cardMode, token.token_id, haUrl);
+    : buildWordPressSnippetFromState(selectedEntities, useAliases, cardMode, token.token_id);
   const hostDisplay = originMode === "any" ? "Anywhere" : (originUrl || haUrl);
 
   const saveWidgetName = async (name: string) => {
@@ -848,36 +852,42 @@ function Step6({ token, tokenSecret, originMode, originUrl, overrideHost, select
             Host URL: <span className="mono">{hostDisplay}</span>
           </div>
 
-          {/* Step 1: page setup */}
-          <div className="code-block-group">
-            <div className="code-block-label">
-              <span className="step-pill">1</span>
-              <div>
-                <div className="code-block-title">{isPage ? "Page setup" : "Widget script"}</div>
-                <div className="muted" style={{ fontSize: 12 }}>
-                  {isPage
-                    ? "Add once to your page's <head>. All widgets inherit these defaults."
-                    : "Add once to your page's <head>."}
+          {/* Step 1: page setup (HTML only; WordPress plugin handles it) */}
+          {tab === "web" && (
+            <div className="code-block-group">
+              <div className="code-block-label">
+                <span className="step-pill">1</span>
+                <div>
+                  <div className="code-block-title">{isPage ? "Page setup" : "Widget script"}</div>
+                  <div className="muted" style={{ fontSize: 12 }}>
+                    {isPage
+                      ? "Add once to your page's <head>. All widgets inherit these defaults."
+                      : "Add once to your page's <head>."}
+                  </div>
                 </div>
               </div>
+              <CopyablePre text={pageSetup} label={isPage ? "Copy setup" : "Copy script"} />
             </div>
-            <CopyablePre text={pageSetup} label={isPage ? "Copy setup" : "Copy script"} />
-          </div>
+          )}
 
-          {/* Step 2: card snippet */}
+          {/* Step 2 (or Step 1 for WordPress): card snippet */}
           <div className="code-block-group">
             <div className="code-block-label">
-              <span className="step-pill">2</span>
+              <span className="step-pill">{tab === "web" ? "2" : "1"}</span>
               <div>
-                <div className="code-block-title">Widget markup</div>
-                <div className="muted" style={{ fontSize: 12 }}>Drop wherever the widget should render.</div>
+                <div className="code-block-title">{tab === "wordpress" ? "Shortcode" : "Widget markup"}</div>
+                <div className="muted" style={{ fontSize: 12 }}>
+                  {tab === "wordpress"
+                    ? "Paste into any post or page. The HArvest plugin loads the widget script automatically."
+                    : "Drop wherever the widget should render."}
+                </div>
               </div>
             </div>
             <div className="segmented" role="group" aria-label="Code format" style={{ marginBottom: 8 }}>
               <button aria-pressed={tab === "web"} onClick={() => { setTab("web"); localStorage.setItem("hrv_code_tab", "web"); }}>Web page</button>
               <button aria-pressed={tab === "wordpress"} onClick={() => { setTab("wordpress"); localStorage.setItem("hrv_code_tab", "wordpress"); }}>WordPress</button>
             </div>
-            <CopyablePre text={cardSnippet} label="Copy markup" />
+            <CopyablePre text={cardSnippet} label={tab === "wordpress" ? "Copy shortcode" : "Copy markup"} />
           </div>
 
           {/* Alias toggle */}

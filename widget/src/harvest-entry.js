@@ -23,6 +23,7 @@ import { getOrCreateClient, setStateCacheRef } from "./harvest-client.js";
 import { StateCache }                      from "./state-cache.js";
 import { registerRenderer, lookupRenderer } from "./renderers/index.js";
 import * as Renderers                      from "./renderers/index.js";
+import "./hrv-mount.js";
 
 // Wire StateCache into HarvestClient (avoids a circular import at module
 // evaluation time - the proxy in harvest-client.js resolves it here).
