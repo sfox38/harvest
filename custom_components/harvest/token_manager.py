@@ -67,6 +67,8 @@ class EntityAccess:
                                             # Random base62, not derived from entity_id. entity= takes
                                             # priority over alias= on the client; the server stores both.
     exclude_attributes: list[str] = field(default_factory=list)
+    companion_of: str | None = None         # entity_id of the primary entity this is a companion of.
+                                            # None means this is a primary entity.
 
 
 @dataclass
@@ -131,6 +133,8 @@ class Token:
     status: str                            # "active", "revoked", "expired", "preview"
     revoked_at: datetime | None
     revoke_reason: str | None
+    paused: bool = False
+    embed_mode: str = "single"             # "single", "group", or "page"
 
 
 class TokenManager:
@@ -226,6 +230,7 @@ class TokenManager:
         max_sessions: int | None,
         active_schedule: ActiveSchedule | None,
         allowed_ips: list[str],
+        embed_mode: str = "single",
     ) -> Token:
         """Create, persist, and return a new token.
 
@@ -233,7 +238,7 @@ class TokenManager:
         Raises ValueError if entity count exceeds max_entities_hard_cap.
         Validates allow_paths entries (must start with /, no .., no query string or
         fragment, max 512 chars). Query strings in allow_paths entries are rejected
-        at save time since they would never match after Referer normalisation.
+        at save time since they would never match after page_path normalisation.
         Raises ValueError for invalid path entries.
         """
         soft_limit = self._config.get(
@@ -271,6 +276,7 @@ class TokenManager:
             status="active",
             revoked_at=None,
             revoke_reason=None,
+            embed_mode=embed_mode,
         )
         self._tokens[token.token_id] = token
         await self.save()
@@ -441,7 +447,7 @@ class TokenManager:
         self,
         token_id: str,
         origin: str,
-        referer: str | None,
+        page_path: str | None,
         source_ip: str,
         entity_refs: list[str],             # real entity IDs, aliases, or a mix
         timestamp: int | None,
@@ -463,6 +469,10 @@ class TokenManager:
         then real entity ID lookup (EntityAccess.entity_id == ref). Unknown refs
         return HRV_ENTITY_NOT_IN_TOKEN.
 
+        page_path is sent by the widget from window.location.pathname. Browsers
+        do not send a Referer header on WebSocket upgrades, so the client
+        includes the path explicitly.
+
         Checks in order:
         1. Token exists (HRV_TOKEN_INVALID if not)
         2. Token status is active (HRV_TOKEN_REVOKED or HRV_TOKEN_EXPIRED)
@@ -470,7 +480,7 @@ class TokenManager:
         4. active_schedule permits current time (HRV_TOKEN_INACTIVE)
         5. source_ip in allowed_ips if set (HRV_IP_DENIED)
         6. Origin in allowed list if allow_any is False (HRV_ORIGIN_DENIED)
-        7. Referer matches allow_paths if set and referer present (HRV_ORIGIN_DENIED)
+        7. page_path matches allow_paths if set and page_path present (HRV_ORIGIN_DENIED)
         8. All entity_refs resolve to known entities (HRV_ENTITY_NOT_IN_TOKEN)
         9. All resolved entities compatible (not Tier 3) (HRV_ENTITY_INCOMPATIBLE)
         10. HMAC signature valid if token_secret set (HRV_SIGNATURE_INVALID)
@@ -487,6 +497,10 @@ class TokenManager:
             return token, ERR_TOKEN_REVOKED
         if token.status == "expired":
             return token, ERR_TOKEN_EXPIRED
+
+        # 2b. Paused check.
+        if token.paused:
+            return token, ERR_TOKEN_INACTIVE
 
         # 3. Expiry datetime.
         now = datetime.now(tz=timezone.utc)
@@ -507,9 +521,9 @@ class TokenManager:
             if origin not in token.origins.allowed:
                 return token, ERR_ORIGIN_DENIED
 
-        # 7. Referer path matching (only when allow_paths is set and referer is present).
-        if token.origins.allow_paths and referer:
-            normalised = _normalise_referer_path(referer)
+        # 7. Page path matching (widget sends window.location.pathname in auth message).
+        if token.origins.allow_paths and page_path:
+            normalised = _normalise_page_path(page_path)
             if normalised not in token.origins.allow_paths:
                 return token, ERR_ORIGIN_DENIED
 
@@ -706,6 +720,7 @@ class TokenManager:
                 capabilities=e["capabilities"],
                 alias=e.get("alias"),
                 exclude_attributes=e.get("exclude_attributes", []),
+                companion_of=e.get("companion_of"),
             )
             for e in d.get("entities", [])
         ]
@@ -766,6 +781,8 @@ class TokenManager:
             status=d["status"],
             revoked_at=datetime.fromisoformat(d["revoked_at"]) if d.get("revoked_at") else None,
             revoke_reason=d.get("revoke_reason"),
+            paused=d.get("paused", False),
+            embed_mode=d.get("embed_mode", "single"),
         )
 
 
@@ -773,19 +790,18 @@ class TokenManager:
 # Module-level helpers
 # ------------------------------------------------------------------
 
-def _normalise_referer_path(referer: str) -> str:
-    """Extract and normalise the path component from a Referer header value.
+def _normalise_page_path(page_path: str) -> str:
+    """Normalise a page path sent by the widget (window.location.pathname).
 
-    Strips query string and fragment. Returns just the path portion.
-    Implemented as a discrete function to allow future extension to
-    prefix/wildcard matching without interface changes.
+    Strips any query string or fragment that might have been appended.
+    Returns just the path portion.
 
     Examples:
-        https://example.com/embed/lights?foo=bar  ->  /embed/lights
-        https://example.com/                      ->  /
+        /embed/lights?foo=bar  ->  /embed/lights
+        /                      ->  /
     """
     try:
-        parsed = urlparse(referer)
+        parsed = urlparse(page_path)
         return parsed.path or "/"
     except Exception:
         return "/"

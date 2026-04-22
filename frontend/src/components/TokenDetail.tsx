@@ -32,44 +32,74 @@ const DEFAULT_WIDGET_SCRIPT_URL = "https://cdn.jsdelivr.net/gh/sfox38/harvest@la
 
 type CardMode = "single" | "group" | "page";
 
+interface PrimaryWithCompanions {
+  primary: Token["entities"][0];
+  companions: Token["entities"][0][];
+}
+
+function groupEntities(entities: Token["entities"]): PrimaryWithCompanions[] {
+  const primaries = entities.filter(e => !e.companion_of);
+  const companionMap = new Map<string, Token["entities"][0][]>();
+  for (const e of entities) {
+    if (e.companion_of) {
+      const list = companionMap.get(e.companion_of) ?? [];
+      list.push(e);
+      companionMap.set(e.companion_of, list);
+    }
+  }
+  return primaries.map(p => ({ primary: p, companions: companionMap.get(p.entity_id) ?? [] }));
+}
+
 function buildCardSnippet(token: Token, useAliases: boolean, mode: CardMode, haUrl: string): string {
-  function cardLine(e: Token["entities"][0], indent = ""): string {
-    const attr = useAliases && e.alias ? `alias="${e.alias}"` : `entity="${e.entity_id}"`;
-    return `${indent}<hrv-card ${attr}></hrv-card>`;
+  const groups = groupEntities(token.entities);
+
+  function cardLine(g: PrimaryWithCompanions, indent = ""): string {
+    const attr = useAliases && g.primary.alias ? `alias="${g.primary.alias}"` : `entity="${g.primary.entity_id}"`;
+    const cl = g.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
+    const companionAttr = cl.length > 0 ? ` companion="${cl.join(", ")}"` : "";
+    return `${indent}<hrv-card ${attr}${companionAttr}></hrv-card>`;
   }
 
   if (mode === "page") {
-    return token.entities.map(e => cardLine(e)).join("\n");
+    return groups.map(g => cardLine(g)).join("\n");
   }
 
   const groupAttrs = `ha-url="${haUrl}" token="${token.token_id}"`;
   if (mode === "group") {
-    return `<hrv-group ${groupAttrs}>\n${token.entities.map(e => cardLine(e, "  ")).join("\n")}\n</hrv-group>`;
+    return `<hrv-group ${groupAttrs}>\n${groups.map(g => cardLine(g, "  ")).join("\n")}\n</hrv-group>`;
   }
-  const entityAttr = useAliases && token.entities[0]?.alias
-    ? `alias="${token.entities[0].alias}"`
-    : `entity="${token.entities[0]?.entity_id ?? ""}"`;
-  return `<hrv-card ${groupAttrs} ${entityAttr}></hrv-card>`;
+  const g = groups[0];
+  if (!g) return "";
+  const entityAttr = useAliases && g.primary.alias ? `alias="${g.primary.alias}"` : `entity="${g.primary.entity_id}"`;
+  const cl = g.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
+  const companionAttr = cl.length > 0 ? ` companion="${cl.join(", ")}"` : "";
+  return `<hrv-card ${groupAttrs} ${entityAttr}${companionAttr}></hrv-card>`;
 }
 
 function buildWordPressSnippet(token: Token, useAliases: boolean, mode: CardMode, haUrl: string): string {
-  function mountLine(e: Token["entities"][0], indent = ""): string {
-    const attr = useAliases && e.alias ? `data-alias="${e.alias}"` : `data-entity="${e.entity_id}"`;
-    return `${indent}<div class="hrv-mount" ${attr}></div>`;
+  const groups = groupEntities(token.entities);
+
+  function mountLine(g: PrimaryWithCompanions, indent = ""): string {
+    const attr = useAliases && g.primary.alias ? `data-alias="${g.primary.alias}"` : `data-entity="${g.primary.entity_id}"`;
+    const cl = g.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
+    const companionAttr = cl.length > 0 ? ` data-companion="${cl.join(", ")}"` : "";
+    return `${indent}<div class="hrv-mount" ${attr}${companionAttr}></div>`;
   }
 
   if (mode === "page") {
-    return token.entities.map(e => mountLine(e)).join("\n");
+    return groups.map(g => mountLine(g)).join("\n");
   }
 
   const groupAttrs = `data-ha-url="${haUrl}" data-token="${token.token_id}"`;
   if (mode === "group") {
-    return `<div class="hrv-group" ${groupAttrs}>\n${token.entities.map(e => mountLine(e, "  ")).join("\n")}\n</div>`;
+    return `<div class="hrv-group" ${groupAttrs}>\n${groups.map(g => mountLine(g, "  ")).join("\n")}\n</div>`;
   }
-  const entityAttr = useAliases && token.entities[0]?.alias
-    ? `data-alias="${token.entities[0].alias}"`
-    : `data-entity="${token.entities[0]?.entity_id ?? ""}"`;
-  return `<div class="hrv-mount" ${groupAttrs} ${entityAttr}></div>`;
+  const g = groups[0];
+  if (!g) return "";
+  const entityAttr = useAliases && g.primary.alias ? `data-alias="${g.primary.alias}"` : `data-entity="${g.primary.entity_id}"`;
+  const cl = g.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
+  const companionAttr = cl.length > 0 ? ` data-companion="${cl.join(", ")}"` : "";
+  return `<div class="hrv-mount" ${groupAttrs} ${entityAttr}${companionAttr}></div>`;
 }
 
 function fmtDateLong(iso: string): string {
@@ -93,10 +123,19 @@ function validateLabel(label: string, otherLabels: string[]): string | null {
 // Code section
 // ---------------------------------------------------------------------------
 
-function CodeSection({ token }: { token: Token }) {
+function CodeSection({ token, setToken, setError }: { token: Token; setToken: (t: Token) => void; setError: (e: string | null) => void }) {
   const [useAliases,      setUseAliases]      = useState(() => localStorage.getItem("hrv_use_aliases") === "true");
   const [tab,             setTab]             = useState<"web" | "wordpress">(() => localStorage.getItem("hrv_code_tab") === "wordpress" ? "wordpress" : "web");
-  const [cardMode,        setCardMode]        = useState<CardMode>(() => token.entities.length > 1 ? "group" : "single");
+  const primaryCount = token.entities.filter(e => !e.companion_of).length;
+  const [cardMode,        setCardMode]        = useState<CardMode>(token.embed_mode ?? "single");
+
+  const changeMode = async (mode: CardMode) => {
+    setCardMode(mode);
+    try {
+      const updated = await api.tokens.update(token.token_id, { embed_mode: mode });
+      setToken(updated);
+    } catch (e) { setError(String(e)); }
+  };
   const [overrideHost,    setOverrideHost]    = useState("");
   const [widgetScriptUrl, setWidgetScriptUrl] = useState("");
 
@@ -133,12 +172,12 @@ function CodeSection({ token }: { token: Token }) {
       <div className="segmented" role="group" aria-label="Embed mode" style={{ marginBottom: 12 }}>
         <button
           aria-pressed={cardMode === "single"}
-          onClick={() => setCardMode("single")}
-          disabled={token.entities.length > 1}
-          title={token.entities.length > 1 ? "Single card requires exactly one entity" : undefined}
+          onClick={() => changeMode("single")}
+          disabled={primaryCount > 1}
+          title={primaryCount > 1 ? "Single card requires exactly one primary entity" : undefined}
         >Single card</button>
-        <button aria-pressed={cardMode === "group"} onClick={() => setCardMode("group")}>Group</button>
-        <button aria-pressed={cardMode === "page"} onClick={() => setCardMode("page")}>Page</button>
+        <button aria-pressed={cardMode === "group"} onClick={() => changeMode("group")}>Group</button>
+        <button aria-pressed={cardMode === "page"} onClick={() => changeMode("page")}>Page</button>
       </div>
 
       {/* Step 1 */}
@@ -207,10 +246,18 @@ interface EntitiesEditorProps {
   setError: (e: string) => void;
 }
 
+const MAX_COMPANIONS = 4;
+const COMPANION_ALLOWED_DOMAINS = new Set(["light", "switch", "binary_sensor", "input_boolean", "cover", "remote", "lock"]);
+
 function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError }: EntitiesEditorProps) {
-  const [addInput, setAddInput]     = useState("");
-  const [adding,   setAdding]       = useState(false);
+  const [addInput, setAddInput]         = useState("");
+  const [companionInput, setCompanionInput] = useState("");
+  const [adding,   setAdding]           = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [expandedCompanions, setExpandedCompanions] = useState<Set<string>>(new Set());
+  const [expandedAttrs, setExpandedAttrs] = useState<Set<string>>(new Set());
+  const [attrCache, setAttrCache] = useState<Record<string, string[]>>({});
+  const [attrLoading, setAttrLoading] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (getEntityCache().length === 0) loadEntityCache();
@@ -218,6 +265,7 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
 
   const canEdit = !readonly && !saving;
   const existingIds = token.entities.map(e => e.entity_id);
+  const grouped = groupEntities(token.entities);
 
   const patchEntities = async (updated: Token["entities"]) => {
     setSaving(true);
@@ -249,22 +297,92 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
       entity_id: entityId,
       alias,
       capabilities: defaultCap,
-      exclude_attributes: [],
+      exclude_attributes: [] as string[],
+      companion_of: null,
     }];
     await patchEntities(updated);
     setAdding(false);
     setAddInput("");
   };
 
+  const addCompanion = async (primaryEntityId: string, companionEntityId: string) => {
+    if (!canEdit || existingIds.includes(companionEntityId)) return;
+    setAdding(true);
+    let alias: string | null = null;
+    try {
+      const result = await api.tokens.generateAlias(companionEntityId);
+      alias = result.alias;
+    } catch { /* alias stays null */ }
+
+    const defaultCap = token.entities[0]?.capabilities ?? "read";
+    const updated = [...token.entities, {
+      entity_id: companionEntityId,
+      alias,
+      capabilities: defaultCap,
+      exclude_attributes: [] as string[],
+      companion_of: primaryEntityId,
+    }];
+    await patchEntities(updated);
+    setAdding(false);
+  };
+
   const removeEntity = (entityId: string) => {
     if (!canEdit) return;
-    patchEntities(token.entities.filter(e => e.entity_id !== entityId));
+    patchEntities(token.entities.filter(e => e.entity_id !== entityId && e.companion_of !== entityId));
     setConfirmRemove(null);
   };
 
+  const removeCompanion = (entityId: string) => {
+    if (!canEdit) return;
+    patchEntities(token.entities.filter(e => e.entity_id !== entityId));
+  };
+
+  const toggleCompanionExpand = (entityId: string) => {
+    setCompanionInput("");
+    setExpandedCompanions(prev => {
+      const next = new Set(prev);
+      if (next.has(entityId)) next.delete(entityId); else next.add(entityId);
+      return next;
+    });
+  };
+
+  const toggleAttrExpand = async (entityId: string) => {
+    const isOpen = expandedAttrs.has(entityId);
+    setExpandedAttrs(prev => {
+      const next = new Set(prev);
+      if (isOpen) next.delete(entityId); else next.add(entityId);
+      return next;
+    });
+    if (!isOpen && !attrCache[entityId]) {
+      setAttrLoading(prev => new Set(prev).add(entityId));
+      try {
+        const keys = await api.ha.entityAttributes(entityId);
+        setAttrCache(prev => ({ ...prev, [entityId]: keys }));
+      } catch { /* entity may not exist */ }
+      setAttrLoading(prev => {
+        const next = new Set(prev);
+        next.delete(entityId);
+        return next;
+      });
+    }
+  };
+
+  const toggleExcludeAttr = (entityId: string, attrKey: string) => {
+    if (!canEdit) return;
+    const entity = token.entities.find(e => e.entity_id === entityId);
+    if (!entity) return;
+    const excluded = new Set(entity.exclude_attributes);
+    if (excluded.has(attrKey)) excluded.delete(attrKey); else excluded.add(attrKey);
+    patchEntities(token.entities.map(e =>
+      e.entity_id === entityId ? { ...e, exclude_attributes: [...excluded] } : e
+    ));
+  };
+
+  const primaryCount = grouped.length;
+
   return (
     <Card
-      title={`Entities (${token.entities.length})`}
+      title={`Entities (${primaryCount} primary, ${token.entities.length - primaryCount} companion)`}
       pad={false}
       action={!readonly ? (
         <span className="muted" style={{ fontSize: 11 }}>
@@ -272,43 +390,139 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
         </span>
       ) : undefined}
     >
-      {token.entities.map(e => {
+      {grouped.map(g => {
+        const e = g.primary;
         const isRW = e.capabilities === "read-write";
+        const companionCount = g.companions.length;
+        const isExpanded = expandedCompanions.has(e.entity_id);
         return (
-          <div key={e.entity_id} className="widget-row" style={{ gridTemplateColumns: "32px 1fr auto auto", cursor: "default" }}>
-            <div className="widget-thumb" style={{ width: 32, height: 32 }}>
-              <Icon name="plug" size={16} />
-            </div>
-            <div className="widget-name">
-              <div className="widget-name-top mono" style={{ fontSize: 13 }}>{e.entity_id}</div>
-              {e.alias && (
-                <div className="widget-name-sub">Alias: <span className="mono">{e.alias}</span></div>
+          <div key={e.entity_id}>
+            <div className="widget-row" style={{ gridTemplateColumns: "32px 1fr auto auto auto", cursor: "default" }}>
+              <div className="widget-thumb" style={{ width: 32, height: 32 }}>
+                <Icon name="plug" size={16} />
+              </div>
+              <div className="widget-name">
+                <div className="widget-name-top mono" style={{ fontSize: 13 }}>{e.entity_id}</div>
+                <div className="widget-name-sub">
+                  {e.alias && <>Alias: <span className="mono">{e.alias}</span> - </>}
+                  <button
+                    className="btn-link"
+                    style={{ fontSize: 11 }}
+                    onClick={() => toggleCompanionExpand(e.entity_id)}
+                  >
+                    {companionCount > 0 ? `${companionCount} companion${companionCount > 1 ? "s" : ""}` : "Add companion"}
+                    {" "}<Icon name={isExpanded ? "chevron-up" : "chevron-down"} size={10} />
+                  </button>
+                  {" - "}
+                  <button
+                    className="btn-link"
+                    style={{ fontSize: 11 }}
+                    onClick={() => toggleAttrExpand(e.entity_id)}
+                  >
+                    {e.exclude_attributes.length > 0 ? `${e.exclude_attributes.length} excluded` : "Filter attributes"}
+                    {" "}<Icon name={expandedAttrs.has(e.entity_id) ? "chevron-up" : "chevron-down"} size={10} />
+                  </button>
+                </div>
+              </div>
+              <select
+                value={e.capabilities}
+                onChange={ev => toggleCap(e.entity_id, ev.target.value as "read" | "read-write")}
+                disabled={!canEdit}
+                className="input"
+                style={{
+                  fontSize: 11, fontWeight: 600, padding: "2px 6px",
+                  background: isRW ? "var(--info-weak)" : "var(--ok-weak)",
+                  color: isRW ? "var(--info)" : "var(--ok)",
+                  border: "none", borderRadius: 10,
+                }}
+              >
+                <option value="read">READ</option>
+                <option value="read-write">READ-WRITE</option>
+              </select>
+              {canEdit && (
+                <button
+                  onClick={() => setConfirmRemove(e.entity_id)}
+                  className="btn btn-sm btn-ghost"
+                  style={{ padding: "1px 4px" }}
+                  aria-label={`Remove ${e.entity_id}`}
+                >
+                  <Icon name="close" size={12} />
+                </button>
               )}
             </div>
-            <select
-              value={e.capabilities}
-              onChange={ev => toggleCap(e.entity_id, ev.target.value as "read" | "read-write")}
-              disabled={!canEdit}
-              className="input"
-              style={{
-                fontSize: 11, fontWeight: 600, padding: "2px 6px",
-                background: isRW ? "var(--info-weak)" : "var(--ok-weak)",
-                color: isRW ? "var(--info)" : "var(--ok)",
-                border: "none", borderRadius: 10,
-              }}
-            >
-              <option value="read">READ</option>
-              <option value="read-write">READ-WRITE</option>
-            </select>
-            {canEdit && (
-              <button
-                onClick={() => setConfirmRemove(e.entity_id)}
-                className="btn btn-sm btn-ghost"
-                style={{ padding: "1px 4px" }}
-                aria-label={`Remove ${e.entity_id}`}
-              >
-                <Icon name="close" size={12} />
-              </button>
+            {isExpanded && (
+              <div style={{ paddingLeft: 44, paddingRight: 12, paddingBottom: 8 }}>
+                <div style={{ borderLeft: "2px solid var(--border)", paddingLeft: 12 }}>
+                  <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
+                    Companions ({companionCount}/{MAX_COMPANIONS})
+                  </div>
+                  {g.companions.map(c => (
+                    <div key={c.entity_id} className="chip" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                      <span style={{ flex: 1, fontSize: 12 }} className="mono">{c.entity_id}</span>
+                      {c.alias && <span className="muted" style={{ fontSize: 10 }}>alias: {c.alias}</span>}
+                      {canEdit && (
+                        <button
+                          onClick={() => removeCompanion(c.entity_id)}
+                          className="btn btn-sm btn-ghost"
+                          style={{ padding: "1px 4px" }}
+                          aria-label={`Remove companion ${c.entity_id}`}
+                        ><Icon name="close" size={10} /></button>
+                      )}
+                    </div>
+                  ))}
+                  {canEdit && companionCount < MAX_COMPANIONS && (
+                    <EntityAutocomplete
+                      value={companionInput}
+                      onChange={setCompanionInput}
+                      onSelect={(id) => { addCompanion(e.entity_id, id); setCompanionInput(""); }}
+                      disabled={adding || saving}
+                      excludeIds={existingIds}
+                      filterDomains={COMPANION_ALLOWED_DOMAINS}
+                      placeholder="Add companion entity..."
+                    />
+                  )}
+                </div>
+              </div>
+            )}
+            {expandedAttrs.has(e.entity_id) && (
+              <div style={{ paddingLeft: 44, paddingRight: 12, paddingBottom: 8 }}>
+                <div style={{ borderLeft: "2px solid var(--border)", paddingLeft: 12 }}>
+                  <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
+                    Exclude attributes
+                    {e.exclude_attributes.length > 0 && canEdit && (
+                      <>{" "}<button
+                        className="btn-link"
+                        style={{ fontSize: 11 }}
+                        onClick={() => patchEntities(token.entities.map(en =>
+                          en.entity_id === e.entity_id ? { ...en, exclude_attributes: [] } : en
+                        ))}
+                      >Clear all</button></>
+                    )}
+                  </div>
+                  {attrLoading.has(e.entity_id) ? (
+                    <Spinner size={16} />
+                  ) : attrCache[e.entity_id] ? (
+                    <div className="attr-filter-grid">
+                      {attrCache[e.entity_id].map(attr => {
+                        const excluded = e.exclude_attributes.includes(attr);
+                        return (
+                          <label key={attr} className={`attr-filter-item${excluded ? " excluded" : ""}`}>
+                            <input
+                              type="checkbox"
+                              checked={excluded}
+                              onChange={() => toggleExcludeAttr(e.entity_id, attr)}
+                              disabled={!canEdit}
+                            />
+                            <span className="mono">{attr}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="muted" style={{ fontSize: 12 }}>Entity not found in HA.</div>
+                  )}
+                </div>
+              </div>
             )}
           </div>
         );
@@ -322,7 +536,7 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
             onSelect={addEntity}
             disabled={adding || saving}
             excludeIds={existingIds}
-            placeholder="Add entity..."
+            placeholder="Add primary entity..."
           />
         </div>
       )}
@@ -330,7 +544,7 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
       {confirmRemove && (
         <ConfirmDialog
           title="Remove entity"
-          message={`Remove ${confirmRemove} from this widget? Active sessions using this entity will lose access.`}
+          message={`Remove ${confirmRemove} and its companions from this widget? Active sessions using this entity will lose access.`}
           confirmLabel="Remove"
           confirmDestructive
           onConfirm={() => removeEntity(confirmRemove)}
@@ -962,7 +1176,7 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
         <div className="col" style={{ gap: 18 }}>
 
           {/* Code section */}
-          {!readonly && <CodeSection token={token} />}
+          {!readonly && <CodeSection token={token} setToken={t => setToken({ ...t, created_by_name: token.created_by_name })} setError={setError} />}
 
           {/* Entities */}
           <EntitiesEditor

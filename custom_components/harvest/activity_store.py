@@ -41,6 +41,7 @@ class TokenLifecycleEvent(NamedTuple):
     display_type: str                       # "TOKEN_REVOKED", "TOKEN_DELETED"
     reason: str | None
     timestamp: datetime
+    label: str | None = None
 
 
 class CommandEvent(NamedTuple):
@@ -231,7 +232,8 @@ class ActivityStore:
             clause, p = _build_auth_clause(token_id, since_ts, until_ts, auth_conds)
             union_parts.append(
                 "SELECT 'auth' AS raw_type, token_id, origin, source_ip, "
-                "NULL AS entity_id, NULL AS action, result, error_code, NULL AS session_id, timestamp, referer "
+                "NULL AS entity_id, NULL AS action, result, error_code, "
+                "NULL AS session_id, timestamp, referer, NULL AS label "
                 f"FROM auth_events{clause}"
             )
             params.extend(p)
@@ -240,7 +242,8 @@ class ActivityStore:
             clause, p = _build_command_clause(token_id, since_ts, until_ts)
             union_parts.append(
                 "SELECT 'command' AS raw_type, token_id, NULL AS origin, NULL AS source_ip, "
-                "entity_id, action, NULL AS result, NULL AS error_code, session_id, timestamp, NULL AS referer "
+                "entity_id, action, NULL AS result, NULL AS error_code, "
+                "session_id, timestamp, NULL AS referer, NULL AS label "
                 f"FROM commands{clause}"
             )
             params.extend(p)
@@ -250,7 +253,7 @@ class ActivityStore:
             union_parts.append(
                 "SELECT 'session' AS raw_type, token_id, origin, source_ip, "
                 "NULL AS entity_id, NULL AS action, event_type AS result, "
-                "NULL AS error_code, session_id, timestamp, referer "
+                "NULL AS error_code, session_id, timestamp, referer, NULL AS label "
                 f"FROM session_events{clause}"
             )
             params.extend(p)
@@ -260,7 +263,7 @@ class ActivityStore:
             union_parts.append(
                 "SELECT 'error' AS raw_type, NULL AS token_id, NULL AS origin, NULL AS source_ip, "
                 "NULL AS entity_id, code AS action, message AS result, "
-                "NULL AS error_code, session_id, timestamp, NULL AS referer "
+                "NULL AS error_code, session_id, timestamp, NULL AS referer, NULL AS label "
                 f"FROM errors{clause}"
             )
             params.extend(p)
@@ -271,7 +274,7 @@ class ActivityStore:
             union_parts.append(
                 "SELECT 'lifecycle' AS raw_type, token_id, NULL AS origin, NULL AS source_ip, "
                 "NULL AS entity_id, NULL AS action, display_type AS result, "
-                "reason AS error_code, NULL AS session_id, timestamp, NULL AS referer "
+                "reason AS error_code, NULL AS session_id, timestamp, NULL AS referer, label "
                 f"FROM token_lifecycle{clause}"
             )
             params.extend(p)
@@ -299,7 +302,7 @@ class ActivityStore:
                 "type": _map_display_type(r[0], r[6] or "", r[5] or ""),
                 "timestamp": r[9],
                 "token_id":  r[1] or None,
-                "token_label": None,  # no join available; frontend shows token_id
+                "token_label": r[11] or None,
                 "session_id": r[8] or None,
                 "origin":    r[2] or None,
                 "referer":   r[10] or None,
@@ -562,9 +565,9 @@ class ActivityStore:
             elif event_type == "lifecycle":
                 e5: TokenLifecycleEvent = event  # type: ignore[assignment]
                 await self._db.execute(
-                    "INSERT INTO token_lifecycle (token_id, display_type, reason, timestamp) "
-                    "VALUES (?, ?, ?, ?)",
-                    [e5.token_id, e5.display_type, e5.reason, _ts(e5.timestamp)],
+                    "INSERT INTO token_lifecycle (token_id, display_type, reason, timestamp, label) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    [e5.token_id, e5.display_type, e5.reason, _ts(e5.timestamp), e5.label],
                 )
 
         await self._db.commit()
@@ -623,7 +626,8 @@ class ActivityStore:
                 token_id TEXT NOT NULL,
                 display_type TEXT NOT NULL,
                 reason TEXT,
-                timestamp TEXT NOT NULL
+                timestamp TEXT NOT NULL,
+                label TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_lifecycle_token ON token_lifecycle(token_id);
             CREATE INDEX IF NOT EXISTS idx_lifecycle_timestamp ON token_lifecycle(timestamp);
@@ -635,6 +639,7 @@ class ActivityStore:
         for stmt in (
             "ALTER TABLE auth_events ADD COLUMN referer TEXT",
             "ALTER TABLE session_events ADD COLUMN referer TEXT",
+            "ALTER TABLE token_lifecycle ADD COLUMN label TEXT",
         ):
             try:
                 await self._db.execute(stmt)

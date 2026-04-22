@@ -47,6 +47,7 @@ CONF_DEFAULT_SESSION = "default_session"
 CONF_HA_EVENT_BUS = "ha_event_bus"
 CONF_OVERRIDE_HOST = "override_host"
 CONF_WIDGET_SCRIPT_URL = "widget_script_url"
+CONF_KILL_SWITCH = "kill_switch"
 
 # Default values matching SPEC.md Section 19
 DEFAULTS: dict[str, object] = {
@@ -90,6 +91,7 @@ DEFAULTS: dict[str, object] = {
     # Empty string means use the default CDN URL. Accepts a path (/harvest.min.js)
     # or a full URL (https://example.com/harvest.min.js).
     CONF_WIDGET_SCRIPT_URL: "",
+    CONF_KILL_SWITCH: False,
 }
 
 # Attribute denylist - keys containing these strings are stripped from state_updates.

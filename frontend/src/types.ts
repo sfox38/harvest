@@ -42,6 +42,7 @@ export interface EntityAccess {
   alias: string | null;
   capabilities: "read" | "read-write";
   exclude_attributes: string[];
+  companion_of: string | null;
 }
 
 export type TokenStatus = "active" | "inactive" | "expiring_soon" | "expired" | "revoked";
@@ -65,6 +66,7 @@ export interface Token {
   status: TokenStatus;
   active_sessions: number;
   paused: boolean;
+  embed_mode: "single" | "group" | "page";
 }
 
 // ---------------------------------------------------------------------------

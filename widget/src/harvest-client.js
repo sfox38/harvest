@@ -370,6 +370,7 @@ export class HarvestClient {
       type: "auth",
       token_id: this.#tokenId,
       entity_ids: entityIds,
+      page_path: window.location.pathname,
       msg_id: this.#nextMsgId(),
     };
 

@@ -28,10 +28,16 @@ const BASE = "/api/harvest";
 // ---------------------------------------------------------------------------
 
 let _authToken = "";
+let _lastToken = "";
 let _tokenGetter: (() => string) | null = null;
+let _authBroken = false;
 
 export function setAuthToken(token: string): void {
   _authToken = token;
+  if (token && token !== _lastToken) {
+    _lastToken = token;
+    _authBroken = false;
+  }
 }
 
 // When registered, _tokenGetter is called on every request so the panel
@@ -47,19 +53,20 @@ function _authHeader(): Record<string, string> {
 }
 
 // ---------------------------------------------------------------------------
-// 401 handling - HA panel auth tokens expire; reload the page once to refresh.
-// A sessionStorage flag prevents an infinite reload loop.
+// 401 handling - circuit breaker. On first 401, stop all outbound requests
+// until HA pushes a fresh token via the hass setter (which calls
+// setAuthToken, clearing the flag). This prevents cascading 401s that
+// trigger HA's IP ban.
 // ---------------------------------------------------------------------------
-
-const _RELOAD_FLAG = "hrv_401_reload";
 
 function _check401(res: Response, path: string): void {
   if (res.status !== 401) return;
-  if (!sessionStorage.getItem(_RELOAD_FLAG)) {
-    sessionStorage.setItem(_RELOAD_FLAG, "1");
-    window.location.reload();
-  }
-  throw new Error(`${path}: session expired - please reload`);
+  _authBroken = true;
+  throw new Error(`${path}: auth expired`);
+}
+
+function _guardAuth(path: string): void {
+  if (_authBroken) throw new Error(`${path}: auth expired - waiting for token refresh`);
 }
 
 // ---------------------------------------------------------------------------
@@ -67,17 +74,18 @@ function _check401(res: Response, path: string): void {
 // ---------------------------------------------------------------------------
 
 async function _get<T>(path: string, params?: Record<string, string>): Promise<T> {
+  _guardAuth(path);
   const url = params
     ? `${BASE}${path}?${new URLSearchParams(params)}`
     : `${BASE}${path}`;
   const res = await fetch(url, { headers: _authHeader() });
   _check401(res, path);
   if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
-  sessionStorage.removeItem(_RELOAD_FLAG);
   return res.json() as Promise<T>;
 }
 
 async function _post<T>(path: string, body?: unknown): Promise<T> {
+  _guardAuth(path);
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ..._authHeader() },
@@ -88,11 +96,11 @@ async function _post<T>(path: string, body?: unknown): Promise<T> {
     const reason = await res.text().catch(() => "");
     throw new Error(`POST ${path} failed: ${res.status}${reason ? ` - ${reason}` : ""}`);
   }
-  sessionStorage.removeItem(_RELOAD_FLAG);
   return res.json() as Promise<T>;
 }
 
 async function _patch<T>(path: string, body: unknown): Promise<T> {
+  _guardAuth(path);
   const res = await fetch(`${BASE}${path}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json", ..._authHeader() },
@@ -100,29 +108,28 @@ async function _patch<T>(path: string, body: unknown): Promise<T> {
   });
   _check401(res, path);
   if (!res.ok) throw new Error(`PATCH ${path} failed: ${res.status}`);
-  sessionStorage.removeItem(_RELOAD_FLAG);
   return res.json() as Promise<T>;
 }
 
 async function _getText(path: string, params?: Record<string, string>): Promise<string> {
+  _guardAuth(path);
   const url = params
     ? `${BASE}${path}?${new URLSearchParams(params)}`
     : `${BASE}${path}`;
   const res = await fetch(url, { headers: _authHeader() });
   _check401(res, path);
   if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
-  sessionStorage.removeItem(_RELOAD_FLAG);
   return res.text();
 }
 
 async function _delete(path: string, params?: Record<string, string>): Promise<void> {
+  _guardAuth(path);
   const url = params
     ? `${BASE}${path}?${new URLSearchParams(params)}`
     : `${BASE}${path}`;
   const res = await fetch(url, { method: "DELETE", headers: _authHeader() });
   _check401(res, path);
   if (!res.ok) throw new Error(`DELETE ${path} failed: ${res.status}`);
-  sessionStorage.removeItem(_RELOAD_FLAG);
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +278,13 @@ export const api = {
           domain,
           state: s.state,
         }));
+    },
+
+    entityAttributes: async (entityId: string): Promise<string[]> => {
+      const res = await fetch(`/api/states/${entityId}`, { headers: _authHeader() });
+      if (!res.ok) throw new Error(`GET /api/states/${entityId} failed: ${res.status}`);
+      const state = await res.json() as { attributes: Record<string, unknown> };
+      return Object.keys(state.attributes).filter(k => k !== "friendly_name").sort();
     },
   },
 };

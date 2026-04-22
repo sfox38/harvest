@@ -402,6 +402,35 @@
 
 .btn-ghost:hover { background: var(--bg-2); color: var(--ink); }
 
+.btn-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+}
+.btn-link:hover { text-decoration: underline; }
+
+.attr-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 2px 12px;
+}
+
+.attr-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.attr-filter-item:hover { background: var(--bg); }
+.attr-filter-item.excluded span { text-decoration: line-through; color: var(--ink-4); }
+.attr-filter-item input[type="checkbox"] { margin: 0; flex-shrink: 0; }
+
 .btn-danger {
   background: var(--paper);
   border-color: #e8c8c5;

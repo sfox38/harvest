@@ -993,8 +993,9 @@ export function Wizard({ onClose }: WizardProps) {
           alias: e.alias,
           capabilities: wState.capability,
           exclude_attributes: [] as string[],
+          companion_of: null as string | null,
         }]));
-        const companionMap = new Map<string, { entity_id: string; alias: string | null; capabilities: "read" | "read-write"; exclude_attributes: string[] }>();
+        const companionMap = new Map<string, { entity_id: string; alias: string | null; capabilities: "read" | "read-write"; exclude_attributes: string[]; companion_of: string | null }>();
         for (const e of wState.entities) {
           for (const c of e.companions) {
             if (!primaryMap.has(c.entity_id) && !companionMap.has(c.entity_id)) {
@@ -1003,6 +1004,7 @@ export function Wizard({ onClose }: WizardProps) {
                 alias: c.alias,
                 capabilities: wState.capability,
                 exclude_attributes: [],
+                companion_of: e.entity_id,
               });
             }
           }
@@ -1021,6 +1023,7 @@ export function Wizard({ onClose }: WizardProps) {
           entities: entityPayload as Token["entities"],
           origins,
           expires,
+          embed_mode: wState.mode,
         });
         if (wState.previewTokenId) {
           api.tokens.revoke(wState.previewTokenId).catch(() => {});

@@ -490,11 +490,11 @@ export function EventRow({ ev, onSelectToken }: EventRowProps) {
   let sub: React.ReactNode = null;
   switch (ev.type) {
     case "AUTH_OK":
-      title = "Auth succeeded";
+      title = "Auth OK";
       sub = <>{widgetLink}{ev.origin ? ` - ${ev.origin}` : ""}</>;
       break;
     case "AUTH_FAIL":
-      title = "Auth failed";
+      title = "Auth Fail";
       sub = <>{widgetLink}{ev.origin ? ` from ${ev.origin}` : ""}{ev.code ? ` - ${ev.code}` : ""}</>;
       break;
     case "COMMAND":
@@ -558,7 +558,6 @@ export function EventRow({ ev, onSelectToken }: EventRowProps) {
       {open && (
         <div className="event-details" onClick={e => e.stopPropagation()}>
           <dl className="kv-compact">
-            <dt>Event ID</dt><dd className="mono">{ev.id}</dd>
             <dt>Type</dt><dd className="mono">{ev.type}</dd>
             <dt>Timestamp</dt><dd className="mono">{new Date(ev.timestamp).toLocaleString()}</dd>
             {ev.token_label && <><dt>Widget</dt><dd>{widgetLink}</dd></>}

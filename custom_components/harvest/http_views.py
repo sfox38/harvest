@@ -54,7 +54,7 @@ def register_views(
     hass.http.register_view(HarvestActivityView(activity_store, token_manager))
     hass.http.register_view(HarvestActionsView(action_manager))
     hass.http.register_view(HarvestActionDetailView(action_manager))
-    hass.http.register_view(HarvestConfigView(hass))
+    hass.http.register_view(HarvestConfigView(hass, session_manager))
     hass.http.register_view(HarvestStatsView(sensors, activity_store, session_manager, token_manager))
     # Additional views needed by the wizard flow.
     hass.http.register_view(HarvestAliasView(token_manager))
@@ -158,6 +158,7 @@ def _parse_entities(raw_list: list) -> list[EntityAccess]:
             capabilities=cap,
             alias=e.get("alias") or None,
             exclude_attributes=list(e.get("exclude_attributes", [])),
+            companion_of=e.get("companion_of") or None,
         ))
     return entities
 
@@ -297,6 +298,7 @@ class HarvestTokensView(HomeAssistantView):
                 max_sessions=body.get("max_sessions"),
                 active_schedule=schedule,
                 allowed_ips=list(body.get("allowed_ips", [])),
+                embed_mode=str(body.get("embed_mode", "single")),
             )
         except ValueError as exc:
             raise web.HTTPBadRequest(reason=str(exc))
@@ -306,6 +308,7 @@ class HarvestTokensView(HomeAssistantView):
             display_type="TOKEN_CREATED",
             reason=None,
             timestamp=datetime.now(timezone.utc),
+            label=token.label,
         ))
         return self.json(_token_to_dict(token), status_code=201)
 
@@ -380,11 +383,25 @@ class HarvestTokenDetailView(HomeAssistantView):
             updates["allowed_ips"] = list(body["allowed_ips"])
         if "active_schedule" in body:
             updates["active_schedule"] = _parse_schedule(body["active_schedule"])
+        if "paused" in body:
+            if not isinstance(body["paused"], bool):
+                raise web.HTTPBadRequest(reason="paused must be a boolean.")
+            updates["paused"] = body["paused"]
+        if "embed_mode" in body:
+            if body["embed_mode"] not in ("single", "group", "page"):
+                raise web.HTTPBadRequest(reason="embed_mode must be single, group, or page.")
+            updates["embed_mode"] = body["embed_mode"]
 
         try:
             token = await self._token_manager.update(token_id, updates)
         except (ValueError, KeyError) as exc:
             raise web.HTTPBadRequest(reason=str(exc))
+
+        if token.paused and updates.get("paused"):
+            ws_list = self._session_manager.terminate_all_for_token(token_id)
+            for ws in ws_list:
+                if not ws.closed:
+                    asyncio.create_task(ws.close())
 
         return self.json(_token_to_dict(token))
 
@@ -415,6 +432,7 @@ class HarvestTokenDetailView(HomeAssistantView):
                     display_type="TOKEN_REVOKED",
                     reason=reason,
                     timestamp=datetime.now(timezone.utc),
+                    label=token.label,
                 ))
                 self._event_bus.token_revoked(token_id, token.label, reason)
             except KeyError:
@@ -423,11 +441,13 @@ class HarvestTokenDetailView(HomeAssistantView):
 
         # Permanent delete - record before deleting so the token_id is still known.
         try:
+            del_token = self._token_manager.get(token_id)
             self._activity_store.record_token_lifecycle(TokenLifecycleEvent(
                 token_id=token_id,
                 display_type="TOKEN_DELETED",
                 reason=None,
                 timestamp=datetime.now(timezone.utc),
+                label=del_token.label if del_token else None,
             ))
             await self._token_manager.delete(token_id)
         except KeyError:
@@ -544,9 +564,10 @@ class HarvestActivityView(HomeAssistantView):
         )
 
         # Enrich events with token labels (friendly names).
+        # Lifecycle events store label at write time; other events look it up.
         label_map = {t.token_id: t.label for t in self._token_manager.get_all()} if self._token_manager else {}
         for ev in events:
-            if ev.get("token_id"):
+            if ev.get("token_id") and not ev.get("token_label"):
                 ev["token_label"] = label_map.get(ev["token_id"])
 
         return self.json({"events": events, "total": total, "limit": limit, "offset": offset})
@@ -699,8 +720,9 @@ class HarvestConfigView(HomeAssistantView):
     name = "api:harvest:config"
     requires_auth = True
 
-    def __init__(self, hass: HomeAssistant) -> None:
+    def __init__(self, hass: HomeAssistant, session_manager: SessionManager) -> None:
         self._hass = hass
+        self._session_manager = session_manager
 
     async def get(self, request: web.Request) -> web.Response:
         from .const import DOMAIN, DEFAULTS
@@ -771,6 +793,12 @@ class HarvestConfigView(HomeAssistantView):
         current = _deep_merge(dict(DEFAULTS), _deep_merge(dict(entry.data), dict(entry.options)))
         updated = _deep_merge(current, filtered)
         self._hass.config_entries.async_update_entry(entry, options=updated)
+
+        if filtered.get("kill_switch"):
+            for session in self._session_manager.get_all():
+                if not session.ws.closed:
+                    asyncio.create_task(session.ws.close())
+
         return self.json(updated)
 
 

@@ -21,15 +21,18 @@ from homeassistant.helpers.event import async_track_state_change_event
 from .activity_store import ActivityStore, AuthEvent, CommandEvent, ErrorEvent, SessionEvent
 from .const import (
     CONF_AUTH_TIMEOUT,
+    CONF_KILL_SWITCH,
     CONF_KEEPALIVE_INTERVAL,
     CONF_MAX_INBOUND_BYTES,
     DEFAULTS,
+    DOMAIN,
     ERR_ENTITY_NOT_IN_TOKEN,
     ERR_ORIGIN_DENIED,
     ERR_PERMISSION_DENIED,
     ERR_RATE_LIMITED,
     ERR_SERVER_ERROR,
     ERR_SESSION_LIMIT_REACHED,
+    ERR_TOKEN_INACTIVE,
     WS_PATH,
 )
 from .entity_compatibility import validate_action
@@ -181,6 +184,12 @@ class HarvestWsView(HomeAssistantView):
         source_ip = self._get_source_ip(request)
         auth_timeout = self._config.get(CONF_AUTH_TIMEOUT, DEFAULTS[CONF_AUTH_TIMEOUT])
 
+        # --- Step 0: Kill switch ---
+        if self._is_kill_switch_active():
+            await ws.send_json({"type": "auth_failed", "code": ERR_TOKEN_INACTIVE, "msg_id": None})
+            await ws.close()
+            return
+
         # --- Step 1: Wait for auth message ---
         try:
             raw = await asyncio.wait_for(ws.receive(), timeout=auth_timeout)
@@ -210,7 +219,7 @@ class HarvestWsView(HomeAssistantView):
             return
         entity_refs: list[str] = raw_entity_refs
         origin: str = request.headers.get("Origin", "")
-        referer: str | None = request.headers.get("Referer")
+        page_path: str | None = msg.get("page_path")
         msg_id = msg.get("msg_id")
 
         # Per-token auth rate limit check (brute-force protection).
@@ -224,7 +233,7 @@ class HarvestWsView(HomeAssistantView):
         token, error_code = self._token_manager.validate_auth(
             token_id=token_id,
             origin=origin,
-            referer=referer,
+            page_path=page_path,
             source_ip=source_ip,
             entity_refs=entity_refs,
             timestamp=msg.get("timestamp"),
@@ -242,7 +251,7 @@ class HarvestWsView(HomeAssistantView):
                 result="failed",
                 error_code=error_code,
                 timestamp=datetime.now(tz=timezone.utc),
-                referer=referer,
+                referer=page_path,
             ))
             self._event_bus.auth_failure(token_id or None, origin, error_code)
             if error_code == ERR_ORIGIN_DENIED:
@@ -276,7 +285,7 @@ class HarvestWsView(HomeAssistantView):
                 session_id=session_id,
                 token=token,
                 origin=origin,
-                referer=referer,
+                referer=page_path,
                 source_ip=source_ip,
                 ws=ws,
                 entity_ids=real_entity_ids,
@@ -310,7 +319,7 @@ class HarvestWsView(HomeAssistantView):
             result="ok",
             error_code=None,
             timestamp=datetime.now(tz=timezone.utc),
-            referer=referer,
+            referer=page_path,
         ))
         self._event_bus.session_connected(session.session_id, token.token_id, origin)
         self._activity_store.record_session(SessionEvent(
@@ -320,7 +329,7 @@ class HarvestWsView(HomeAssistantView):
             source_ip=source_ip,
             event_type="connected",
             timestamp=datetime.now(tz=timezone.utc),
-            referer=referer,
+            referer=page_path,
         ))
         if self._sensors is not None:
             self._sensors.push_token_update(token.token_id)
@@ -365,7 +374,7 @@ class HarvestWsView(HomeAssistantView):
                 source_ip=source_ip,
                 event_type="disconnected",
                 timestamp=datetime.now(tz=timezone.utc),
-                referer=referer,
+                referer=page_path,
             ))
             if self._sensors is not None:
                 self._sensors.push_token_update(token.token_id)
@@ -995,6 +1004,15 @@ class HarvestWsView(HomeAssistantView):
             if ea.alias == ref and ea.entity_id in session.subscribed_entity_ids:
                 return ea.entity_id
         return None
+
+    def _is_kill_switch_active(self) -> bool:
+        """Read kill_switch from the live config entry (not the init-time snapshot)."""
+        entries = self._hass.config_entries.async_entries(DOMAIN)
+        if not entries:
+            return False
+        entry = entries[0]
+        merged = {**entry.data, **entry.options}
+        return bool(merged.get(CONF_KILL_SWITCH, False))
 
     def _get_source_ip(self, request: Request) -> str:
         """Extract the real client IP.
