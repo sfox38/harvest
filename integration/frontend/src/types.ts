@@ -64,6 +64,7 @@ export interface Token {
   allowed_ips: string[];
   status: TokenStatus;
   active_sessions: number;
+  paused: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +168,7 @@ export interface IntegrationConfig {
   max_auth_attempts_per_ip_per_minute: number;
   override_host: string;
   widget_script_url: string;
+  kill_switch: boolean;
   default_session: {
     lifetime_minutes: number;
     max_lifetime_minutes: number;

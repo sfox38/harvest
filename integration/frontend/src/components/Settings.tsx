@@ -277,9 +277,10 @@ function ThemeToggle({ theme, onThemeChange }: ThemeToggleProps) {
 interface SettingsProps {
   theme: AppTheme;
   onThemeChange: (t: AppTheme) => void;
+  onKillSwitchChange?: (v: boolean) => void;
 }
 
-export function Settings({ theme, onThemeChange }: SettingsProps) {
+export function Settings({ theme, onThemeChange, onKillSwitchChange }: SettingsProps) {
   const [config,  setConfig]  = useState<IntegrationConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
@@ -368,6 +369,16 @@ export function Settings({ theme, onThemeChange }: SettingsProps) {
       <Card
         title={<span className="row" style={{ gap: 8 }}><Icon name="plug" size={14} /> Sessions</span>}
       >
+        <ToggleField
+          label="Kill switch"
+          value={config.kill_switch ?? false}
+          hint="Immediately disconnect ALL sessions and block new connections. Use in emergencies."
+          onChange={async (v) => {
+            await patch({ kill_switch: v });
+            onKillSwitchChange?.(v);
+          }}
+        />
+        <div style={{ height: 1, background: "var(--divider)", margin: "8px 0 12px" }} />
         <dl>
           <NumberField label="Default session lifetime" value={config.default_session.lifetime_minutes} suffix="minutes" min={1}
             onChange={patchDefaultSession("lifetime_minutes")} />

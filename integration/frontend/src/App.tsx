@@ -8,6 +8,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import type { Screen } from "./types";
+import { api }         from "./api";
 import { Dashboard }   from "./components/Dashboard";
 import { TokenList }   from "./components/TokenList";
 import { ActivityLog } from "./components/ActivityLog";
@@ -64,11 +65,18 @@ export function App() {
   const [activityTypeFilter, setActivityTypeFilter] = useState<string | undefined>(undefined);
   // App-level theme: "auto" defers to prefers-color-scheme CSS media query.
   const [theme, setTheme] = useState<AppTheme>(readStoredTheme);
+  // Kill switch: when active, all sessions are blocked.
+  const [killSwitch, setKillSwitch] = useState(false);
 
   // Persist theme choice and apply data-theme attribute.
   useEffect(() => {
     localStorage.setItem("hrv_theme", theme);
   }, [theme]);
+
+  // Fetch kill switch state on mount.
+  useEffect(() => {
+    api.config.get().then(c => setKillSwitch(c.kill_switch ?? false)).catch(() => {});
+  }, []);
 
   const openWizard = useCallback(() => setWizardOpen(true), []);
 
@@ -111,6 +119,11 @@ export function App() {
             <span className="brand-name">HArvest</span>
           </div>
           <div className="appbar-actions">
+            {killSwitch && (
+              <span className="kill-switch-indicator" title="Kill switch is active - all sessions blocked">
+                <Icon name="power" size={13} /> Service off
+              </span>
+            )}
             <button className="btn btn-primary btn-sm" onClick={openWizard}>
               <Icon name="plus" size={14} />
               <span>New widget</span>
@@ -181,7 +194,7 @@ export function App() {
             />
           )}
           {screen === "settings" && (
-            <Settings theme={theme} onThemeChange={setTheme} />
+            <Settings theme={theme} onThemeChange={setTheme} onKillSwitchChange={setKillSwitch} />
           )}
         </div>
       </main>

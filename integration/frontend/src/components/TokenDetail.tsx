@@ -8,9 +8,10 @@
 import { useState, useEffect, useCallback } from "react";
 import type { Token, Session, ActivityPage } from "../types";
 import { api } from "../api";
-import { StatusBadge, CopyablePre, ConfirmDialog, Spinner, ErrorBanner, Card, EventRow, fmtRel } from "./Shared";
+import { StatusBadge, CopyablePre, ConfirmDialog, Spinner, ErrorBanner, Card, EventRow, fmtRel, EntityAutocomplete } from "./Shared";
 import { Icon } from "./Icon";
 import { loadKnownOrigins, addKnownOrigin, removeKnownOrigin, validateOriginUrl, displayOriginLabel } from "./originMemory";
+import { loadEntityCache, getEntityCache } from "../entityCache";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -29,33 +30,42 @@ interface TokenDetailProps {
 
 const DEFAULT_WIDGET_SCRIPT_URL = "https://cdn.jsdelivr.net/gh/sfox38/harvest@latest/widget/dist/harvest.min.js";
 
-function buildWidgetScript(customUrl: string): string {
-  const url = customUrl.trim() || DEFAULT_WIDGET_SCRIPT_URL;
-  return `<script src="${url}"></script>`;
-}
+type CardMode = "single" | "group" | "page";
 
-function buildCardSnippet(token: Token, useAliases: boolean, haUrl: string): string {
-  const attrs = `ha-url="${haUrl}" token="${token.token_id}"`;
-  const isGroup = token.entities.length > 1;
-  const cards = token.entities.map(e => {
+function buildCardSnippet(token: Token, useAliases: boolean, mode: CardMode, haUrl: string): string {
+  function cardLine(e: Token["entities"][0], indent = ""): string {
     const attr = useAliases && e.alias ? `alias="${e.alias}"` : `entity="${e.entity_id}"`;
-    return `  <hrv-card ${attr}></hrv-card>`;
-  });
-  if (isGroup) return `<hrv-group ${attrs}>\n${cards.join("\n")}\n</hrv-group>`;
+    return `${indent}<hrv-card ${attr}></hrv-card>`;
+  }
+
+  if (mode === "page") {
+    return token.entities.map(e => cardLine(e)).join("\n");
+  }
+
+  const groupAttrs = `ha-url="${haUrl}" token="${token.token_id}"`;
+  if (mode === "group") {
+    return `<hrv-group ${groupAttrs}>\n${token.entities.map(e => cardLine(e, "  ")).join("\n")}\n</hrv-group>`;
+  }
   const entityAttr = useAliases && token.entities[0]?.alias
     ? `alias="${token.entities[0].alias}"`
     : `entity="${token.entities[0]?.entity_id ?? ""}"`;
-  return `<hrv-card ${attrs} ${entityAttr}></hrv-card>`;
+  return `<hrv-card ${groupAttrs} ${entityAttr}></hrv-card>`;
 }
 
-function buildWordPressSnippet(token: Token, useAliases: boolean, haUrl: string): string {
-  const groupAttrs = `data-ha-url="${haUrl}" data-token="${token.token_id}"`;
-  const cards = token.entities.map(e => {
+function buildWordPressSnippet(token: Token, useAliases: boolean, mode: CardMode, haUrl: string): string {
+  function mountLine(e: Token["entities"][0], indent = ""): string {
     const attr = useAliases && e.alias ? `data-alias="${e.alias}"` : `data-entity="${e.entity_id}"`;
-    return `  <div class="hrv-mount" ${attr}></div>`;
-  });
-  const isGroup = token.entities.length > 1;
-  if (isGroup) return `<div class="hrv-group" ${groupAttrs}>\n${cards.join("\n")}\n</div>`;
+    return `${indent}<div class="hrv-mount" ${attr}></div>`;
+  }
+
+  if (mode === "page") {
+    return token.entities.map(e => mountLine(e)).join("\n");
+  }
+
+  const groupAttrs = `data-ha-url="${haUrl}" data-token="${token.token_id}"`;
+  if (mode === "group") {
+    return `<div class="hrv-group" ${groupAttrs}>\n${token.entities.map(e => mountLine(e, "  ")).join("\n")}\n</div>`;
+  }
   const entityAttr = useAliases && token.entities[0]?.alias
     ? `data-alias="${token.entities[0].alias}"`
     : `data-entity="${token.entities[0]?.entity_id ?? ""}"`;
@@ -85,7 +95,8 @@ function validateLabel(label: string, otherLabels: string[]): string | null {
 
 function CodeSection({ token }: { token: Token }) {
   const [useAliases,      setUseAliases]      = useState(() => localStorage.getItem("hrv_use_aliases") === "true");
-  const [tab,             setTab]             = useState<"web" | "wordpress">("web");
+  const [tab,             setTab]             = useState<"web" | "wordpress">(() => localStorage.getItem("hrv_code_tab") === "wordpress" ? "wordpress" : "web");
+  const [cardMode,        setCardMode]        = useState<CardMode>(() => token.entities.length > 1 ? "group" : "single");
   const [overrideHost,    setOverrideHost]    = useState("");
   const [widgetScriptUrl, setWidgetScriptUrl] = useState("");
 
@@ -97,33 +108,53 @@ function CodeSection({ token }: { token: Token }) {
   }, []);
 
   const haUrl = overrideHost || window.location.origin;
+  const isPage = cardMode === "page";
+  const scriptUrl = widgetScriptUrl.trim() || DEFAULT_WIDGET_SCRIPT_URL;
+  const scriptTag = `<script src="${scriptUrl}"></script>`;
+  const setupSnippet = isPage
+    ? `${scriptTag}\n<script>HArvest.config({ haUrl: "${haUrl}", token: "${token.token_id}" });</script>`
+    : scriptTag;
 
   const cardSnippet = tab === "web"
-    ? buildCardSnippet(token, useAliases, haUrl)
-    : buildWordPressSnippet(token, useAliases, haUrl);
+    ? buildCardSnippet(token, useAliases, cardMode, haUrl)
+    : buildWordPressSnippet(token, useAliases, cardMode, haUrl);
 
   return (
     <Card
       title="Embed code"
       action={
         <div className="segmented" role="group" aria-label="Code format">
-          <button aria-pressed={tab === "web"} onClick={() => setTab("web")}>HTML</button>
-          <button aria-pressed={tab === "wordpress"} onClick={() => setTab("wordpress")}>WordPress</button>
+          <button aria-pressed={tab === "web"} onClick={() => { setTab("web"); localStorage.setItem("hrv_code_tab", "web"); }}>HTML</button>
+          <button aria-pressed={tab === "wordpress"} onClick={() => { setTab("wordpress"); localStorage.setItem("hrv_code_tab", "wordpress"); }}>WordPress</button>
         </div>
       }
     >
+      {/* Mode selector */}
+      <div className="segmented" role="group" aria-label="Embed mode" style={{ marginBottom: 12 }}>
+        <button
+          aria-pressed={cardMode === "single"}
+          onClick={() => setCardMode("single")}
+          disabled={token.entities.length > 1}
+          title={token.entities.length > 1 ? "Single card requires exactly one entity" : undefined}
+        >Single card</button>
+        <button aria-pressed={cardMode === "group"} onClick={() => setCardMode("group")}>Group</button>
+        <button aria-pressed={cardMode === "page"} onClick={() => setCardMode("page")}>Page</button>
+      </div>
+
       {/* Step 1 */}
       <div className="code-block-group">
         <div className="code-block-label">
           <span className="step-pill">1</span>
           <div>
-            <div className="code-block-title">Page-level script</div>
+            <div className="code-block-title">{isPage ? "Page setup" : "Widget script"}</div>
             <div className="muted" style={{ fontSize: 12 }}>
-              Add once to your site's <code>&lt;head&gt;</code>. Shared by all HArvest widgets on the page.
+              {isPage
+                ? <>Add once to your site's <code>&lt;head&gt;</code>. All widgets inherit these defaults.</>
+                : <>Add once to your site's <code>&lt;head&gt;</code>.</>}
             </div>
           </div>
         </div>
-        <CopyablePre text={buildWidgetScript(widgetScriptUrl)} label="Copy script" />
+        <CopyablePre text={setupSnippet} label={isPage ? "Copy setup" : "Copy script"} />
       </div>
 
       {/* Step 2 */}
@@ -133,7 +164,9 @@ function CodeSection({ token }: { token: Token }) {
           <div>
             <div className="code-block-title">Widget markup</div>
             <div className="muted" style={{ fontSize: 12 }}>
-              Drop wherever this widget should render. Repeat for more widgets.
+              {isPage
+                ? "Drop cards anywhere on your page. Group related cards with <hrv-group> if needed."
+                : "Drop wherever this widget should render."}
             </div>
           </div>
         </div>
@@ -157,6 +190,153 @@ function CodeSection({ token }: { token: Token }) {
           (?)
         </span>
       </label>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Entities editor
+// ---------------------------------------------------------------------------
+
+interface EntitiesEditorProps {
+  token: Token;
+  readonly: boolean;
+  saving: boolean;
+  setSaving: (v: boolean) => void;
+  setToken: (t: Token) => void;
+  setError: (e: string) => void;
+}
+
+function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError }: EntitiesEditorProps) {
+  const [addInput, setAddInput]     = useState("");
+  const [adding,   setAdding]       = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (getEntityCache().length === 0) loadEntityCache();
+  }, []);
+
+  const canEdit = !readonly && !saving;
+  const existingIds = token.entities.map(e => e.entity_id);
+
+  const patchEntities = async (updated: Token["entities"]) => {
+    setSaving(true);
+    try {
+      const t = await api.tokens.update(token.token_id, { entities: updated });
+      setToken(t);
+    } catch (err) { setError(String(err)); }
+    finally { setSaving(false); }
+  };
+
+  const toggleCap = (entityId: string, newCap: "read" | "read-write") => {
+    if (!canEdit) return;
+    patchEntities(token.entities.map(en =>
+      en.entity_id === entityId ? { ...en, capabilities: newCap } : en
+    ));
+  };
+
+  const addEntity = async (entityId: string) => {
+    if (!canEdit || existingIds.includes(entityId)) return;
+    setAdding(true);
+    let alias: string | null = null;
+    try {
+      const result = await api.tokens.generateAlias(entityId);
+      alias = result.alias;
+    } catch { /* alias stays null */ }
+
+    const defaultCap = token.entities[0]?.capabilities ?? "read";
+    const updated = [...token.entities, {
+      entity_id: entityId,
+      alias,
+      capabilities: defaultCap,
+      exclude_attributes: [],
+    }];
+    await patchEntities(updated);
+    setAdding(false);
+    setAddInput("");
+  };
+
+  const removeEntity = (entityId: string) => {
+    if (!canEdit) return;
+    patchEntities(token.entities.filter(e => e.entity_id !== entityId));
+    setConfirmRemove(null);
+  };
+
+  return (
+    <Card
+      title={`Entities (${token.entities.length})`}
+      pad={false}
+      action={!readonly ? (
+        <span className="muted" style={{ fontSize: 11 }}>
+          {adding ? "Adding..." : ""}
+        </span>
+      ) : undefined}
+    >
+      {token.entities.map(e => {
+        const isRW = e.capabilities === "read-write";
+        return (
+          <div key={e.entity_id} className="widget-row" style={{ gridTemplateColumns: "32px 1fr auto auto", cursor: "default" }}>
+            <div className="widget-thumb" style={{ width: 32, height: 32 }}>
+              <Icon name="plug" size={16} />
+            </div>
+            <div className="widget-name">
+              <div className="widget-name-top mono" style={{ fontSize: 13 }}>{e.entity_id}</div>
+              {e.alias && (
+                <div className="widget-name-sub">Alias: <span className="mono">{e.alias}</span></div>
+              )}
+            </div>
+            <select
+              value={e.capabilities}
+              onChange={ev => toggleCap(e.entity_id, ev.target.value as "read" | "read-write")}
+              disabled={!canEdit}
+              className="input"
+              style={{
+                fontSize: 11, fontWeight: 600, padding: "2px 6px",
+                background: isRW ? "var(--info-weak)" : "var(--ok-weak)",
+                color: isRW ? "var(--info)" : "var(--ok)",
+                border: "none", borderRadius: 10,
+              }}
+            >
+              <option value="read">READ</option>
+              <option value="read-write">READ-WRITE</option>
+            </select>
+            {canEdit && (
+              <button
+                onClick={() => setConfirmRemove(e.entity_id)}
+                className="btn btn-sm btn-ghost"
+                style={{ padding: "1px 4px" }}
+                aria-label={`Remove ${e.entity_id}`}
+              >
+                <Icon name="close" size={12} />
+              </button>
+            )}
+          </div>
+        );
+      })}
+
+      {!readonly && (
+        <div style={{ padding: "8px 12px" }}>
+          <EntityAutocomplete
+            value={addInput}
+            onChange={setAddInput}
+            onSelect={addEntity}
+            disabled={adding || saving}
+            excludeIds={existingIds}
+            placeholder="Add entity..."
+          />
+        </div>
+      )}
+
+      {confirmRemove && (
+        <ConfirmDialog
+          title="Remove entity"
+          message={`Remove ${confirmRemove} from this widget? Active sessions using this entity will lose access.`}
+          confirmLabel="Remove"
+          confirmDestructive
+          onConfirm={() => removeEntity(confirmRemove)}
+          onCancel={() => setConfirmRemove(null)}
+        />
+      )}
     </Card>
   );
 }
@@ -218,8 +398,8 @@ function SessionsPanel({ tokenId }: { tokenId: string }) {
               tabIndex={0}
               onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpanded(expanded === s.session_id ? null : s.session_id); } }}
             >
-              <div className="session-row-top">
-                <code className="mono" style={{ fontSize: 11, flex: 1 }}>
+              <div className="session-row-top" style={{ gridTemplateColumns: "1fr auto 18px" }}>
+                <code className="mono" style={{ fontSize: 11 }}>
                   {s.session_id.slice(0, 20)}...
                 </code>
                 <span className="muted" style={{ fontSize: 12 }}>
@@ -602,6 +782,7 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
   const [saving,        setSaving]        = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmPause,  setConfirmPause]  = useState(false);
 
   const load = useCallback(() => {
     api.tokens.get(tokenId)
@@ -680,6 +861,15 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
     } catch (e) { setError(String(e)); }
   };
 
+  const doPause = async () => {
+    if (!token) return;
+    try {
+      const updated = await api.tokens.update(token.token_id, { paused: !token.paused } as Partial<Token>);
+      setToken({ ...updated, created_by_name: token.created_by_name });
+      setConfirmPause(false);
+    } catch (e) { setError(String(e)); }
+  };
+
   if (loading) {
     return (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 64 }}>
@@ -719,6 +909,7 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
         <div className="row detail-header-row" style={{ alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
+              <StatusBadge status={token.paused ? "inactive" : token.status} label={token.paused ? "Paused" : undefined} />
               <input
                 value={editLabel}
                 maxLength={100}
@@ -733,7 +924,6 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
                 style={{ fontSize: 20, fontWeight: 650, border: "none", padding: "0", background: "transparent", flex: 1 }}
                 aria-label="Widget name"
               />
-              <StatusBadge status={token.status} />
             </div>
             {labelError && (
               <div style={{ fontSize: 12, color: "var(--danger)", marginTop: 3 }}>{labelError}</div>
@@ -745,9 +935,18 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
           </div>
           <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
             {!readonly && (
-              <button className="btn btn-sm btn-danger" onClick={() => setConfirmRevoke(true)}>
-                <Icon name="trash" size={13} /> Revoke
-              </button>
+              <>
+                <button
+                  className={`btn btn-sm ${token.paused ? "btn-primary" : ""}`}
+                  onClick={() => token.paused ? doPause() : setConfirmPause(true)}
+                >
+                  <Icon name={token.paused ? "play" : "pause"} size={13} />
+                  {token.paused ? "Resume" : "Pause"}
+                </button>
+                <button className="btn btn-sm btn-danger" onClick={() => setConfirmRevoke(true)}>
+                  <Icon name="trash" size={13} /> Revoke
+                </button>
+              </>
             )}
             {readonly && (
               <button className="btn btn-sm btn-danger" onClick={() => setConfirmDelete(true)}>
@@ -766,53 +965,14 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
           {!readonly && <CodeSection token={token} />}
 
           {/* Entities */}
-          <Card title={`Entities (${token.entities.length})`} pad={false}>
-            {token.entities.map(e => {
-              const isRW = e.capabilities === "read-write";
-              const canEdit = !readonly && !saving;
-              const toggleCap = async (newCap: "read" | "read-write") => {
-                if (!canEdit) return;
-                const updated = token.entities.map(en =>
-                  en.entity_id === e.entity_id ? { ...en, capabilities: newCap } : en
-                );
-                setSaving(true);
-                const prevName = token.created_by_name;
-                try {
-                  const t = await api.tokens.update(token.token_id, { entities: updated as Token["entities"] });
-                  setToken({ ...t, created_by_name: prevName });
-                } catch (err) { setError(String(err)); }
-                finally { setSaving(false); }
-              };
-              return (
-                <div key={e.entity_id} className="widget-row" style={{ gridTemplateColumns: "32px 1fr auto auto", cursor: "default" }}>
-                  <div className="widget-thumb" style={{ width: 32, height: 32 }}>
-                    <Icon name="plug" size={16} />
-                  </div>
-                  <div className="widget-name">
-                    <div className="widget-name-top mono" style={{ fontSize: 13 }}>{e.entity_id}</div>
-                    {e.alias && (
-                      <div className="widget-name-sub">Alias: <span className="mono">{e.alias}</span></div>
-                    )}
-                  </div>
-                  <select
-                    value={e.capabilities}
-                    onChange={ev => { if (canEdit) toggleCap(ev.target.value as "read" | "read-write"); }}
-                    disabled={!canEdit}
-                    className="input"
-                    style={{
-                      fontSize: 11, fontWeight: 600, padding: "2px 6px",
-                      background: isRW ? "var(--info-weak)" : "var(--ok-weak)",
-                      color: isRW ? "var(--info)" : "var(--ok)",
-                      border: "none", borderRadius: 10,
-                    }}
-                  >
-                    <option value="read">READ</option>
-                    <option value="read-write">READ-WRITE</option>
-                  </select>
-                </div>
-              );
-            })}
-          </Card>
+          <EntitiesEditor
+            token={token}
+            readonly={readonly}
+            saving={saving}
+            setSaving={setSaving}
+            setToken={t => setToken({ ...t, created_by_name: token.created_by_name })}
+            setError={setError}
+          />
 
           {/* Origins */}
           <OriginsEditor
@@ -891,6 +1051,16 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
         </div>
       </div>
 
+      {confirmPause && (
+        <ConfirmDialog
+          title="Pause widget"
+          message={`Pausing "${token.label}" will immediately close all active sessions and block new connections until you resume it.`}
+          confirmLabel="Pause"
+          confirmDestructive
+          onConfirm={doPause}
+          onCancel={() => setConfirmPause(false)}
+        />
+      )}
       {confirmRevoke && (
         <ConfirmDialog
           title="Revoke widget"

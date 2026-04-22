@@ -26,13 +26,13 @@ interface TokenListProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
-type FilterOption = "all" | TokenStatus;
+type FilterOption = "all" | "active" | "expiring_soon" | "paused";
 
 const FILTER_OPTIONS: { value: FilterOption; label: string }[] = [
   { value: "all",           label: "All"      },
   { value: "active",        label: "Active"   },
   { value: "expiring_soon", label: "Expiring" },
-  { value: "inactive",      label: "Paused"   },
+  { value: "paused",        label: "Paused"   },
 ];
 
 const ARCHIVED_STATUSES: TokenStatus[] = ["expired", "revoked"];
@@ -140,10 +140,13 @@ export function TokenList({ onOpenWizard, initialTokenId, onInitialTokenConsumed
   const [loading,      setLoading]      = useState(true);
   const [error,        setError]        = useState<string | null>(null);
   const [search,       setSearch]       = useState("");
-  const [filter,       setFilter]       = useState<FilterOption>("all");
-  const [showArchived, setShowArchived] = useState(false);
+  const [filter,       setFilter]       = useState<FilterOption>(() => {
+    const stored = localStorage.getItem("hrv_filter_tab");
+    return (stored === "all" || stored === "active" || stored === "expiring_soon" || stored === "paused") ? stored : "all";
+  });
+  const [showArchived, setShowArchived] = useState(() => localStorage.getItem("hrv_show_archived") === "true");
   const [selectedId,   setSelectedId]   = useState<string | null>(null);
-  const [viewMode,     setViewMode]     = useState<"grid" | "list">("grid");
+  const [viewMode,     setViewMode]     = useState<"grid" | "list">(() => localStorage.getItem("hrv_view_mode") === "list" ? "list" : "grid");
 
   const load = useCallback(() => {
     api.tokens.list().then(setTokens).catch(e => setError(String(e))).finally(() => setLoading(false));
@@ -160,10 +163,12 @@ export function TokenList({ onOpenWizard, initialTokenId, onInitialTokenConsumed
   }, [initialTokenId, onInitialTokenConsumed, load]);
 
   const filtered = tokens.filter(t => {
-    const matchSearch = !search
-      || t.label.toLowerCase().includes(search.toLowerCase())
-      || primaryOrigin(t).toLowerCase().includes(search.toLowerCase());
-    const matchFilter = filter === "all" || t.status === filter;
+    const words = search.toLowerCase().split(/\s+/).filter(Boolean);
+    const hay = `${t.label} ${primaryOrigin(t)} ${t.entities.map(e => e.entity_id).join(" ")}`.toLowerCase();
+    const matchSearch = words.length === 0 || words.every(w => hay.includes(w));
+    const matchFilter = filter === "all"
+      || (filter === "paused" && t.paused)
+      || (filter !== "paused" && !t.paused && t.status === filter);
     return matchSearch && matchFilter;
   });
 
@@ -200,19 +205,19 @@ export function TokenList({ onOpenWizard, initialTokenId, onInitialTokenConsumed
         </div>
         <div className="segmented" role="group" aria-label="Filter by status">
           {FILTER_OPTIONS.map(({ value, label }) => (
-            <button key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}>
+            <button key={value} aria-pressed={filter === value} onClick={() => { setFilter(value); localStorage.setItem("hrv_filter_tab", value); }}>
               {label}
             </button>
           ))}
         </div>
         <div style={{ flex: 1 }} />
-        <button className="btn btn-ghost" onClick={() => setShowArchived(s => !s)}>
+        <button className="btn btn-ghost" onClick={() => { const next = !showArchived; setShowArchived(next); localStorage.setItem("hrv_show_archived", String(next)); }}>
           <Icon name="clock" size={14} />
           {showArchived ? "Hide" : "Show"} archived
         </button>
         <button
           className="icon-btn"
-          onClick={() => setViewMode(m => m === "grid" ? "list" : "grid")}
+          onClick={() => { const next = viewMode === "grid" ? "list" : "grid"; setViewMode(next); localStorage.setItem("hrv_view_mode", next); }}
           aria-label={viewMode === "grid" ? "Switch to list view" : "Switch to grid view"}
           title={viewMode === "grid" ? "List view" : "Grid view"}
         >

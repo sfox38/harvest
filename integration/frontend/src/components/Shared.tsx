@@ -6,9 +6,10 @@
  *          Sparkline, ActivityGraph, EventRow, fmtRel, fmtBytes
  */
 
-import { useState, useCallback, useEffect, useRef } from "react";
-import type { TokenStatus, ActivityEvent } from "../types";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import type { TokenStatus, ActivityEvent, HAEntity } from "../types";
 import { Icon } from "./Icon";
+import { getEntityCache } from "../entityCache";
 
 // ---------------------------------------------------------------------------
 // StatusBadge
@@ -559,7 +560,7 @@ export function EventRow({ ev, onSelectToken }: EventRowProps) {
           <dl className="kv-compact">
             <dt>Event ID</dt><dd className="mono">{ev.id}</dd>
             <dt>Type</dt><dd className="mono">{ev.type}</dd>
-            <dt>Timestamp</dt><dd className="mono">{new Date(ev.timestamp).toISOString()}</dd>
+            <dt>Timestamp</dt><dd className="mono">{new Date(ev.timestamp).toLocaleString()}</dd>
             {ev.token_label && <><dt>Widget</dt><dd>{widgetLink}</dd></>}
             {ev.session_id && <><dt>Session</dt><dd className="mono">{ev.session_id}</dd></>}
             {ev.origin && <><dt>Origin</dt><dd className="mono">{ev.origin}</dd></>}
@@ -590,4 +591,113 @@ export function fmtBytes(b: number): string {
   if (b < 1024) return `${b} B`;
   if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
   return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// ---------------------------------------------------------------------------
+// EntityAutocomplete
+// ---------------------------------------------------------------------------
+
+interface EntityAutocompleteProps {
+  value: string;
+  onChange: (v: string) => void;
+  onSelect: (entityId: string) => void;
+  disabled?: boolean;
+  filterDomains?: Set<string>;
+  placeholder?: string;
+  excludeIds?: string[];
+}
+
+export function EntityAutocomplete({ value, onChange, onSelect, disabled, filterDomains, placeholder, excludeIds }: EntityAutocompleteProps) {
+  const [open, setOpen] = useState(false);
+  const [highlighted, setHighlighted] = useState(0);
+  const [dropdownRect, setDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const excluded = useMemo(() => new Set(excludeIds ?? []), [excludeIds]);
+
+  const matches = useMemo<HAEntity[]>(() => {
+    if (!value.trim()) return [];
+    const words = value.toLowerCase().split(/\s+/).filter(Boolean);
+    return getEntityCache()
+      .filter(e => {
+        if (excluded.has(e.entity_id)) return false;
+        if (filterDomains && !filterDomains.has(e.domain)) return false;
+        const hay = `${e.entity_id} ${e.friendly_name}`.toLowerCase();
+        return words.every(w => hay.includes(w));
+      })
+      .slice(0, 8);
+  }, [value, filterDomains, excluded]);
+
+  useEffect(() => { setHighlighted(0); }, [matches.length]);
+
+  useEffect(() => {
+    if (open && matches.length > 0 && inputRef.current) {
+      const r = inputRef.current.getBoundingClientRect();
+      setDropdownRect({ top: r.bottom, left: r.left, width: r.width });
+    } else {
+      setDropdownRect(null);
+    }
+  }, [open, matches.length]);
+
+  const select = (entityId: string) => {
+    onSelect(entityId);
+    onChange("");
+    setOpen(false);
+  };
+
+  return (
+    <div style={{ flex: 1 }}>
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={e => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onKeyDown={e => {
+          if (!open || matches.length === 0) {
+            if (e.key === "Enter" && value.trim().includes(".")) { select(value.trim()); e.preventDefault(); }
+            return;
+          }
+          if (e.key === "ArrowDown") { setHighlighted(h => Math.min(h + 1, matches.length - 1)); e.preventDefault(); }
+          else if (e.key === "ArrowUp") { setHighlighted(h => Math.max(h - 1, 0)); e.preventDefault(); }
+          else if (e.key === "Enter") { select(matches[highlighted].entity_id); e.preventDefault(); }
+          else if (e.key === "Escape") { setOpen(false); }
+        }}
+        disabled={disabled}
+        placeholder={placeholder ?? "Search entity ID or friendly name..."}
+        className="input"
+        style={{ width: "100%", boxSizing: "border-box" }}
+        aria-label="Search entities"
+        aria-autocomplete="list"
+        aria-expanded={open && matches.length > 0}
+      />
+      {dropdownRect && (
+        <div
+          className="autocomplete-dropdown"
+          style={{ top: dropdownRect.top, left: dropdownRect.left, width: dropdownRect.width }}
+          role="listbox"
+        >
+          {matches.map((e, i) => (
+            <div
+              key={e.entity_id}
+              onMouseDown={() => select(e.entity_id)}
+              onMouseEnter={() => setHighlighted(i)}
+              className={`autocomplete-item${i === highlighted ? " highlighted" : ""}`}
+              role="option"
+              aria-selected={i === highlighted}
+            >
+              <span className="badge badge-neutral" style={{ fontSize: 10 }}>{e.domain}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>{e.entity_id}</div>
+                {e.friendly_name !== e.entity_id && (
+                  <div className="muted" style={{ fontSize: 11 }}>{e.friendly_name}</div>
+                )}
+              </div>
+              <span className="muted" style={{ fontSize: 11 }}>{e.state}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }

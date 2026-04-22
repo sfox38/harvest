@@ -9,7 +9,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { Token } from "../types";
 import { api } from "../api";
-import { CopyablePre, CopyButton, Spinner, ErrorBanner, ConfirmDialog } from "./Shared";
+import { CopyablePre, CopyButton, Spinner, ErrorBanner, ConfirmDialog, EntityAutocomplete } from "./Shared";
 import { Icon } from "./Icon";
 import { getEntityCache, loadEntityCache } from "../entityCache";
 import { loadKnownOrigins, addKnownOrigin, removeKnownOrigin, validateOriginUrl, displayOriginLabel } from "./originMemory";
@@ -46,7 +46,7 @@ interface SelectedEntity {
 }
 
 interface WizardState {
-  mode: "single" | "group";
+  mode: "single" | "group" | "page";
   entities: SelectedEntity[];
   label: string;
   labelAutoset: boolean;
@@ -105,10 +105,9 @@ function fmtExpiry(option: string): string {
   return `until ${d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`;
 }
 
-function buildCardSnippetFromState(entities: SelectedEntity[], useAliases: boolean, tokenId: string, haUrl: string): string {
-  const groupAttrs = `ha-url="${haUrl}" token="${tokenId}"`;
-  const isGroup = entities.length > 1;
-
+function buildCardSnippetFromState(
+  entities: SelectedEntity[], useAliases: boolean, mode: "single" | "group" | "page", tokenId: string, haUrl: string,
+): string {
   function cardLine(e: SelectedEntity, indent = ""): string {
     const entityAttr = useAliases && e.alias ? `alias="${e.alias}"` : `entity="${e.entity_id}"`;
     const cl = e.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
@@ -116,7 +115,13 @@ function buildCardSnippetFromState(entities: SelectedEntity[], useAliases: boole
     return `${indent}<hrv-card ${entityAttr}${companionAttr}></hrv-card>`;
   }
 
-  if (isGroup) {
+  if (mode === "page") {
+    const cards = entities.map(e => cardLine(e));
+    return cards.join("\n");
+  }
+
+  const groupAttrs = `ha-url="${haUrl}" token="${tokenId}"`;
+  if (mode === "group") {
     return `<hrv-group ${groupAttrs}>\n${entities.map(e => cardLine(e, "  ")).join("\n")}\n</hrv-group>`;
   }
   const e = entities[0];
@@ -127,10 +132,9 @@ function buildCardSnippetFromState(entities: SelectedEntity[], useAliases: boole
   return `<hrv-card ${groupAttrs} ${sEntityAttr}${sCompanionAttr}></hrv-card>`;
 }
 
-function buildWordPressSnippetFromState(entities: SelectedEntity[], useAliases: boolean, tokenId: string, haUrl: string): string {
-  const groupAttrs = `data-ha-url="${haUrl}" data-token="${tokenId}"`;
-  const isGroup = entities.length > 1;
-
+function buildWordPressSnippetFromState(
+  entities: SelectedEntity[], useAliases: boolean, mode: "single" | "group" | "page", tokenId: string, haUrl: string,
+): string {
   function mountLine(e: SelectedEntity, indent = ""): string {
     const entityAttr = useAliases && e.alias ? `data-alias="${e.alias}"` : `data-entity="${e.entity_id}"`;
     const cl = e.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
@@ -138,7 +142,13 @@ function buildWordPressSnippetFromState(entities: SelectedEntity[], useAliases: 
     return `${indent}<div class="hrv-mount" ${entityAttr}${companionAttr}></div>`;
   }
 
-  if (isGroup) {
+  if (mode === "page") {
+    const mounts = entities.map(e => mountLine(e));
+    return mounts.join("\n");
+  }
+
+  const groupAttrs = `data-ha-url="${haUrl}" data-token="${tokenId}"`;
+  if (mode === "group") {
     return `<div class="hrv-group" ${groupAttrs}>\n${entities.map(e => mountLine(e, "  ")).join("\n")}\n</div>`;
   }
   const e = entities[0];
@@ -171,111 +181,6 @@ function StepIndicator({ current }: { current: number }) {
           </React.Fragment>
         );
       })}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// EntityAutocomplete
-// ---------------------------------------------------------------------------
-
-interface EntityAutocompleteProps {
-  value: string;
-  onChange: (v: string) => void;
-  onSelect: (entityId: string) => void;
-  disabled?: boolean;
-  filterDomains?: Set<string>;
-  placeholder?: string;
-}
-
-function EntityAutocomplete({ value, onChange, onSelect, disabled, filterDomains, placeholder }: EntityAutocompleteProps) {
-  const [open, setOpen] = useState(false);
-  const [highlighted, setHighlighted] = useState(0);
-  const [dropdownRect, setDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const matches = useMemo<HAEntity[]>(() => {
-    if (!value.trim()) return [];
-    const words = value.toLowerCase().split(/\s+/).filter(Boolean);
-    return getEntityCache()
-      .filter(e => {
-        if (filterDomains && !filterDomains.has(e.domain)) return false;
-        const hay = `${e.entity_id} ${e.friendly_name}`.toLowerCase();
-        return words.every(w => hay.includes(w));
-      })
-      .slice(0, 8);
-  }, [value, filterDomains]);
-
-  useEffect(() => { setHighlighted(0); }, [matches.length]);
-
-  useEffect(() => {
-    if (open && matches.length > 0 && inputRef.current) {
-      const r = inputRef.current.getBoundingClientRect();
-      setDropdownRect({ top: r.bottom, left: r.left, width: r.width });
-    } else {
-      setDropdownRect(null);
-    }
-  }, [open, matches.length]);
-
-  const select = (entityId: string) => {
-    onSelect(entityId);
-    onChange("");
-    setOpen(false);
-  };
-
-  return (
-    <div style={{ flex: 1 }}>
-      <input
-        ref={inputRef}
-        value={value}
-        onChange={e => { onChange(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
-        onKeyDown={e => {
-          if (!open || matches.length === 0) {
-            if (e.key === "Enter" && value.trim().includes(".")) { select(value.trim()); e.preventDefault(); }
-            return;
-          }
-          if (e.key === "ArrowDown") { setHighlighted(h => Math.min(h + 1, matches.length - 1)); e.preventDefault(); }
-          else if (e.key === "ArrowUp") { setHighlighted(h => Math.max(h - 1, 0)); e.preventDefault(); }
-          else if (e.key === "Enter") { select(matches[highlighted].entity_id); e.preventDefault(); }
-          else if (e.key === "Escape") { setOpen(false); }
-        }}
-        disabled={disabled}
-        placeholder={placeholder ?? "Search entity ID or friendly name..."}
-        className="input"
-        style={{ width: "100%", boxSizing: "border-box" }}
-        aria-label="Search entities"
-        aria-autocomplete="list"
-        aria-expanded={open && matches.length > 0}
-      />
-      {dropdownRect && (
-        <div
-          className="autocomplete-dropdown"
-          style={{ top: dropdownRect.top, left: dropdownRect.left, width: dropdownRect.width }}
-          role="listbox"
-        >
-          {matches.map((e, i) => (
-            <div
-              key={e.entity_id}
-              onMouseDown={() => select(e.entity_id)}
-              onMouseEnter={() => setHighlighted(i)}
-              className={`autocomplete-item${i === highlighted ? " highlighted" : ""}`}
-              role="option"
-              aria-selected={i === highlighted}
-            >
-              <span className="badge badge-neutral" style={{ fontSize: 10 }}>{e.domain}</span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 500 }}>{e.entity_id}</div>
-                {e.friendly_name !== e.entity_id && (
-                  <div className="muted" style={{ fontSize: 11 }}>{e.friendly_name}</div>
-                )}
-              </div>
-              <span className="muted" style={{ fontSize: 11 }}>{e.state}</span>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -381,7 +286,7 @@ function Step1({ state, onChange, existingLabels }: { state: WizardState; onChan
     if (state.labelAutoset && isFirst) {
       const cached = getEntityCache().find(e => e.entity_id === entityId);
       const name = cached?.friendly_name ?? entityId;
-      const autoName = state.mode === "group" ? `${name} group` : name;
+      const autoName = state.mode === "single" ? name : state.mode === "group" ? `${name} group` : `${name} page`;
       updates.label = autoName.slice(0, 100);
     }
 
@@ -409,14 +314,15 @@ function Step1({ state, onChange, existingLabels }: { state: WizardState; onChan
   };
 
   const primaryIds = state.entities.map(e => e.entity_id);
+  const multiMode = state.mode === "group" || state.mode === "page";
   const showPicker = !(state.mode === "single" && state.entities.length === 1);
 
   return (
     <div className="col" style={{ gap: 16 }}>
       <div className="segmented" role="group">
-        {(["single", "group"] as const).map(m => (
+        {(["single", "group", "page"] as const).map(m => (
           <button key={m} aria-pressed={state.mode === m} onClick={() => onChange({ mode: m, entities: [], ...(state.labelAutoset ? { label: "" } : {}) })}>
-            {m === "single" ? "Single card" : "Group of cards"}
+            {m === "single" ? "Single card" : m === "group" ? "Group of cards" : "Page of cards"}
           </button>
         ))}
       </div>
@@ -424,7 +330,9 @@ function Step1({ state, onChange, existingLabels }: { state: WizardState; onChan
       <p className="muted" style={{ fontSize: 13 }}>
         {state.mode === "single"
           ? "Choose one entity. Optionally add companion entities shown alongside it."
-          : "Add multiple entities for a group widget. Each card can have companion entities."}
+          : state.mode === "group"
+            ? "Add multiple entities for a group widget. Each card can have companion entities."
+            : "Add entities for a full page of widgets. Cards inherit ha-url and token from a page-level config call."}
       </p>
 
       {showPicker && (
@@ -433,7 +341,7 @@ function Step1({ state, onChange, existingLabels }: { state: WizardState; onChan
           onChange={setEntityInput}
           onSelect={id => { selectEntity(id); setEntityInput(""); }}
           disabled={loadingAlias !== null}
-          placeholder={state.mode === "single" ? "Search entity ID or friendly name..." : "Add entity to group..."}
+          placeholder={state.mode === "single" ? "Search entity ID or friendly name..." : multiMode ? "Add entity..." : "Add entity..."}
         />
       )}
 
@@ -445,7 +353,7 @@ function Step1({ state, onChange, existingLabels }: { state: WizardState; onChan
 
       {state.entities.length > 0 && (
         <div className="col" style={{ gap: 8 }}>
-          {state.mode === "group" && (
+          {multiMode && (
             <div className="muted" style={{ fontSize: 12, fontWeight: 600 }}>
               Entities ({state.entities.length}):
             </div>
@@ -458,7 +366,7 @@ function Step1({ state, onChange, existingLabels }: { state: WizardState; onChan
                 <div className="row" style={{ alignItems: "center", gap: 8 }}>
                   <span style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{e.entity_id}</span>
                   {e.alias && <span className="muted" style={{ fontSize: 11 }}>alias: {e.alias}</span>}
-                  {state.mode === "group" && (
+                  {multiMode && (
                     <button
                       className="btn btn-sm btn-ghost"
                       onClick={() => toggleExpand(e.entity_id)}
@@ -845,7 +753,7 @@ function validateLabelWiz(label: string, otherLabels: string[]): string | null {
   return null;
 }
 
-function Step6({ token, tokenSecret, originMode, originUrl, overrideHost, selectedEntities, widgetScriptUrl }: {
+function Step6({ token, tokenSecret, originMode, originUrl, overrideHost, selectedEntities, widgetScriptUrl, cardMode }: {
   token: Token;
   tokenSecret: string | null;
   originMode: "specific" | "any";
@@ -853,9 +761,10 @@ function Step6({ token, tokenSecret, originMode, originUrl, overrideHost, select
   overrideHost: string;
   selectedEntities: SelectedEntity[];
   widgetScriptUrl: string;
+  cardMode: "single" | "group" | "page";
 }) {
   const [useAliases,   setUseAliases]   = useState(() => localStorage.getItem("hrv_use_aliases") === "true");
-  const [tab,          setTab]          = useState<"web" | "wordpress">("web");
+  const [tab,          setTab]          = useState<"web" | "wordpress">(() => localStorage.getItem("hrv_code_tab") === "wordpress" ? "wordpress" : "web");
   const [acknowledged, setAcknowledged] = useState(!tokenSecret);
   const [widgetName,   setWidgetName]   = useState(token.label);
   const [nameSaving,   setNameSaving]   = useState(false);
@@ -869,9 +778,15 @@ function Step6({ token, tokenSecret, originMode, originUrl, overrideHost, select
   }, [token.token_id]);
 
   const haUrl = overrideHost || window.location.origin;
+  const scriptUrl = widgetScriptUrl.trim() || DEFAULT_WIDGET_SCRIPT_URL;
+  const isPage = cardMode === "page";
+  const scriptTag = `<script src="${scriptUrl}"></script>`;
+  const pageSetup = isPage
+    ? `${scriptTag}\n<script>HArvest.config({ haUrl: "${haUrl}", token: "${token.token_id}" });</script>`
+    : scriptTag;
   const cardSnippet = tab === "web"
-    ? buildCardSnippetFromState(selectedEntities, useAliases, token.token_id, haUrl)
-    : buildWordPressSnippetFromState(selectedEntities, useAliases, token.token_id, haUrl);
+    ? buildCardSnippetFromState(selectedEntities, useAliases, cardMode, token.token_id, haUrl)
+    : buildWordPressSnippetFromState(selectedEntities, useAliases, cardMode, token.token_id, haUrl);
   const hostDisplay = originMode === "any" ? "Anywhere" : (originUrl || haUrl);
 
   const saveWidgetName = async (name: string) => {
@@ -933,16 +848,20 @@ function Step6({ token, tokenSecret, originMode, originUrl, overrideHost, select
             Host URL: <span className="mono">{hostDisplay}</span>
           </div>
 
-          {/* Step 1: script tag */}
+          {/* Step 1: page setup */}
           <div className="code-block-group">
             <div className="code-block-label">
               <span className="step-pill">1</span>
               <div>
-                <div className="code-block-title">Page-level script</div>
-                <div className="muted" style={{ fontSize: 12 }}>Add once to your page's &lt;head&gt;.</div>
+                <div className="code-block-title">{isPage ? "Page setup" : "Widget script"}</div>
+                <div className="muted" style={{ fontSize: 12 }}>
+                  {isPage
+                    ? "Add once to your page's <head>. All widgets inherit these defaults."
+                    : "Add once to your page's <head>."}
+                </div>
               </div>
             </div>
-            <CopyablePre text={`<script src="${widgetScriptUrl.trim() || DEFAULT_WIDGET_SCRIPT_URL}"></script>`} label="Copy script" />
+            <CopyablePre text={pageSetup} label={isPage ? "Copy setup" : "Copy script"} />
           </div>
 
           {/* Step 2: card snippet */}
@@ -955,8 +874,8 @@ function Step6({ token, tokenSecret, originMode, originUrl, overrideHost, select
               </div>
             </div>
             <div className="segmented" role="group" aria-label="Code format" style={{ marginBottom: 8 }}>
-              <button aria-pressed={tab === "web"} onClick={() => setTab("web")}>Web page</button>
-              <button aria-pressed={tab === "wordpress"} onClick={() => setTab("wordpress")}>WordPress</button>
+              <button aria-pressed={tab === "web"} onClick={() => { setTab("web"); localStorage.setItem("hrv_code_tab", "web"); }}>Web page</button>
+              <button aria-pressed={tab === "wordpress"} onClick={() => { setTab("wordpress"); localStorage.setItem("hrv_code_tab", "wordpress"); }}>WordPress</button>
             </div>
             <CopyablePre text={cardSnippet} label="Copy markup" />
           </div>
@@ -1194,6 +1113,7 @@ export function Wizard({ onClose }: WizardProps) {
               overrideHost={overrideHost}
               selectedEntities={wState.entities}
               widgetScriptUrl={widgetScriptUrl}
+              cardMode={wState.mode}
             />
           )}
         </div>
