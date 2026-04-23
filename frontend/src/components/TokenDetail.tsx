@@ -6,7 +6,8 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { Token, Session, ActivityPage } from "../types";
+import type { Token, TokenUpdate, Session, ActivityPage } from "../types";
+import { validateLabel, DEFAULT_WIDGET_SCRIPT_URL } from "../types";
 import { api } from "../api";
 import { StatusBadge, ConfirmDialog, Spinner, ErrorBanner, Card, EventRow, fmtRel, EntityAutocomplete } from "./Shared";
 import { Icon } from "./Icon";
@@ -75,8 +76,6 @@ interface TokenDetailProps {
 // Code snippet builders (preserved from original)
 // ---------------------------------------------------------------------------
 
-const DEFAULT_WIDGET_SCRIPT_URL = "https://cdn.jsdelivr.net/gh/sfox38/harvest@latest/widget/dist/harvest.min.js";
-
 type CardMode = "single" | "group" | "page";
 
 interface PrimaryWithCompanions {
@@ -86,9 +85,14 @@ interface PrimaryWithCompanions {
 
 function groupEntities(entities: Token["entities"]): PrimaryWithCompanions[] {
   const primaries = entities.filter(e => !e.companion_of);
+  const primaryIds = new Set(primaries.map(p => p.entity_id));
   const companionMap = new Map<string, Token["entities"][0][]>();
   for (const e of entities) {
     if (e.companion_of) {
+      if (!primaryIds.has(e.companion_of)) {
+        console.warn(`[harvest] orphaned companion ${e.entity_id}: companion_of "${e.companion_of}" not found`);
+        continue;
+      }
       const list = companionMap.get(e.companion_of) ?? [];
       list.push(e);
       companionMap.set(e.companion_of, list);
@@ -193,26 +197,14 @@ function fmtDateLong(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 }
 
-const LABEL_ILLEGAL = /[\x00-\x1f<>"&]/;
-
-function validateLabel(label: string, otherLabels: string[]): string | null {
-  const t = label.trim();
-  if (!t) return "Name is required.";
-  if (t.length > 100) return "Name must be 100 characters or fewer.";
-  if (LABEL_ILLEGAL.test(t)) return "Name contains invalid characters.";
-  if (otherLabels.some(l => l.trim().toLowerCase() === t.toLowerCase())) {
-    return "A widget with this name already exists.";
-  }
-  return null;
-}
 
 // ---------------------------------------------------------------------------
 // Code section
 // ---------------------------------------------------------------------------
 
 function CodeSection({ token, setToken, setError, hmacSecret }: { token: Token; setToken: (t: Token) => void; setError: (e: string | null) => void; hmacSecret: string | null }) {
-  const [useAliases,      setUseAliases]      = useState(() => localStorage.getItem("hrv_use_aliases") === "true");
-  const [tab,             setTab]             = useState<"web" | "wordpress">(() => localStorage.getItem("hrv_code_tab") === "wordpress" ? "wordpress" : "web");
+  const [useAliases,      setUseAliases]      = useState(() => { try { return localStorage.getItem("hrv_use_aliases") === "true"; } catch { return false; } });
+  const [tab,             setTab]             = useState<"web" | "wordpress">(() => { try { return localStorage.getItem("hrv_code_tab") === "wordpress" ? "wordpress" : "web"; } catch { return "web"; } });
   const primaryCount = token.entities.filter(e => !e.companion_of).length;
   const [cardMode,        setCardMode]        = useState<CardMode>(token.embed_mode ?? "single");
 
@@ -1222,10 +1214,10 @@ interface SecurityEditorProps {
 function SecurityEditor({ token, readonly, saving, setSaving, setToken, setError, generatedSecret, setGeneratedSecret }: SecurityEditorProps) {
   const canEdit = !readonly && !saving;
   const prevName = token.created_by_name;
-  const patchToken = async (data: Record<string, unknown>) => {
+  const patchToken = async (data: Partial<Token> | TokenUpdate) => {
     setSaving(true);
     try {
-      const updated = await api.tokens.update(token.token_id, data as Partial<Token>);
+      const updated = await api.tokens.update(token.token_id, data);
       setToken({ ...updated, created_by_name: prevName });
     } catch (e) { setError(String(e)); }
     finally { setSaving(false); }
@@ -1293,8 +1285,8 @@ function SecurityEditor({ token, readonly, saving, setSaving, setToken, setError
     if (!canEdit) return;
     setSaving(true);
     try {
-      const data = await api.tokens.update(token.token_id, { token_secret: "generate" } as unknown as Partial<Token>);
-      setGeneratedSecret((data as Token & { generated_secret?: string }).generated_secret ?? null);
+      const data = await api.tokens.update(token.token_id, { token_secret: "generate" });
+      setGeneratedSecret(data.generated_secret ?? null);
       setToken({ ...data, created_by_name: prevName });
     } catch (e) { setError(String(e)); }
     finally { setSaving(false); }
@@ -1302,7 +1294,7 @@ function SecurityEditor({ token, readonly, saving, setSaving, setToken, setError
 
   const disableHmac = async () => {
     setConfirmDisableHmac(false);
-    await patchToken({ token_secret: null } as Record<string, unknown>);
+    await patchToken({ token_secret: null });
     setGeneratedSecret(null);
   };
 
@@ -1338,7 +1330,7 @@ function SecurityEditor({ token, readonly, saving, setSaving, setToken, setError
           {generatedSecret && (
             <div style={{ marginTop: 8 }}>
               <div className="badge badge-warn" style={{ fontSize: 12, marginBottom: 6 }}>
-                Copy this secret now. It will not be shown again.
+                Copy this secret now. It will not be shown again. Do not share your screen while this is visible.
               </div>
               <pre className="code code-full" onClick={secretCopy.copy} title="Click to copy">{generatedSecret}</pre>
             </div>

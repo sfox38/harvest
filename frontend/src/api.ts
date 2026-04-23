@@ -10,6 +10,8 @@
 
 import type {
   Token,
+  TokenUpdate,
+  TokenUpdateResponse,
   Session,
   ActivityPage,
   HarvestAction,
@@ -122,8 +124,8 @@ export const api = {
     createPreview: (data: { entity_id: string; capabilities: "read" | "read-write" }): Promise<{ token_id: string; expires: string | null }> =>
       _post("/tokens/preview", data),
 
-    update: (tokenId: string, data: Partial<Token>): Promise<Token> =>
-      _patch<Token>(`/tokens/${tokenId}`, data),
+    update: (tokenId: string, data: Partial<Token> | TokenUpdate): Promise<TokenUpdateResponse> =>
+      _patch<TokenUpdateResponse>(`/tokens/${tokenId}`, data),
 
     revoke: (tokenId: string, reason?: string): Promise<void> =>
       _delete(`/tokens/${tokenId}`, { action: "revoke", ...(reason ? { reason } : {}) }),

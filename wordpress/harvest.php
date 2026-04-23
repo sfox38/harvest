@@ -53,9 +53,6 @@ function harvest_activate(): void {
     if ( ! get_option( 'harvest_widget_source' ) ) {
         add_option( 'harvest_widget_source', 'bundled' );
     }
-    if ( ! get_option( 'harvest_cdn_url' ) ) {
-        add_option( 'harvest_cdn_url', '' );
-    }
     if ( ! get_option( 'harvest_default_theme' ) ) {
         add_option( 'harvest_default_theme', '' );
     }

@@ -8,6 +8,7 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { Token } from "../types";
+import { validateLabel as validateLabelWiz, DEFAULT_WIDGET_SCRIPT_URL } from "../types";
 import { api } from "../api";
 import { CopyablePre, CopyButton, Spinner, ErrorBanner, ConfirmDialog, EntityAutocomplete } from "./Shared";
 import { Icon } from "./Icon";
@@ -71,7 +72,6 @@ interface WizardProps {
 // ---------------------------------------------------------------------------
 
 const TOTAL_STEPS = 6;
-const DEFAULT_WIDGET_SCRIPT_URL = "https://cdn.jsdelivr.net/gh/sfox38/harvest@latest/widget/dist/harvest.min.js";
 const STEP_LABELS = ["Entities", "Permissions", "Origin", "Expiry", "Appearance", "Done"];
 const MAX_COMPANIONS = 4;
 const COMPANION_ALLOWED_DOMAINS = new Set(["light", "switch", "binary_sensor", "input_boolean", "cover", "remote", "lock"]);
@@ -267,6 +267,8 @@ function Step1({ state, onChange, existingLabels }: { state: WizardState; onChan
   const [entityInput, setEntityInput] = useState("");
   const [loadingAlias, setLoadingAlias] = useState<string | null>(null);
   const [expandedCompanions, setExpandedCompanions] = useState<Set<string>>(new Set());
+  const entitiesRef = useRef(state.entities);
+  entitiesRef.current = state.entities;
 
   useEffect(() => {
     if (getEntityCache().length === 0) loadEntityCache();
@@ -282,9 +284,12 @@ function Step1({ state, onChange, existingLabels }: { state: WizardState; onChan
     } catch { /* alias stays null */ }
     finally { setLoadingAlias(null); }
 
+    const latest = entitiesRef.current;
+    if (latest.some(e => e.entity_id === entityId)) return;
+
     const entry: SelectedEntity = { entity_id: entityId, alias, companions: [] };
-    const isFirst = state.entities.length === 0;
-    const newEntities = state.mode === "single" ? [entry] : [...state.entities, entry];
+    const isFirst = latest.length === 0;
+    const newEntities = state.mode === "single" ? [entry] : [...latest, entry];
     const updates: Partial<WizardState> = { entities: newEntities };
 
     if (state.labelAutoset && isFirst) {
@@ -510,7 +515,9 @@ function Step3({ state, onChange }: { state: WizardState; onChange: (u: Partial<
     const err = validateOriginUrl(trimmed);
     if (err) { setUrlError(err); return; }
     setUrlError(null);
-    const u = new URL(trimmed);
+    let u: URL;
+    try { u = new URL(trimmed); }
+    catch { setUrlError("Invalid URL"); return; }
     const newOrigin = u.origin;
     const path = (u.pathname && u.pathname !== "/") ? u.pathname : null;
     // Strip query string and fragment - only origin+path are used for matching.
@@ -744,20 +751,8 @@ function Step5({ state, onChange }: { state: WizardState; onChange: (u: Partial<
 // Step 6: Done
 // ---------------------------------------------------------------------------
 
-const LABEL_ILLEGAL_WIZ = /[\x00-\x1f<>"&]/;
 
-function validateLabelWiz(label: string, otherLabels: string[]): string | null {
-  const t = label.trim();
-  if (!t) return "Name is required.";
-  if (t.length > 100) return "Name must be 100 characters or fewer.";
-  if (LABEL_ILLEGAL_WIZ.test(t)) return "Name contains invalid characters.";
-  if (otherLabels.some(l => l.trim().toLowerCase() === t.toLowerCase())) {
-    return "A widget with this name already exists.";
-  }
-  return null;
-}
-
-function Step6({ token, tokenSecret, originMode, originUrl, overrideHost, selectedEntities, widgetScriptUrl, cardMode }: {
+function Step6({ token, tokenSecret, originMode, originUrl, overrideHost, selectedEntities, widgetScriptUrl, cardMode, onAcknowledgedChange }: {
   token: Token;
   tokenSecret: string | null;
   originMode: "specific" | "any";
@@ -766,6 +761,7 @@ function Step6({ token, tokenSecret, originMode, originUrl, overrideHost, select
   selectedEntities: SelectedEntity[];
   widgetScriptUrl: string;
   cardMode: "single" | "group" | "page";
+  onAcknowledgedChange?: (v: boolean) => void;
 }) {
   const [useAliases,   setUseAliases]   = useState(() => localStorage.getItem("hrv_use_aliases") === "true");
   const [tab,          setTab]          = useState<"web" | "wordpress">(() => localStorage.getItem("hrv_code_tab") === "wordpress" ? "wordpress" : "web");
@@ -822,7 +818,7 @@ function Step6({ token, tokenSecret, originMode, originUrl, overrideHost, select
             This is shown once only and cannot be retrieved again.
           </p>
           <label className="row" style={{ gap: 8, fontSize: 13, cursor: "pointer" }}>
-            <input type="checkbox" checked={acknowledged} onChange={e => setAcknowledged(e.target.checked)} />
+            <input type="checkbox" checked={acknowledged} onChange={e => { setAcknowledged(e.target.checked); onAcknowledgedChange?.(e.target.checked); }} />
             I have saved my token secret
           </label>
         </div>
@@ -938,9 +934,10 @@ export function Wizard({ onClose }: WizardProps) {
   const [loading,      setLoading]      = useState(false);
   const [error,        setError]        = useState<string | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
-  const [overrideHost,    setOverrideHost]    = useState("");
-  const [widgetScriptUrl, setWidgetScriptUrl] = useState("");
-  const [existingLabels,  setExistingLabels]  = useState<string[]>([]);
+  const [overrideHost,       setOverrideHost]       = useState("");
+  const [widgetScriptUrl,    setWidgetScriptUrl]    = useState("");
+  const [existingLabels,     setExistingLabels]     = useState<string[]>([]);
+  const [secretAcknowledged, setSecretAcknowledged] = useState(false);
   const previewRevoked = useRef(false);
 
   useEffect(() => {
@@ -1064,6 +1061,7 @@ export function Wizard({ onClose }: WizardProps) {
   };
 
   const isDone = step === 6 && !!wState.generatedToken;
+  const secretPending = isDone && !!wState.tokenSecret && !secretAcknowledged;
 
   return (
     <div className="overlay" role="presentation">
@@ -1092,6 +1090,8 @@ export function Wizard({ onClose }: WizardProps) {
             aria-label="Close wizard"
             className="icon-btn"
             style={{ flexShrink: 0 }}
+            disabled={secretPending}
+            title={secretPending ? "Acknowledge the token secret first" : undefined}
           >
             <Icon name="close" size={15} />
           </button>
@@ -1127,6 +1127,7 @@ export function Wizard({ onClose }: WizardProps) {
               selectedEntities={wState.entities}
               widgetScriptUrl={widgetScriptUrl}
               cardMode={wState.mode}
+              onAcknowledgedChange={setSecretAcknowledged}
             />
           )}
         </div>
@@ -1139,6 +1140,7 @@ export function Wizard({ onClose }: WizardProps) {
               <button
                 onClick={() => onClose(wState.generatedToken!.token_id)}
                 className="btn btn-primary"
+                disabled={secretPending}
               >
                 Go to widget <Icon name="chevRight" size={14} />
               </button>

@@ -1,4 +1,4 @@
-# Copyright (C) 2024 HArvest Contributors
+# Copyright (c) 2026 by https://github.com/sfox38/
 # This file is distributed under the same license as the HArvest plugin.
 msgid ""
 msgstr ""
@@ -113,6 +113,46 @@ msgstr ""
 
 #: includes/class-harvest-settings.php
 msgid "HArvest plugin settings are stored in the WordPress database and are included in standard WordPress backups. The widget token secrets you create in Home Assistant are stored in HA, not in WordPress."
+msgstr ""
+
+#: includes/class-harvest-settings.php
+msgid "CDN note: if your site has a strict script-src Content Security Policy, you may need to add https://cdn.jsdelivr.net manually."
+msgstr ""
+
+#: includes/class-harvest-settings.php
+msgid "HA entity ID, e.g. light.bedroom_main. Required unless alias is set. If both entity and alias are provided, entity takes priority."
+msgstr ""
+
+#: includes/class-harvest-settings.php
+msgid "Entity alias (8-character random key). Use instead of entity when \"Show as aliases\" is checked in the wizard. Either entity or alias is required, not both. Companion values should match - use aliases when alias is set, real IDs when entity is set."
+msgstr ""
+
+#: includes/class-harvest-settings.php
+msgid "HMAC secret for enhanced security. Set via the token editor in Home Assistant."
+msgstr ""
+
+#: includes/class-harvest-settings.php
+msgid "Comma-separated companion entity IDs or aliases."
+msgstr ""
+
+#: includes/class-harvest-settings.php
+msgid "URL to a HArvest theme JSON file. Overrides the site default."
+msgstr ""
+
+#: includes/class-harvest-settings.php
+msgid "Language code, e.g. \"de\". Defaults to auto-detect from browser."
+msgstr ""
+
+#: includes/class-harvest-settings.php
+msgid "Graph type: \"line\" or \"bar\". Omit to show no graph."
+msgstr ""
+
+#: includes/class-harvest-settings.php
+msgid "History window in hours. Default: 24."
+msgstr ""
+
+#: includes/class-harvest-settings.php
+msgid "Aggregation period in minutes. Default: 10."
 msgstr ""
 
 #: includes/class-harvest-shortcode.php

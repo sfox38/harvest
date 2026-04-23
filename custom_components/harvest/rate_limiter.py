@@ -57,6 +57,8 @@ class TokenBucket:
 class RateLimiter:
     """Manages all rate limiting for the integration. One instance per entry."""
 
+    _IP_COUNTER_SOFT_CAP = 10_000
+
     def __init__(self, config: dict) -> None:
         self._config = config
         # Keyed by (session_id, entity_id): per-entity push rate bucket.
@@ -142,6 +144,10 @@ class RateLimiter:
             CONF_MAX_CONNECTIONS_PER_MINUTE, DEFAULTS[CONF_MAX_CONNECTIONS_PER_MINUTE]
         )
         now = time.monotonic()
+
+        if len(self._ip_counters) > self._IP_COUNTER_SOFT_CAP:
+            self._prune_ip_counters(now)
+
         count, window_start = self._ip_counters.get(ip, (0, now))
 
         if now - window_start >= _IP_WINDOW_SECONDS:
@@ -154,6 +160,15 @@ class RateLimiter:
 
         self._ip_counters[ip] = (count + 1, window_start)
         return True
+
+    def _prune_ip_counters(self, now: float) -> None:
+        """Remove IP counter entries whose windows have expired."""
+        stale = [
+            ip for ip, (_, ws) in self._ip_counters.items()
+            if now - ws >= _IP_WINDOW_SECONDS
+        ]
+        for ip in stale:
+            del self._ip_counters[ip]
 
     def cleanup_session(self, session_id: str) -> None:
         """Remove all rate limit buckets for a closed session."""

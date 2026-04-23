@@ -9,7 +9,6 @@
  * Options managed here:
  *   harvest_ha_url          - External HA URL used by every widget on the site
  *   harvest_widget_source   - "bundled" or "cdn"
- *   harvest_cdn_url         - Reserved; currently unused (CDN URL is hardcoded)
  *   harvest_default_theme   - Optional URL to a default theme JSON file
  */
 
@@ -51,12 +50,6 @@ class Harvest_Settings {
             'type'              => 'string',
             'sanitize_callback' => [ self::class, 'sanitize_widget_source' ],
             'default'           => 'bundled',
-        ] );
-
-        register_setting( 'harvest_settings_group', 'harvest_cdn_url', [
-            'type'              => 'string',
-            'sanitize_callback' => 'esc_url_raw',
-            'default'           => '',
         ] );
 
         register_setting( 'harvest_settings_group', 'harvest_default_theme', [
@@ -234,6 +227,14 @@ class Harvest_Settings {
                         <td><?php esc_html_e( 'Yes*', 'harvest' ); ?></td>
                         <td><?php esc_html_e(
                             'Entity alias (8-character random key). Use instead of entity when "Show as aliases" is checked in the wizard. Either entity or alias is required, not both. Companion values should match - use aliases when alias is set, real IDs when entity is set.',
+                            'harvest'
+                        ); ?></td>
+                    </tr>
+                    <tr>
+                        <td><code>token-secret</code></td>
+                        <td><?php esc_html_e( 'No', 'harvest' ); ?></td>
+                        <td><?php esc_html_e(
+                            'HMAC secret for enhanced security. Set via the token editor in Home Assistant.',
                             'harvest'
                         ); ?></td>
                     </tr>

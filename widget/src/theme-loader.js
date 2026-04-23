@@ -41,6 +41,14 @@ const _cache = new Map();
  */
 const _inflight = new Map();
 
+/**
+ * Shared dark-mode listener. All themed cards register a callback here
+ * instead of each attaching its own matchMedia listener.
+ * @type {Set<() => void>}
+ */
+const _darkCallbacks = new Set();
+let _darkMq = null;
+
 // ---------------------------------------------------------------------------
 // ThemeLoader
 // ---------------------------------------------------------------------------
@@ -119,10 +127,15 @@ export class ThemeLoader {
     // Remove any previous listener before attaching a new one.
     ThemeLoader.detach(shadowRoot);
 
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    if (!_darkMq) {
+      _darkMq = window.matchMedia("(prefers-color-scheme: dark)");
+      _darkMq.addEventListener("change", () => {
+        for (const cb of _darkCallbacks) cb();
+      });
+    }
 
     const applyVars = () => {
-      const vars = (mq.matches && theme.dark_variables)
+      const vars = (_darkMq.matches && theme.dark_variables)
         ? { ...theme.variables, ...theme.dark_variables }
         : theme.variables;
 
@@ -133,13 +146,8 @@ export class ThemeLoader {
 
     applyVars();
 
-    // Store listener reference so detach() can remove it.
-    const listener = () => applyVars();
-    mq.addEventListener("change", listener);
-
-    // Attach cleanup handle to the host element (keyed by a symbol to avoid
-    // polluting the element's public interface).
-    host[_CLEANUP_KEY] = () => mq.removeEventListener("change", listener);
+    _darkCallbacks.add(applyVars);
+    host[_CLEANUP_KEY] = () => _darkCallbacks.delete(applyVars);
   }
 
   /**

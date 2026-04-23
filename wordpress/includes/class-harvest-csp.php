@@ -38,6 +38,12 @@ class Harvest_Csp {
             return $headers;
         }
 
+        // Validate URL structure before injecting into a security header.
+        $parsed = wp_parse_url( $ha_url );
+        if ( empty( $parsed['host'] ) ) {
+            return $headers;
+        }
+
         // Convert http(s):// to wss:// for the WebSocket CSP directive.
         $ws_url = preg_replace( '/^https?:\/\//', 'wss://', $ha_url );
 

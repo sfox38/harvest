@@ -222,4 +222,43 @@ export interface HAEntity {
 // Panel navigation
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Shared constants
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_WIDGET_SCRIPT_URL = "https://cdn.jsdelivr.net/gh/sfox38/harvest@latest/widget/dist/harvest.min.js";
+
+// ---------------------------------------------------------------------------
+// Shared validation
+// ---------------------------------------------------------------------------
+
+export const LABEL_ILLEGAL = /[\x00-\x1f<>"&]/;
+
+export function validateLabel(label: string, otherLabels: string[]): string | null {
+  const t = label.trim();
+  if (!t) return "Name is required.";
+  if (t.length > 100) return "Name must be 100 characters or fewer.";
+  if (LABEL_ILLEGAL.test(t)) return "Name contains invalid characters.";
+  if (otherLabels.some(l => l.trim().toLowerCase() === t.toLowerCase())) {
+    return "A widget with this name already exists.";
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// API mutation types (token_secret accepts sentinel values, not just boolean)
+// ---------------------------------------------------------------------------
+
+export type TokenUpdate = Omit<Partial<Token>, "token_secret"> & {
+  token_secret?: "generate" | null;
+};
+
+export interface TokenUpdateResponse extends Token {
+  generated_secret?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Panel navigation
+// ---------------------------------------------------------------------------
+
 export type Screen = "dashboard" | "widgets" | "actions" | "activity" | "sessions" | "settings";

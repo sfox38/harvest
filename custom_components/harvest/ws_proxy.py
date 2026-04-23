@@ -6,6 +6,7 @@ auth flow, message processing, state fan-out, and keepalive.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import time
@@ -956,6 +957,8 @@ class HarvestWsView(HomeAssistantView):
         await asyncio.sleep(1.0)
         if ws.closed:
             return
+        if entity_id not in session.subscribed_entity_ids:
+            return
         state = self._hass.states.get(entity_id)
         if state is None:
             return
@@ -1125,7 +1128,7 @@ class HarvestWsView(HomeAssistantView):
         peer = request.transport.get_extra_info("peername")
         peer_ip = peer[0] if peer else ""
 
-        if trusted_proxies and peer_ip in trusted_proxies:
+        if trusted_proxies and peer_ip and _ip_in_trusted(peer_ip, trusted_proxies):
             forwarded = request.headers.get("X-Forwarded-For", "")
             if forwarded:
                 return forwarded.split(",")[0].strip()
@@ -1136,6 +1139,27 @@ class HarvestWsView(HomeAssistantView):
 # ------------------------------------------------------------------
 # Module-level helpers
 # ------------------------------------------------------------------
+
+def _ip_in_trusted(peer_ip: str, trusted: list[str]) -> bool:
+    """Check whether peer_ip falls within any trusted proxy entry.
+
+    Each entry may be a bare IP or a CIDR network (e.g. "10.0.0.0/8").
+    """
+    try:
+        addr = ipaddress.ip_address(peer_ip)
+    except ValueError:
+        return False
+    for entry in trusted:
+        try:
+            if "/" in entry:
+                if addr in ipaddress.ip_network(entry, strict=False):
+                    return True
+            elif addr == ipaddress.ip_address(entry):
+                return True
+        except ValueError:
+            continue
+    return False
+
 
 def _aggregate_points(
     raw: list[tuple[float, float]],

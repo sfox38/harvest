@@ -19,6 +19,8 @@
  * localStorage is unavailable (Safari private browsing, sandboxed iframes).
  */
 
+// 32-bit hash: collision-tolerant by design. Cache is best-effort; server
+// state replaces it on next WebSocket connect.
 /**
  * Compute a djb2-style hash of a string. Returns a 32-bit signed integer.
  * @param {string} str
