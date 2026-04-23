@@ -238,6 +238,78 @@ function ToggleField({ label, value, onChange, hint }: ToggleFieldProps) {
 }
 
 // ---------------------------------------------------------------------------
+// TrustedProxiesField
+// ---------------------------------------------------------------------------
+
+interface TrustedProxiesFieldProps {
+  value: string[];
+  onChange: (v: string[]) => Promise<void>;
+}
+
+function TrustedProxiesField({ value, onChange }: TrustedProxiesFieldProps) {
+  const [localVal,  setLocalVal]  = useState(value.join("\n"));
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [errMsg,    setErrMsg]    = useState("");
+
+  useEffect(() => { setLocalVal(value.join("\n")); }, [value]);
+
+  const commit = useCallback(async (raw: string) => {
+    const lines = raw.split("\n").map(l => l.trim()).filter(Boolean);
+    const bad = lines.find(l => !/^\d{1,3}(\.\d{1,3}){3}(\/\d{1,2})?$/.test(l) && !/^[0-9a-fA-F:]+\/?\d*$/.test(l));
+    if (bad) {
+      setSaveState("error");
+      setErrMsg(`Invalid entry: ${bad}`);
+      return;
+    }
+    setSaveState("saving");
+    setErrMsg("");
+    try {
+      await onChange(lines);
+      setSaveState("idle");
+    } catch (e) {
+      setSaveState("error");
+      setErrMsg(String(e));
+    }
+  }, [onChange]);
+
+  return (
+    <div className="kv" style={{ paddingBottom: 8 }}>
+      <dt style={{ alignSelf: "start", paddingTop: 6 }}>
+        Trusted proxies
+        <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+          CIDR ranges of reverse proxies (one per line). When a connection arrives from a trusted proxy, the real client IP is read from X-Forwarded-For.
+        </div>
+      </dt>
+      <dd>
+        <div style={{ position: "relative" }}>
+          <textarea
+            value={localVal}
+            placeholder={"192.168.1.1\n10.0.0.0/8"}
+            rows={3}
+            onChange={e => { setLocalVal(e.target.value); setSaveState("idle"); }}
+            onBlur={() => commit(localVal)}
+            className="input"
+            style={{
+              width: "100%",
+              fontFamily: "var(--font-mono)",
+              fontSize: 13,
+              resize: "vertical",
+              borderColor: saveState === "error" ? "var(--danger)" : undefined,
+            }}
+          />
+          {saveState === "saving" && (
+            <span style={{ position: "absolute", top: 8, right: 8 }}><Spinner size={14} /></span>
+          )}
+        </div>
+        {saveState === "error" && errMsg && (
+          <div style={{ fontSize: 12, color: "var(--danger)", marginTop: 2 }}>{errMsg}</div>
+        )}
+      </dd>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // ThemeToggle
 // ---------------------------------------------------------------------------
 
@@ -346,6 +418,10 @@ export function Settings({ theme, onThemeChange, onKillSwitchChange }: SettingsP
             onChange={patchNum("max_auth_attempts_per_token_per_minute")} />
           <NumberField label="Max auth attempts per IP / min" value={config.max_auth_attempts_per_ip_per_minute} suffix="/ min" min={1}
             onChange={patchNum("max_auth_attempts_per_ip_per_minute")} />
+          <TrustedProxiesField
+            value={config.trusted_proxies ?? []}
+            onChange={async (v) => { await patch({ trusted_proxies: v }); }}
+          />
           <TextField
             label="Override host"
             value={config.override_host}
