@@ -711,7 +711,9 @@ class HarvestActionsView(HomeAssistantView):
 
 
 class HarvestActionDetailView(HomeAssistantView):
-    """DELETE /api/harvest/actions/{action_id} - delete a harvest_action."""
+    """PATCH /api/harvest/actions/{action_id} - update a harvest_action.
+    DELETE /api/harvest/actions/{action_id} - delete a harvest_action.
+    """
 
     url = "/api/harvest/actions/{action_id}"
     name = "api:harvest:action_detail"
@@ -719,6 +721,44 @@ class HarvestActionDetailView(HomeAssistantView):
 
     def __init__(self, action_manager: HarvestActionManager) -> None:
         self._action_manager = action_manager
+
+    async def patch(self, request: web.Request, action_id: str) -> web.Response:
+        user = request.get("hass_user")
+        if user is None:
+            raise web.HTTPUnauthorized()
+        if not user.is_admin:
+            raise web.HTTPForbidden()
+
+        try:
+            body = await request.json()
+        except Exception:
+            raise web.HTTPBadRequest(reason="Invalid JSON body.")
+
+        kwargs: dict = {}
+        if "label" in body:
+            kwargs["label"] = str(body["label"])
+        if "icon" in body:
+            kwargs["icon"] = str(body["icon"])
+        if "service_calls" in body:
+            _svc_re = re.compile(r"^[a-z0-9_]+$")
+            try:
+                scs = []
+                for sc in body["service_calls"]:
+                    domain = str(sc["domain"])
+                    service = str(sc["service"])
+                    if not _svc_re.match(domain) or not _svc_re.match(service):
+                        raise ValueError(f"Invalid domain/service: {domain!r}/{service!r}")
+                    scs.append(ServiceCall(domain=domain, service=service, data=sc.get("data", {})))
+                kwargs["service_calls"] = scs
+            except (KeyError, TypeError, ValueError) as exc:
+                raise web.HTTPBadRequest(reason=f"Invalid service_calls: {exc}")
+
+        try:
+            action = await self._action_manager.update(action_id, **kwargs)
+        except KeyError:
+            raise web.HTTPNotFound(reason=f"Action not found: {action_id}")
+
+        return self.json(dataclasses.asdict(action))
 
     async def delete(self, request: web.Request, action_id: str) -> web.Response:
         try:

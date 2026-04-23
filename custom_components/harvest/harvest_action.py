@@ -115,6 +115,32 @@ class HarvestActionManager:
         await self._save()
         return action
 
+    async def update(
+        self,
+        action_id: str,
+        label: str | None = None,
+        icon: str | None = None,
+        service_calls: list[ServiceCall] | None = None,
+    ) -> HarvestActionDefinition:
+        """Update an existing harvest_action definition.
+
+        Only provided fields are changed. Raises KeyError if not found.
+        """
+        action = self._actions.get(action_id)
+        if action is None:
+            raise KeyError(f"harvest_action not found: {action_id}")
+
+        if label is not None:
+            action.label = label
+        if icon is not None:
+            action.icon = icon
+        if service_calls is not None:
+            action.service_calls = service_calls
+
+        self._register_entity_state(action, "idle")
+        await self._save()
+        return action
+
     async def delete(self, action_id: str) -> None:
         """Remove a harvest_action definition and unregister its HA entity.
 

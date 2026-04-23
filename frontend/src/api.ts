@@ -201,6 +201,9 @@ export const api = {
     create: (data: { label: string; icon: string; service_calls: ServiceCallDef[] }): Promise<HarvestAction> =>
       _post<HarvestAction>("/actions", data),
 
+    update: (actionId: string, data: Partial<{ label: string; icon: string; service_calls: ServiceCallDef[] }>): Promise<HarvestAction> =>
+      _patch<HarvestAction>(`/actions/${actionId}`, data),
+
     delete: (actionId: string): Promise<void> =>
       _delete(`/actions/${actionId}`),
   },

@@ -1,9 +1,9 @@
 /**
  * Actions.tsx - Manage harvest_action virtual entities.
  *
- * Lists all defined actions, provides create/delete operations.
- * Each action maps to a harvest_action.{slug} entity that the widget
- * renders as a single trigger button.
+ * Lists all defined actions with search and row/card toggle.
+ * Clicking an action opens the Action Editor (same form as create,
+ * pre-filled). Delete is inside the editor, not on the list row.
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
@@ -15,79 +15,74 @@ import { Icon } from "./Icon";
 import { loadEntityCache } from "../entityCache";
 
 // ---------------------------------------------------------------------------
-// ActionRow
+// ActionCard (grid view)
 // ---------------------------------------------------------------------------
 
-interface ActionRowProps {
-  action: HarvestAction;
-  onDelete: () => void;
-}
-
-function ActionRow({ action, onDelete }: ActionRowProps) {
-  const [open, setOpen] = useState(false);
-  const toggle = () => setOpen(o => !o);
+function ActionCard({ action, onSelect }: { action: HarvestAction; onSelect: () => void }) {
   const entityId = `harvest_action.${action.action_id}`;
-
   return (
     <div
-      className={`session-row${open ? " open" : ""}`}
+      className="wcard"
+      onClick={onSelect}
+      role="button"
       tabIndex={0}
-      onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}
+      onKeyDown={e => { if (e.key === "Enter" || e.key === " ") onSelect(); }}
+      aria-label={`Edit action ${action.label}`}
     >
-      <div className="session-row-top" onClick={toggle}>
-        <div style={{ width: 24, height: 24, borderRadius: "50%", background: "var(--accent-weak)", color: "var(--accent-strong)", display: "grid", placeItems: "center", flexShrink: 0 }}>
-          <Icon name="play" size={12} />
+      <div className="wcard-top">
+        <div className="widget-thumb">
+          <Icon name="play" size={17} />
         </div>
-
-        <div className="sess-col" style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontWeight: 600, fontSize: 13.5 }}>{action.label}</div>
-          <div className="muted mono" style={{ fontSize: 11 }}>{entityId}</div>
-        </div>
-
-        <div className="sess-col muted" style={{ fontSize: 12 }}>
-          {action.service_calls.length} service call{action.service_calls.length !== 1 ? "s" : ""}
-        </div>
-
-        <div className="sess-col muted" style={{ fontSize: 12 }}>
-          {action.created_at ? fmtRel(action.created_at) : "-"}
-        </div>
-
-        <div className="event-caret" style={{ margin: 0 }}>
-          <Icon name={open ? "chevUp" : "chevDown"} size={14} />
-        </div>
-
-        <button
-          className="btn btn-sm btn-danger"
-          onClick={e => { e.stopPropagation(); onDelete(); }}
-          aria-label={`Delete action ${action.label}`}
-        >
-          Delete
-        </button>
+        <span className="muted" style={{ fontSize: 11 }}>
+          {action.service_calls.length} call{action.service_calls.length !== 1 ? "s" : ""}
+        </span>
       </div>
-
-      {open && (
-        <div className="event-details" onClick={e => e.stopPropagation()}>
-          <dl className="kv-compact">
-            <dt>Action ID</dt><dd className="mono">{action.action_id}</dd>
-            <dt>Entity ID</dt><dd className="mono">{entityId}</dd>
-            <dt>Icon</dt><dd className="mono">{action.icon}</dd>
-            <dt>Created</dt><dd>{action.created_at ? new Date(action.created_at).toLocaleString() : "-"}</dd>
-          </dl>
-          {action.service_calls.length > 0 && (
-            <div style={{ marginTop: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Service calls</div>
-              {action.service_calls.map((sc, i) => (
-                <div key={i} className="mono" style={{ fontSize: 11, padding: "2px 0" }}>
-                  {sc.domain}.{sc.service}
-                  {Object.keys(sc.data).length > 0 && (
-                    <span className="muted"> - {JSON.stringify(sc.data)}</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+      <div className="wcard-body">
+        <div className="wcard-name">{action.label}</div>
+        <div className="wcard-domain">
+          <Icon name="plug" size={11} />
+          {entityId}
         </div>
-      )}
+      </div>
+      <div className="wcard-footer">
+        <span className="muted">{action.created_at ? fmtRel(action.created_at) : "-"}</span>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ActionRow (list view)
+// ---------------------------------------------------------------------------
+
+function ActionRow({ action, onSelect }: { action: HarvestAction; onSelect: () => void }) {
+  const entityId = `harvest_action.${action.action_id}`;
+  return (
+    <div
+      className="widget-row"
+      onClick={onSelect}
+      role="button"
+      tabIndex={0}
+      onKeyDown={e => { if (e.key === "Enter" || e.key === " ") onSelect(); }}
+      aria-label={`Edit action ${action.label}`}
+    >
+      <div className="widget-thumb">
+        <Icon name="play" size={16} />
+      </div>
+      <div className="widget-name">
+        <div className="widget-name-top">{action.label}</div>
+        <div className="widget-name-sub">
+          <Icon name="plug" size={11} />
+          {entityId}
+        </div>
+      </div>
+      <div className="widget-meta widget-hide-sm">
+        <span className="widget-meta-num">{action.service_calls.length}</span>
+        <div className="muted" style={{ fontSize: 11 }}>call{action.service_calls.length !== 1 ? "s" : ""}</div>
+      </div>
+      <span className="muted" style={{ fontSize: 12 }}>
+        {action.created_at ? fmtRel(action.created_at) : "-"}
+      </span>
     </div>
   );
 }
@@ -192,7 +187,7 @@ function DomainEntityPicker({ domain, onSelect, placeholder }: DomainEntityPicke
 }
 
 // ---------------------------------------------------------------------------
-// CreateActionForm
+// ActionEditor - shared form for create and edit
 // ---------------------------------------------------------------------------
 
 type ActionType = "script" | "automation" | "custom";
@@ -203,22 +198,54 @@ const TYPE_META: Record<ActionType, { label: string; desc: string; icon: string;
   custom:     { label: "Custom service call",    desc: "For advanced users. Specify the HA domain, service, and data directly.", icon: "mdi:play-circle",  domain: "" },
 };
 
-interface CreateFormProps {
-  onCreated: () => void;
+function inferActionType(action: HarvestAction): ActionType {
+  if (action.service_calls.length === 1) {
+    const sc = action.service_calls[0];
+    if (sc.domain === "script") return "script";
+    if (sc.domain === "automation" && sc.service === "trigger") return "automation";
+  }
+  return "custom";
+}
+
+function inferSelectedEntity(action: HarvestAction, type: ActionType): string | null {
+  if (type === "script" && action.service_calls.length === 1) {
+    return `script.${action.service_calls[0].service}`;
+  }
+  if (type === "automation" && action.service_calls.length === 1) {
+    const data = action.service_calls[0].data as Record<string, unknown>;
+    return (data.entity_id as string) ?? null;
+  }
+  return null;
+}
+
+interface ActionEditorProps {
+  existing: HarvestAction | null;
+  onSaved: () => void;
   onCancel: () => void;
+  onDeleted?: () => void;
 }
 
 const EMPTY_SC: ServiceCallDef = { domain: "", service: "", data: {} };
 
-function CreateActionForm({ onCreated, onCancel }: CreateFormProps) {
-  const [actionType, setActionType] = useState<ActionType>("script");
-  const [label, setLabel]           = useState("");
-  const [labelAutoset, setLabelAutoset] = useState(true);
-  const [icon, setIcon]             = useState(TYPE_META.script.icon);
-  const [selectedEntity, setSelectedEntity] = useState<string | null>(null);
-  const [calls, setCalls]           = useState<ServiceCallDef[]>([{ ...EMPTY_SC }]);
+function ActionEditor({ existing, onSaved, onCancel, onDeleted }: ActionEditorProps) {
+  const isEdit = existing !== null;
+  const initialType = existing ? inferActionType(existing) : "script";
+
+  const [actionType, setActionType] = useState<ActionType>(initialType);
+  const [label, setLabel]           = useState(existing?.label ?? "");
+  const [labelAutoset, setLabelAutoset] = useState(!isEdit);
+  const [icon, setIcon]             = useState(existing?.icon ?? TYPE_META.script.icon);
+  const [selectedEntity, setSelectedEntity] = useState<string | null>(
+    existing ? inferSelectedEntity(existing, initialType) : null
+  );
+  const [calls, setCalls]           = useState<ServiceCallDef[]>(
+    existing && initialType === "custom"
+      ? existing.service_calls.map(sc => ({ ...sc }))
+      : [{ ...EMPTY_SC }]
+  );
   const [saving, setSaving]         = useState(false);
   const [error, setError]           = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState(false);
 
   const switchType = (t: ActionType) => {
     setActionType(t);
@@ -272,12 +299,17 @@ function CreateActionForm({ onCreated, onCancel }: CreateFormProps) {
     setSaving(true);
     setError(null);
     try {
-      await api.actions.create({
+      const payload = {
         label: label.trim(),
         icon,
         service_calls: buildServiceCalls(),
-      });
-      onCreated();
+      };
+      if (isEdit) {
+        await api.actions.update(existing.action_id, payload);
+      } else {
+        await api.actions.create(payload);
+      }
+      onSaved();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -285,160 +317,203 @@ function CreateActionForm({ onCreated, onCancel }: CreateFormProps) {
     }
   };
 
+  const doDelete = async () => {
+    if (!existing) return;
+    try {
+      await api.actions.delete(existing.action_id);
+      onDeleted?.();
+    } catch (e) {
+      setError(String(e));
+    }
+    setDeleteTarget(false);
+  };
+
   return (
-    <Card title="New action">
-      {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
-
-      <div className="col" style={{ gap: 14 }}>
-        {/* Action type selector */}
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
-            What should this button do?
-          </div>
-          <div className="col" style={{ gap: 6 }}>
-            {(Object.keys(TYPE_META) as ActionType[]).map(t => (
-              <label
-                key={t}
-                className={`choice${actionType === t ? " choice-selected" : ""}`}
-                style={{ padding: "8px 12px" }}
-              >
-                <input
-                  type="radio"
-                  name="action-type"
-                  value={t}
-                  checked={actionType === t}
-                  onChange={() => switchType(t)}
-                />
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>{TYPE_META[t].label}</div>
-                  <div className="muted" style={{ fontSize: 12, marginTop: 1 }}>{TYPE_META[t].desc}</div>
-                </div>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        {/* Entity picker for script / automation */}
-        {actionType !== "custom" && (
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-              {actionType === "script" ? "Script" : "Automation"}
-            </div>
-            {selectedEntity ? (
-              <div className="row" style={{ gap: 8, alignItems: "center" }}>
-                <span className="mono" style={{ flex: 1, fontSize: 13 }}>{selectedEntity}</span>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => { setSelectedEntity(null); if (labelAutoset) setLabel(""); }}
-                >
-                  Change
-                </button>
-              </div>
-            ) : (
-              <DomainEntityPicker
-                domain={TYPE_META[actionType].domain}
-                onSelect={handleEntitySelect}
-                placeholder={actionType === "script"
-                  ? "Search scripts..."
-                  : "Search automations..."}
-              />
-            )}
-          </div>
-        )}
-
-        {/* Raw service calls for custom mode */}
-        {actionType === "custom" && (
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-              Service calls
-            </div>
-            {calls.map((sc, i) => (
-              <div key={i} className="row" style={{ gap: 6, marginBottom: 6, alignItems: "center" }}>
-                <input
-                  type="text"
-                  className="input"
-                  placeholder="domain"
-                  value={sc.domain}
-                  onChange={e => updateCall(i, "domain", e.target.value)}
-                  style={{ flex: 1 }}
-                />
-                <input
-                  type="text"
-                  className="input"
-                  placeholder="service"
-                  value={sc.service}
-                  onChange={e => updateCall(i, "service", e.target.value)}
-                  style={{ flex: 1 }}
-                />
-                <input
-                  type="text"
-                  className="input"
-                  placeholder='data JSON'
-                  defaultValue={Object.keys(sc.data).length > 0 ? JSON.stringify(sc.data) : ""}
-                  onBlur={e => updateCall(i, "data", e.target.value)}
-                  style={{ flex: 2 }}
-                />
-                {calls.length > 1 && (
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => removeCall(i)}
-                    aria-label="Remove service call"
-                  >
-                    <Icon name="close" size={14} />
-                  </button>
-                )}
-              </div>
-            ))}
-            <button className="btn btn-ghost btn-sm" onClick={addCall} style={{ marginTop: 4 }}>
-              <Icon name="plus" size={14} /> Add service call
-            </button>
-          </div>
-        )}
-
-        {/* Label */}
-        <div className="kv" style={{ paddingBottom: 0 }}>
-          <dt>Button label</dt>
-          <dd>
-            <input
-              type="text"
-              className="input"
-              placeholder="e.g. Welcome Home"
-              value={label}
-              onChange={e => { setLabel(e.target.value); setLabelAutoset(false); }}
-              maxLength={100}
-              style={{ width: "100%" }}
-            />
-          </dd>
-        </div>
-
-        {/* Icon */}
-        <div className="kv" style={{ paddingBottom: 0 }}>
-          <dt>Icon</dt>
-          <dd>
-            <input
-              type="text"
-              className="input"
-              placeholder="mdi:play-circle"
-              value={icon}
-              onChange={e => setIcon(e.target.value)}
-              style={{ width: "100%" }}
-            />
-            <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>MDI icon name shown on the widget button.</div>
-          </dd>
-        </div>
-      </div>
-
-      <div className="dialog-actions" style={{ marginTop: 14 }}>
-        <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-        <button
-          className="btn btn-primary"
-          onClick={submit}
-          disabled={!canSubmit() || saving}
-        >
-          {saving ? "Creating..." : "Create action"}
+    <div className="content-narrow col" style={{ gap: 18 }}>
+      {/* Top bar: back */}
+      <div className="row" style={{ gap: 8, alignItems: "center" }}>
+        <button className="btn btn-ghost btn-sm" onClick={onCancel}>
+          <Icon name="chevLeft" size={14} /> Back
         </button>
       </div>
-    </Card>
+
+      <Card
+        title={isEdit ? "Edit action" : "New action"}
+        action={isEdit ? (
+          <button
+            className="btn btn-sm btn-danger"
+            onClick={() => setDeleteTarget(true)}
+          >
+            <Icon name="trash" size={14} /> Delete
+          </button>
+        ) : undefined}
+      >
+        {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
+
+        <div className="col" style={{ gap: 14 }}>
+          {/* Action type selector */}
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+              What should this button do?
+            </div>
+            <div className="col" style={{ gap: 6 }}>
+              {(Object.keys(TYPE_META) as ActionType[]).map(t => (
+                <label
+                  key={t}
+                  className={`choice${actionType === t ? " choice-selected" : ""}`}
+                  style={{ padding: "8px 12px" }}
+                >
+                  <input
+                    type="radio"
+                    name="action-type"
+                    value={t}
+                    checked={actionType === t}
+                    onChange={() => switchType(t)}
+                  />
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>{TYPE_META[t].label}</div>
+                    <div className="muted" style={{ fontSize: 12, marginTop: 1 }}>{TYPE_META[t].desc}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Entity picker for script / automation */}
+          {actionType !== "custom" && (
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                {actionType === "script" ? "Script" : "Automation"}
+              </div>
+              {selectedEntity ? (
+                <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                  <span className="mono" style={{ flex: 1, fontSize: 13 }}>{selectedEntity}</span>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => { setSelectedEntity(null); if (labelAutoset) setLabel(""); }}
+                  >
+                    Change
+                  </button>
+                </div>
+              ) : (
+                <DomainEntityPicker
+                  domain={TYPE_META[actionType].domain}
+                  onSelect={handleEntitySelect}
+                  placeholder={actionType === "script"
+                    ? "Search scripts..."
+                    : "Search automations..."}
+                />
+              )}
+            </div>
+          )}
+
+          {/* Raw service calls for custom mode */}
+          {actionType === "custom" && (
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                Service calls
+              </div>
+              {calls.map((sc, i) => (
+                <div key={i} className="row" style={{ gap: 6, marginBottom: 6, alignItems: "center" }}>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="domain"
+                    value={sc.domain}
+                    onChange={e => updateCall(i, "domain", e.target.value)}
+                    style={{ flex: 1 }}
+                  />
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="service"
+                    value={sc.service}
+                    onChange={e => updateCall(i, "service", e.target.value)}
+                    style={{ flex: 1 }}
+                  />
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder='data JSON'
+                    defaultValue={Object.keys(sc.data).length > 0 ? JSON.stringify(sc.data) : ""}
+                    onBlur={e => updateCall(i, "data", e.target.value)}
+                    style={{ flex: 2 }}
+                  />
+                  {calls.length > 1 && (
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => removeCall(i)}
+                      aria-label="Remove service call"
+                    >
+                      <Icon name="close" size={14} />
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button className="btn btn-ghost btn-sm" onClick={addCall} style={{ marginTop: 4 }}>
+                <Icon name="plus" size={14} /> Add service call
+              </button>
+            </div>
+          )}
+
+          {/* Label */}
+          <div className="kv" style={{ paddingBottom: 0 }}>
+            <dt>Button label</dt>
+            <dd>
+              <input
+                type="text"
+                className="input"
+                placeholder="e.g. Welcome Home"
+                value={label}
+                onChange={e => { setLabel(e.target.value); setLabelAutoset(false); }}
+                maxLength={100}
+                style={{ width: "100%" }}
+              />
+            </dd>
+          </div>
+
+          {/* Icon */}
+          <div className="kv" style={{ paddingBottom: 0 }}>
+            <dt>Icon</dt>
+            <dd>
+              <input
+                type="text"
+                className="input"
+                placeholder="mdi:play-circle"
+                value={icon}
+                onChange={e => setIcon(e.target.value)}
+                style={{ width: "100%" }}
+              />
+              <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>MDI icon name shown on the widget button.</div>
+            </dd>
+          </div>
+        </div>
+
+        <div className="dialog-actions" style={{ marginTop: 14 }}>
+          <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+          <button
+            className="btn btn-primary"
+            onClick={submit}
+            disabled={!canSubmit() || saving}
+          >
+            {saving
+              ? (isEdit ? "Saving..." : "Creating...")
+              : (isEdit ? "Save and close" : "Create action")}
+          </button>
+        </div>
+      </Card>
+
+      {deleteTarget && existing && (
+        <ConfirmDialog
+          title="Delete action"
+          message={`Delete "${existing.label}"? Any widgets using harvest_action.${existing.action_id} will stop working.`}
+          confirmLabel="Delete"
+          confirmDestructive
+          onConfirm={doDelete}
+          onCancel={() => setDeleteTarget(false)}
+        />
+      )}
+    </div>
   );
 }
 
@@ -447,11 +522,16 @@ function CreateActionForm({ onCreated, onCancel }: CreateFormProps) {
 // ---------------------------------------------------------------------------
 
 export function Actions() {
-  const [actions, setActions] = useState<HarvestAction[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<HarvestAction | null>(null);
+  const [actions, setActions]     = useState<HarvestAction[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState<string | null>(null);
+  const [search, setSearch]       = useState("");
+  const [viewMode, setViewMode]   = useState<"grid" | "list">(() => {
+    try { return localStorage.getItem("hrv_action_view") === "list" ? "list" : "grid"; }
+    catch { return "grid"; }
+  });
+  const [editing, setEditing]     = useState<HarvestAction | null>(null);
+  const [creating, setCreating]   = useState(false);
 
   const load = useCallback(() => {
     api.actions.list()
@@ -462,68 +542,108 @@ export function Actions() {
 
   useEffect(() => { load(); }, [load]);
 
-  const doDelete = async () => {
-    if (!deleteTarget) return;
-    try {
-      await api.actions.delete(deleteTarget.action_id);
-    } catch (e) { setError(String(e)); }
-    setDeleteTarget(null);
-    load();
-    loadEntityCache();
-  };
+  const filtered = useMemo(() => {
+    if (!search.trim()) return actions;
+    const words = search.toLowerCase().split(/\s+/).filter(Boolean);
+    return actions.filter(a => {
+      const hay = `${a.label} harvest_action.${a.action_id}`.toLowerCase();
+      return words.every(w => hay.includes(w));
+    });
+  }, [actions, search]);
+
+  // Show editor when creating or editing
+  if (creating) {
+    return (
+      <ActionEditor
+        existing={null}
+        onSaved={() => { setCreating(false); load(); loadEntityCache(); }}
+        onCancel={() => setCreating(false)}
+      />
+    );
+  }
+
+  if (editing) {
+    return (
+      <ActionEditor
+        existing={editing}
+        onSaved={() => { setEditing(null); load(); loadEntityCache(); }}
+        onCancel={() => setEditing(null)}
+        onDeleted={() => { setEditing(null); load(); loadEntityCache(); }}
+      />
+    );
+  }
 
   return (
     <div className="content-narrow col" style={{ gap: 18 }}>
       {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
-      <div className="row" style={{ gap: 8 }}>
-        <span className="muted" style={{ fontSize: 14, flex: 1 }}>
-          {actions.length} action{actions.length !== 1 ? "s" : ""} defined
-        </span>
-        <button onClick={() => setCreating(true)} className="btn btn-primary btn-sm">
-          <Icon name="plus" size={14} /> New action
+      {/* Toolbar */}
+      <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
+        <div className="search" style={{ flex: "1 1 240px", maxWidth: 400 }}>
+          <Icon name="search" size={15} />
+          <input
+            className="input"
+            type="search"
+            placeholder="Search actions..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            aria-label="Search actions"
+          />
+        </div>
+        <div style={{ flex: 1 }} />
+        <button
+          className="icon-btn"
+          onClick={() => {
+            const next = viewMode === "grid" ? "list" : "grid";
+            setViewMode(next);
+            try { localStorage.setItem("hrv_action_view", next); } catch {}
+          }}
+          aria-label={viewMode === "grid" ? "Switch to list view" : "Switch to grid view"}
+          title={viewMode === "grid" ? "List view" : "Grid view"}
+        >
+          <Icon name={viewMode === "grid" ? "list" : "grid"} size={15} />
+        </button>
+        <button onClick={() => setCreating(true)} className="btn btn-primary">
+          <Icon name="plus" size={14} />
+          <span className="btn-label-sm">New action</span>
         </button>
       </div>
 
-      {creating && (
-        <CreateActionForm
-          onCreated={() => { setCreating(false); load(); loadEntityCache(); }}
-          onCancel={() => setCreating(false)}
-        />
-      )}
-
       {loading ? (
-        <div style={{ display: "flex", justifyContent: "center", padding: 40 }}>
-          <Spinner size={36} />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 64 }}>
+          <Spinner size={40} />
         </div>
-      ) : actions.length === 0 && !creating ? (
+      ) : filtered.length === 0 && !search ? (
         <EmptyState
           icon="play"
           title="No actions defined"
           subtitle="Actions add trigger buttons to your widget for things that don't have a card - like running scripts, triggering automations, or firing custom service calls."
           action={{ label: "Create an action", onClick: () => setCreating(true) }}
         />
+      ) : filtered.length === 0 ? (
+        <div className="card card-pad muted" style={{ textAlign: "center", fontSize: 13 }}>
+          No actions match your search.
+        </div>
+      ) : viewMode === "grid" ? (
+        <div className="widgets-grid">
+          {filtered.map(a => (
+            <ActionCard
+              key={a.action_id}
+              action={a}
+              onSelect={() => setEditing(a)}
+            />
+          ))}
+        </div>
       ) : (
-        <Card pad={false}>
-          {actions.map(a => (
+        <div className="card" style={{ padding: 0 }}>
+          {filtered.map(a => (
             <ActionRow
               key={a.action_id}
               action={a}
-              onDelete={() => setDeleteTarget(a)}
+              onSelect={() => setEditing(a)}
             />
           ))}
-        </Card>
-      )}
-
-      {deleteTarget && (
-        <ConfirmDialog
-          title="Delete action"
-          message={`Delete "${deleteTarget.label}"? Any widgets using harvest_action.${deleteTarget.action_id} will stop working.`}
-          confirmLabel="Delete"
-          confirmDestructive
-          onConfirm={doDelete}
-          onCancel={() => setDeleteTarget(null)}
-        />
+        </div>
       )}
     </div>
   );
