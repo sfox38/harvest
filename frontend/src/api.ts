@@ -164,6 +164,7 @@ export const api = {
       event_type?: string;
       since?: string;
       until?: string;
+      search?: string;
     }): Promise<ActivityPage> => {
       const p: Record<string, string> = {};
       if (params.offset     !== undefined) p.offset     = String(params.offset);
@@ -172,6 +173,7 @@ export const api = {
       if (params.event_type) p.event_type = params.event_type;
       if (params.since)      p.since      = params.since;
       if (params.until)      p.until      = params.until;
+      if (params.search)     p.search     = params.search;
       return _get<ActivityPage>("/activity", p);
     },
 

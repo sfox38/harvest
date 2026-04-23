@@ -5,7 +5,7 @@
  * and expandable event rows. CSV export button.
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { ActivityPage, ActivityEventType, HourlyBucket } from "../types";
 import { api } from "../api";
 import { Spinner, ErrorBanner, EventRow, Card, ActivityGraph } from "./Shared";
@@ -58,6 +58,18 @@ export function ActivityLog({ onSelectToken, initialTypeFilter }: ActivityLogPro
   const [tab,       setTab]       = useState<TypeTab>("all");
   const [timeRange, setTimeRange] = useState<TimeRange>("1d");
   const [loadTick,  setLoadTick]  = useState(0);
+  const [search,    setSearch]    = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setDebouncedSearch(value);
+      setOffset(0);
+    }, 300);
+  };
 
   const activeTab  = TYPE_TABS.find(t => t.value === tab) ?? TYPE_TABS[0];
   const activeTime = TIME_RANGES.find(t => t.value === timeRange) ?? TIME_RANGES[3];
@@ -97,13 +109,15 @@ export function ActivityLog({ onSelectToken, initialTypeFilter }: ActivityLogPro
     } else if (activeTab.types.length === 1) {
       params.event_type = activeTab.types[0];
     }
+    const trimmed = debouncedSearch.trim();
+    if (trimmed) params.search = trimmed;
     api.activity.list(params)
       .then(p => { if (!cancelled) setPage(p); })
       .catch(e => { if (!cancelled) setError(String(e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offset, tab, timeRange, loadTick]);
+  }, [offset, tab, timeRange, loadTick, debouncedSearch]);
 
   const handleExport = useCallback(async () => {
     setExporting(true);
@@ -115,13 +129,15 @@ export function ActivityLog({ onSelectToken, initialTypeFilter }: ActivityLogPro
       } else if (activeTab.types.length === 1) {
         p.event_type = activeTab.types[0];
       }
+      const trimmed = debouncedSearch.trim();
+      if (trimmed) p.search = trimmed;
       await api.activity.exportCsv(p);
     } catch (e) {
       setError(String(e));
     } finally {
       setExporting(false);
     }
-  }, [activeTab, sinceIso]);
+  }, [activeTab, sinceIso, debouncedSearch]);
 
   const chartTitle = timeRange === "all"
     ? "Activity - all time"
@@ -155,6 +171,17 @@ export function ActivityLog({ onSelectToken, initialTypeFilter }: ActivityLogPro
 
       {/* Filter bar */}
       <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+        <div className="search" style={{ flex: "0 1 220px", minWidth: 140 }}>
+          <Icon name="search" size={15} />
+          <input
+            className="input"
+            type="search"
+            placeholder="Search entity, token, origin..."
+            value={search}
+            onChange={e => handleSearchChange(e.target.value)}
+            aria-label="Search activity events"
+          />
+        </div>
         <div className="segmented" role="group" aria-label="Filter by event type">
           {TYPE_TABS.map(t => (
             <button
@@ -201,10 +228,10 @@ export function ActivityLog({ onSelectToken, initialTypeFilter }: ActivityLogPro
         <div style={{ display: "flex", justifyContent: "center", padding: 40 }}>
           <Spinner size={36} />
         </div>
-      ) : !hasChartData || !page || page.events.length === 0 ? (
+      ) : !page || page.events.length === 0 ? (
         <Card>
           <div className="muted" style={{ textAlign: "center", padding: 24, fontSize: 14 }}>
-            No activity data for this period.
+            {debouncedSearch.trim() ? "No events match your search." : "No activity data for this period."}
           </div>
         </Card>
       ) : (

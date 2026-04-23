@@ -176,6 +176,7 @@ class ActivityStore:
         until: datetime | None = None,
         limit: int = 50,
         offset: int = 0,
+        search: str | None = None,
     ) -> tuple[list[dict], int]:
         """Query the activity log with optional filters.
 
@@ -283,17 +284,38 @@ class ActivityStore:
             return [], 0
 
         union_sql = " UNION ALL ".join(union_parts)
-        count_sql = f"SELECT COUNT(*) FROM ({union_sql})"
+
+        search_clause = ""
+        search_params: list = []
+        if search:
+            search_words = [w for w in search.lower().split() if w]
+            if search_words:
+                word_conds = []
+                for word in search_words:
+                    escaped = word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                    pattern = f"%{escaped}%"
+                    word_conds.append(
+                        "(LOWER(COALESCE(entity_id,'')) LIKE ? ESCAPE '\\'"
+                        " OR LOWER(COALESCE(origin,'')) LIKE ? ESCAPE '\\'"
+                        " OR LOWER(COALESCE(action,'')) LIKE ? ESCAPE '\\'"
+                        " OR LOWER(COALESCE(result,'')) LIKE ? ESCAPE '\\'"
+                        " OR LOWER(COALESCE(token_id,'')) LIKE ? ESCAPE '\\'"
+                        " OR LOWER(COALESCE(label,'')) LIKE ? ESCAPE '\\')"
+                    )
+                    search_params.extend([pattern] * 6)
+                search_clause = " WHERE " + " AND ".join(word_conds)
+
+        count_sql = f"SELECT COUNT(*) FROM ({union_sql}){search_clause}"
         page_sql = (
-            f"SELECT * FROM ({union_sql}) "
+            f"SELECT * FROM ({union_sql}){search_clause} "
             f"ORDER BY timestamp DESC LIMIT ? OFFSET ?"
         )
 
-        cursor = await self._db.execute(count_sql, params)
+        cursor = await self._db.execute(count_sql, params + search_params)
         row = await cursor.fetchone()
         total = row[0] if row else 0
 
-        cursor = await self._db.execute(page_sql, params + [limit, offset])
+        cursor = await self._db.execute(page_sql, params + search_params + [limit, offset])
         rows = await cursor.fetchall()
 
         events = [
@@ -465,6 +487,7 @@ class ActivityStore:
         display_type_filter: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
+        search: str | None = None,
     ) -> str:
         """Export activity log entries as a CSV string.
 
@@ -472,7 +495,6 @@ class ActivityStore:
         all matching rows (no pagination limit) formatted as CSV with a
         header row.
         """
-        # Use a single query with a large limit to fetch all matching rows.
         events, _ = await self.query_activity(
             token_id=token_id,
             display_type_filter=display_type_filter,
@@ -480,6 +502,7 @@ class ActivityStore:
             until=until,
             limit=100_000,
             offset=0,
+            search=search,
         )
 
         output = io.StringIO()

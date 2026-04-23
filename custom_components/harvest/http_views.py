@@ -564,6 +564,7 @@ class HarvestActivityView(HomeAssistantView):
         token_id = request.query.get("token_id") or None
         # Accept both singular (frontend) and plural (legacy) param names.
         display_type = request.query.get("event_type") or request.query.get("event_types") or None
+        search = request.query.get("search") or None
         try:
             since = _parse_dt(request.query.get("since"))
             until = _parse_dt(request.query.get("until"))
@@ -582,6 +583,7 @@ class HarvestActivityView(HomeAssistantView):
             until=until,
             limit=limit,
             offset=offset,
+            search=search,
         )
 
         # Enrich events with token labels (friendly names).
@@ -607,6 +609,7 @@ class HarvestActivityExportView(HomeAssistantView):
     async def get(self, request: web.Request) -> web.Response:
         token_id = request.query.get("token_id") or None
         display_type = request.query.get("event_type") or request.query.get("event_types") or None
+        search = request.query.get("search") or None
         try:
             since = _parse_dt(request.query.get("since"))
             until = _parse_dt(request.query.get("until"))
@@ -618,6 +621,7 @@ class HarvestActivityExportView(HomeAssistantView):
             display_type_filter=display_type,
             since=since,
             until=until,
+            search=search,
         )
         return web.Response(
             body=csv_data,
