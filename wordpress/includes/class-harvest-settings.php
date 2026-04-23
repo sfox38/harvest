@@ -259,10 +259,10 @@ class Harvest_Settings {
                         ); ?></td>
                     </tr>
                     <tr>
-                        <td><code>show_history</code></td>
+                        <td><code>graph</code></td>
                         <td><?php esc_html_e( 'No', 'harvest' ); ?></td>
                         <td><?php esc_html_e(
-                            'Set to "true" to show a history graph below the card.',
+                            'Graph type: "line" or "bar". Omit to show no graph.',
                             'harvest'
                         ); ?></td>
                     </tr>
@@ -272,9 +272,9 @@ class Harvest_Settings {
                         <td><?php esc_html_e( 'History window in hours. Default: 24.', 'harvest' ); ?></td>
                     </tr>
                     <tr>
-                        <td><code>graph</code></td>
+                        <td><code>period</code></td>
                         <td><?php esc_html_e( 'No', 'harvest' ); ?></td>
-                        <td><?php esc_html_e( 'Graph type: "line" or "bar". Default: line.', 'harvest' ); ?></td>
+                        <td><?php esc_html_e( 'Aggregation period in minutes. Default: 10.', 'harvest' ); ?></td>
                     </tr>
                 </tbody>
             </table>

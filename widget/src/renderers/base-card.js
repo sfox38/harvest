@@ -198,6 +198,36 @@ const CARD_BASE_CSS = /* css */`
 `;
 
 // ---------------------------------------------------------------------------
+// History graph CSS
+// ---------------------------------------------------------------------------
+
+const HISTORY_CSS = /* css */`
+  [part=history-graph] {
+    margin-top: var(--hrv-spacing-s);
+    width: 100%;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  [part=history-graph]:empty {
+    display: none;
+  }
+
+  [part=history-svg] {
+    width: 100%;
+    height: 48px;
+    display: block;
+  }
+
+  [part=history-empty] {
+    font-size: var(--hrv-font-size-xs);
+    color: var(--hrv-color-text-secondary);
+  }
+`;
+
+// ---------------------------------------------------------------------------
 // BaseCard
 // ---------------------------------------------------------------------------
 
@@ -429,7 +459,7 @@ export class BaseCard {
    * @returns {string}
    */
   getSharedStyles() {
-    return SHARED_CSS_VARS + CARD_BASE_CSS + getErrorStateStyles() + COMPANION_CSS;
+    return SHARED_CSS_VARS + CARD_BASE_CSS + getErrorStateStyles() + COMPANION_CSS + HISTORY_CSS;
   }
 
   /**
@@ -446,6 +476,141 @@ export class BaseCard {
       clearTimeout(timer);
       timer = setTimeout(() => { timer = null; fn(...args); }, ms);
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // History graph
+  // -------------------------------------------------------------------------
+
+  /**
+   * Return HTML placeholder for the history graph zone. Include in render()
+   * templates between card-body and companion-zone.
+   *
+   * @returns {string}
+   */
+  renderHistoryZoneHTML() {
+    if (!this.config.graph) return "";
+    return `<div part="history-graph" aria-label="History graph"></div>`;
+  }
+
+  /** @type {Array<{t:number, s:number}>} */ #historyPoints = [];
+  /** @type {number} */ #historyHours = 24;
+  /** @type {string} */ #historyGraphType = "line";
+
+  /**
+   * Called when history_data arrives from the server.
+   *
+   * @param {Array<{t:string, s:string}>} points
+   * @param {number} hours
+   * @param {string} graphType - "line" or "bar"
+   */
+  receiveHistoryData(points, hours, graphType) {
+    this.#historyHours = hours || 24;
+    this.#historyGraphType = graphType || "line";
+
+    this.#historyPoints = [];
+    for (const p of points) {
+      const v = parseFloat(p.s);
+      if (!isNaN(v)) {
+        this.#historyPoints.push({ t: new Date(p.t).getTime(), s: v });
+      }
+    }
+
+    this.#renderHistoryGraph();
+  }
+
+  /**
+   * Append a live state_update value to the history graph.
+   *
+   * @param {string} stateValue
+   */
+  appendHistoryPoint(stateValue) {
+    const v = parseFloat(stateValue);
+    if (isNaN(v)) return;
+    if (this.#historyPoints.length === 0) return;
+
+    const now = Date.now();
+    this.#historyPoints.push({ t: now, s: v });
+
+    const cutoff = now - this.#historyHours * 3600_000;
+    while (this.#historyPoints.length > 0 && this.#historyPoints[0].t < cutoff) {
+      this.#historyPoints.shift();
+    }
+
+    this.#renderHistoryGraph();
+  }
+
+  #renderHistoryGraph() {
+    const zone = this.root.querySelector("[part=history-graph]");
+    if (!zone) return;
+
+    if (this.#historyPoints.length < 2) {
+      zone.innerHTML = `<span part="history-empty">${this.i18n.t("history.unavailable")}</span>`;
+      return;
+    }
+
+    const W = 280;
+    const H = 60;
+    const PAD_X = 0;
+    const PAD_Y = 4;
+
+    const pts = this.#historyPoints;
+    const tMin = pts[0].t;
+    const tMax = pts[pts.length - 1].t;
+    const tRange = tMax - tMin || 1;
+
+    let sMin = Infinity;
+    let sMax = -Infinity;
+    for (const p of pts) {
+      if (p.s < sMin) sMin = p.s;
+      if (p.s > sMax) sMax = p.s;
+    }
+    const sRange = sMax - sMin || 1;
+
+    const scaleX = (t) => PAD_X + ((t - tMin) / tRange) * (W - 2 * PAD_X);
+    const scaleY = (s) => (H - PAD_Y) - ((s - sMin) / sRange) * (H - 2 * PAD_Y);
+
+    if (this.#historyGraphType === "bar") {
+      zone.innerHTML = this.#renderBarGraph(pts, W, H, scaleX, scaleY, sMin);
+    } else {
+      zone.innerHTML = this.#renderLineGraph(pts, W, H, scaleX, scaleY);
+    }
+  }
+
+  #renderLineGraph(pts, W, H, scaleX, scaleY) {
+    const coords = pts.map(p => `${scaleX(p.t).toFixed(1)},${scaleY(p.s).toFixed(1)}`);
+    const polyline = coords.join(" ");
+
+    const first = pts[0];
+    const last = pts[pts.length - 1];
+    const fillCoords = [
+      ...coords,
+      `${scaleX(last.t).toFixed(1)},${H}`,
+      `${scaleX(first.t).toFixed(1)},${H}`,
+    ].join(" ");
+
+    return `<svg part="history-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <polygon points="${fillCoords}" fill="var(--hrv-color-primary)" opacity="0.1"/>
+      <polyline points="${polyline}" fill="none" stroke="var(--hrv-color-primary)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+    </svg>`;
+  }
+
+  #renderBarGraph(pts, W, H, scaleX, scaleY, sMin) {
+    const gap = 1;
+    const totalGaps = (pts.length - 1) * gap;
+    const barWidth = Math.max(2, (W - totalGaps) / pts.length);
+    const baseline = H;
+    let bars = "";
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      const x = i * (barWidth + gap);
+      const y = scaleY(p.s);
+      const h = baseline - y;
+      if (h > 0.5) {
+        bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${h.toFixed(1)}" fill="var(--hrv-color-primary)" opacity="0.6" rx="1"/>`;
+      }
+    }
+    return `<svg part="history-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}</svg>`;
   }
 }
 

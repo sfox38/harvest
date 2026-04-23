@@ -352,13 +352,16 @@ class HarvestWsView(HomeAssistantView):
             self._send_keepalive(ws, keepalive_interval)
         )
 
+        # Track which entities have already had history sent (debounce per session).
+        history_sent: set[str] = set()
+
         # --- Steps 4b/6/7: Initial state, message loop, and cleanup ---
         # _send_initial_state and _register_listeners are inside the try block so
         # that a dropped connection during initial state push still triggers cleanup.
         try:
             await self._send_initial_state(ws, session, real_entity_ids, token, outgoing_ids)
             self._register_listeners(ws, session, token, outgoing_ids, listener_unsubs, real_entity_ids)
-            await self._message_loop(ws, session, token, outgoing_ids, listener_unsubs)
+            await self._message_loop(ws, session, token, outgoing_ids, listener_unsubs, history_sent)
         finally:
             # --- Step 7: Cleanup ---
             expiry_warning_task.cancel()
@@ -432,6 +435,7 @@ class HarvestWsView(HomeAssistantView):
         token: Token,
         outgoing_ids: dict[str, str],
         listener_unsubs: dict[str, Callable],
+        history_sent: set[str],
     ) -> None:
         """Process incoming messages until the connection closes.
 
@@ -502,6 +506,8 @@ class HarvestWsView(HomeAssistantView):
                     await self._handle_unsubscribe(ws, msg, session, listener_unsubs)
                 elif msg_type == "renew":
                     await self._handle_renew(ws, msg, session, token, outgoing_ids, listener_unsubs)
+                elif msg_type == "history_request":
+                    await self._handle_history_request(ws, msg, session, token, outgoing_ids, history_sent)
                 elif msg_type is None:
                     _LOGGER.debug("HArvest: message missing 'type' from session %s.", session.session_id)
                     flood_count, flood_window_start = _track_flood(flood_count, flood_window_start)
@@ -759,6 +765,100 @@ class HarvestWsView(HomeAssistantView):
         await self._send_initial_state(
             ws, session, list(session.subscribed_entity_ids), token, outgoing_ids
         )
+
+    # ------------------------------------------------------------------
+    # History
+    # ------------------------------------------------------------------
+
+    async def _handle_history_request(
+        self,
+        ws: WebSocketResponse,
+        msg: dict,
+        session: Session,
+        token: Token,
+        outgoing_ids: dict[str, str],
+        history_sent: set[str],
+    ) -> None:
+        """Fetch entity state history from HA's recorder and send history_data.
+
+        Debounces: each (session, entity) pair gets history at most once.
+        If recorder is not loaded, sends empty points array.
+        """
+        msg_id = msg.get("msg_id")
+        entity_ref = msg.get("entity_id", "")
+        hours = msg.get("hours", 24)
+        if not isinstance(hours, (int, float)) or hours < 1:
+            hours = 24
+        hours = min(hours, 168)  # cap at 7 days
+
+        period = msg.get("period", 10)
+        if not isinstance(period, (int, float)) or period < 1:
+            period = 10
+        period = int(period)
+        hours_in_minutes = int(hours) * 60
+        if period >= hours_in_minutes:
+            period = 10
+
+        real_id = self._ref_to_real_id(entity_ref, session)
+        if real_id is None:
+            await ws.send_json({
+                "type": "error",
+                "code": ERR_ENTITY_NOT_IN_TOKEN,
+                "message": f"Entity {entity_ref} not in session.",
+                "msg_id": msg_id,
+            })
+            return
+
+        outgoing_id = outgoing_ids.get(real_id, real_id)
+
+        if real_id in history_sent:
+            return
+        history_sent.add(real_id)
+
+        points: list[dict[str, str]] = []
+
+        if "recorder" in self._hass.config.components:
+            try:
+                from homeassistant.components.recorder import get_instance, history
+
+                end = datetime.now(tz=timezone.utc)
+                start = end - timedelta(hours=int(hours))
+                instance = get_instance(self._hass)
+                states_dict = await instance.async_add_executor_job(
+                    history.state_changes_during_period,
+                    self._hass,
+                    start,
+                    end,
+                    real_id,
+                    True,  # no_attributes - we only need state values
+                )
+                raw_points: list[tuple[float, float]] = []
+                for state_obj in states_dict.get(real_id, []):
+                    s = state_obj.state
+                    if s in ("unavailable", "unknown", ""):
+                        continue
+                    try:
+                        raw_points.append((
+                            state_obj.last_changed.timestamp(),
+                            float(s),
+                        ))
+                    except (ValueError, TypeError):
+                        continue
+
+                if raw_points:
+                    points = _aggregate_points(raw_points, start.timestamp(), end.timestamp(), period)
+
+            except Exception:
+                _LOGGER.warning("HArvest: failed to fetch history for %s", real_id, exc_info=True)
+
+        await ws.send_json({
+            "type": "history_data",
+            "entity_id": outgoing_id,
+            "hours": hours,
+            "period": period,
+            "points": points,
+            "msg_id": msg_id,
+        })
 
     # ------------------------------------------------------------------
     # State fan-out
@@ -1036,6 +1136,48 @@ class HarvestWsView(HomeAssistantView):
 # ------------------------------------------------------------------
 # Module-level helpers
 # ------------------------------------------------------------------
+
+def _aggregate_points(
+    raw: list[tuple[float, float]],
+    start_ts: float,
+    end_ts: float,
+    period_minutes: int,
+) -> list[dict[str, str]]:
+    """Aggregate raw (timestamp, value) pairs into period-sized buckets.
+
+    Each bucket spans period_minutes and contains the average value of all
+    raw points that fall within it. Empty buckets are skipped.
+    Returns list of dicts with ISO timestamp midpoint and string value.
+    """
+    from datetime import datetime, timezone
+
+    period_secs = period_minutes * 60
+    bucket_start = start_ts
+    result: list[dict[str, str]] = []
+    idx = 0
+    raw.sort(key=lambda p: p[0])
+
+    while bucket_start < end_ts:
+        bucket_end = bucket_start + period_secs
+        total = 0.0
+        count = 0
+        while idx < len(raw) and raw[idx][0] < bucket_end:
+            if raw[idx][0] >= bucket_start:
+                total += raw[idx][1]
+                count += 1
+            idx += 1
+
+        if count > 0:
+            mid_ts = bucket_start + period_secs / 2
+            result.append({
+                "t": datetime.fromtimestamp(mid_ts, tz=timezone.utc).isoformat(),
+                "s": str(round(total / count, 2)),
+            })
+
+        bucket_start = bucket_end
+
+    return result
+
 
 def _find_entity_access(entity_id: str, token: Token) -> EntityAccess | None:
     """Return the EntityAccess for a real entity_id in a token, or None."""

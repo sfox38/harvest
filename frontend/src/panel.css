@@ -431,6 +431,102 @@
 .attr-filter-item.excluded span { text-decoration: line-through; color: var(--ink-4); }
 .attr-filter-item input[type="checkbox"] { margin: 0; flex-shrink: 0; }
 
+/* Entity card layout (TokenDetail EntitiesEditor) */
+.entity-card {
+  border-bottom: 1px solid var(--divider);
+  padding: 10px 18px;
+}
+.entity-card:last-child { border-bottom: none; }
+
+.entity-row-1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.entity-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.entity-alias {
+  font-size: 11px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.entity-delete {
+  padding: 1px 4px;
+  flex-shrink: 0;
+}
+
+.entity-row-2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-left: 36px;
+  padding-top: 4px;
+}
+
+.entity-row-2-btn {
+  font-size: 11px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.entity-cap-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.entity-expand-panel {
+  padding: 8px 12px 4px 36px;
+}
+
+.entity-expand-panel > div {
+  border-left: 2px solid var(--border);
+  padding-left: 12px;
+}
+
+.entity-settings-badge {
+  font-weight: 600;
+}
+
+.entity-graph-settings {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.entity-graph-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.entity-graph-select {
+  font-size: 11px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  min-width: 56px;
+}
+
 .btn-danger {
   background: var(--paper);
   border-color: #e8c8c5;

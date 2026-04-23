@@ -96,6 +96,7 @@ export class InputNumberCard extends BaseCard {
             </div>
           `}
         </div>
+        ${this.renderHistoryZoneHTML()}
         ${this.renderCompanionZoneHTML()}
         <div part="stale-indicator" aria-hidden="true"></div>
       </div>

@@ -212,6 +212,25 @@ export class HarvestClient {
   }
 
   /**
+   * Request history data for an entity from the server.
+   *
+   * @param {string} entityId
+   * @param {number} hours
+   * @param {number} period - aggregation period in minutes
+   */
+  requestHistory(entityId, hours, period) {
+    if (!this.#sessionId || !this.#ws || this.#ws.readyState !== WebSocket.OPEN) return;
+    this.#sendJson({
+      type: "history_request",
+      session_id: this.#sessionId,
+      entity_id: entityId,
+      hours: hours ?? 24,
+      period: period ?? 10,
+      msg_id: this.#nextMsgId(),
+    });
+  }
+
+  /**
    * Return a new monotonically increasing message ID.
    * @returns {number}
    */
@@ -540,7 +559,7 @@ export class HarvestClient {
   #handleHistoryData(msg) {
     const entityId = msg.entity_id;
     const card = this.#cards.get(entityId);
-    card?.receiveHistoryData?.(msg.history ?? []);
+    card?.receiveHistoryData?.(msg.points ?? [], msg.hours ?? 24);
   }
 
   #handleSubscribeOk(_msg) {

@@ -43,6 +43,10 @@ export interface EntityAccess {
   capabilities: "read" | "read-write";
   exclude_attributes: string[];
   companion_of: string | null;
+  graph: "line" | "bar" | null;
+  hours: number;
+  period: number;
+  animate: boolean;
 }
 
 export type TokenStatus = "active" | "inactive" | "expiring_soon" | "expired" | "revoked";

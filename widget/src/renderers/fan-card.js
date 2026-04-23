@@ -59,8 +59,8 @@ const FAN_CARD_STYLES = /* css */`
     margin-bottom: 2px;
   }
 
-  /* Fan spin animation - only active when data-on=true */
-  [part=card-icon][data-on=true] svg {
+  /* Fan spin animation - only active when data-on=true and data-animate=true */
+  [part=card-icon][data-on=true][data-animate=true] svg {
     animation: hrv-fan-spin 2s linear infinite;
     transform-origin: center;
   }
@@ -73,7 +73,7 @@ const FAN_CARD_STYLES = /* css */`
   /* Respects prefers-reduced-motion (already enforced by shared styles,
      but re-stated here for explicitness) */
   @media (prefers-reduced-motion: reduce) {
-    [part=card-icon][data-on=true] svg {
+    [part=card-icon][data-on=true][data-animate=true] svg {
       animation: none;
     }
   }
@@ -185,7 +185,10 @@ export class FanCard extends BaseCard {
       ?? this.def.icon
       ?? domainDefault;
     this.renderIcon(this.resolveIcon(rawIcon, domainDefault), "card-icon");
-    if (iconEl) iconEl.setAttribute("data-on", String(isOn));
+    if (iconEl) {
+      iconEl.setAttribute("data-on", String(isOn));
+      iconEl.setAttribute("data-animate", String(!!this.config.animate));
+    }
   }
 
   predictState(action, _data) {

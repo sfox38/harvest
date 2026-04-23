@@ -83,6 +83,7 @@ export class BatterySensorCard extends BaseCard {
           <span part="sensor-value" aria-live="polite">-</span>
           <span part="sensor-unit">${_esc(this.def.unit_of_measurement ?? "%")}</span>
         </div>
+        ${this.renderHistoryZoneHTML()}
         ${this.renderCompanionZoneHTML()}
         <div part="stale-indicator" aria-hidden="true"></div>
       </div>

@@ -69,6 +69,10 @@ class EntityAccess:
     exclude_attributes: list[str] = field(default_factory=list)
     companion_of: str | None = None         # entity_id of the primary entity this is a companion of.
                                             # None means this is a primary entity.
+    graph: str | None = None                # "line" or "bar"; None means no graph
+    hours: int = 24
+    period: int = 10                        # aggregation period in minutes
+    animate: bool = False
 
 
 @dataclass
@@ -722,6 +726,10 @@ class TokenManager:
                 alias=e.get("alias"),
                 exclude_attributes=e.get("exclude_attributes", []),
                 companion_of=e.get("companion_of"),
+                graph=e.get("graph"),
+                hours=e.get("hours", 24),
+                period=e.get("period", 10),
+                animate=e.get("animate", False),
             )
             for e in d.get("entities", [])
         ]

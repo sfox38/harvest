@@ -39,9 +39,10 @@ class Harvest_Shortcode {
                 'companion'    => '',
                 'theme'        => '',
                 'lang'         => 'auto',
-                'show_history' => 'false',
+                'graph'        => '',
                 'hours'        => '24',
-                'graph'        => 'line',
+                'period'       => '10',
+                'animate'      => 'false',
             ],
             $atts,
             'harvest'
@@ -112,10 +113,14 @@ class Harvest_Shortcode {
             $data_attrs['data-lang'] = $atts['lang'];
         }
 
-        if ( $atts['show_history'] === 'true' ) {
-            $data_attrs['data-show-history']  = 'true';
-            $data_attrs['data-hours-to-show'] = $atts['hours'];
-            $data_attrs['data-graph']          = $atts['graph'];
+        if ( ! empty( $atts['graph'] ) ) {
+            $data_attrs['data-graph']  = $atts['graph'];
+            $data_attrs['data-hours']  = $atts['hours'];
+            $data_attrs['data-period'] = $atts['period'];
+        }
+
+        if ( $atts['animate'] === 'true' ) {
+            $data_attrs['data-animate'] = 'true';
         }
 
         $attr_string = self::build_attr_string( $data_attrs );

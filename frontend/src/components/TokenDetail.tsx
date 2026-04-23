@@ -50,6 +50,29 @@ function groupEntities(entities: Token["entities"]): PrimaryWithCompanions[] {
   return primaries.map(p => ({ primary: p, companions: companionMap.get(p.entity_id) ?? [] }));
 }
 
+const PERIOD_OPTIONS = [
+  { value: 1440, label: "1 day" },
+  { value: 60,   label: "1 hour" },
+  { value: 30,   label: "30 minutes" },
+  { value: 10,   label: "10 minutes" },
+  { value: 5,    label: "5 minutes" },
+  { value: 1,    label: "1 minute" },
+];
+
+function graphAttrs(e: Token["entities"][0], format: "html" | "shortcode"): string {
+  if (!e.graph) return "";
+  if (format === "html") {
+    return ` graph="${e.graph}" hours="${e.hours ?? 24}" period="${e.period ?? 10}"`;
+  }
+  return ` graph="${e.graph}" hours="${e.hours ?? 24}" period="${e.period ?? 10}"`;
+}
+
+function extraAttrs(e: Token["entities"][0], format: "html" | "shortcode"): string {
+  let s = "";
+  if (e.animate) s += format === "html" ? ` animate` : ` animate="true"`;
+  return s;
+}
+
 function buildCardSnippet(token: Token, useAliases: boolean, mode: CardMode, haUrl: string): string {
   const groups = groupEntities(token.entities);
 
@@ -57,7 +80,9 @@ function buildCardSnippet(token: Token, useAliases: boolean, mode: CardMode, haU
     const attr = useAliases && g.primary.alias ? `alias="${g.primary.alias}"` : `entity="${g.primary.entity_id}"`;
     const cl = g.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
     const companionAttr = cl.length > 0 ? ` companion="${cl.join(", ")}"` : "";
-    return `${indent}<hrv-card ${attr}${companionAttr}></hrv-card>`;
+    const hist = graphAttrs(g.primary, "html");
+    const extra = extraAttrs(g.primary, "html");
+    return `${indent}<hrv-card ${attr}${companionAttr}${hist}${extra}></hrv-card>`;
   }
 
   if (mode === "page") {
@@ -73,7 +98,9 @@ function buildCardSnippet(token: Token, useAliases: boolean, mode: CardMode, haU
   const entityAttr = useAliases && g.primary.alias ? `alias="${g.primary.alias}"` : `entity="${g.primary.entity_id}"`;
   const cl = g.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
   const companionAttr = cl.length > 0 ? ` companion="${cl.join(", ")}"` : "";
-  return `<hrv-card ${groupAttrs} ${entityAttr}${companionAttr}></hrv-card>`;
+  const hist = graphAttrs(g.primary, "html");
+  const extra = extraAttrs(g.primary, "html");
+  return `<hrv-card ${groupAttrs} ${entityAttr}${companionAttr}${hist}${extra}></hrv-card>`;
 }
 
 function buildWordPressSnippet(token: Token, useAliases: boolean, mode: CardMode): string {
@@ -83,7 +110,9 @@ function buildWordPressSnippet(token: Token, useAliases: boolean, mode: CardMode
     const attr = useAliases && g.primary.alias ? `alias="${g.primary.alias}"` : `entity="${g.primary.entity_id}"`;
     const cl = g.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
     const companionAttr = cl.length > 0 ? ` companion="${cl.join(",")}"` : "";
-    return `${indent}[harvest ${attr}${companionAttr}]`;
+    const hist = graphAttrs(g.primary, "shortcode");
+    const extra = extraAttrs(g.primary, "shortcode");
+    return `${indent}[harvest ${attr}${companionAttr}${hist}${extra}]`;
   }
 
   if (mode === "page") {
@@ -91,7 +120,9 @@ function buildWordPressSnippet(token: Token, useAliases: boolean, mode: CardMode
       const attr = useAliases && g.primary.alias ? `alias="${g.primary.alias}"` : `entity="${g.primary.entity_id}"`;
       const cl = g.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
       const companionAttr = cl.length > 0 ? ` companion="${cl.join(",")}"` : "";
-      return `[harvest token="${token.token_id}" ${attr}${companionAttr}]`;
+      const hist = graphAttrs(g.primary, "shortcode");
+      const extra = extraAttrs(g.primary, "shortcode");
+      return `[harvest token="${token.token_id}" ${attr}${companionAttr}${hist}${extra}]`;
     }).join("\n");
   }
 
@@ -104,7 +135,9 @@ function buildWordPressSnippet(token: Token, useAliases: boolean, mode: CardMode
   const entityAttr = useAliases && g.primary.alias ? `alias="${g.primary.alias}"` : `entity="${g.primary.entity_id}"`;
   const cl = g.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
   const companionAttr = cl.length > 0 ? ` companion="${cl.join(",")}"` : "";
-  return `[harvest token="${token.token_id}" ${entityAttr}${companionAttr}]`;
+  const hist = graphAttrs(g.primary, "shortcode");
+  const extra = extraAttrs(g.primary, "shortcode");
+  return `[harvest token="${token.token_id}" ${entityAttr}${companionAttr}${hist}${extra}]`;
 }
 
 function fmtDateLong(iso: string): string {
@@ -257,6 +290,8 @@ interface EntitiesEditorProps {
 
 const MAX_COMPANIONS = 4;
 const COMPANION_ALLOWED_DOMAINS = new Set(["light", "switch", "binary_sensor", "input_boolean", "cover", "remote", "lock"]);
+const HISTORY_DOMAINS = new Set(["sensor", "input_number", "binary_sensor"]);
+const HOURS_OPTIONS = [1, 6, 12, 24, 48, 72, 168];
 
 function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError }: EntitiesEditorProps) {
   const [addInput, setAddInput]         = useState("");
@@ -264,7 +299,7 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
   const [adding,   setAdding]           = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [expandedCompanions, setExpandedCompanions] = useState<Set<string>>(new Set());
-  const [expandedAttrs, setExpandedAttrs] = useState<Set<string>>(new Set());
+  const [expandedSettings, setExpandedSettings] = useState<Set<string>>(new Set());
   const [attrCache, setAttrCache] = useState<Record<string, string[]>>({});
   const [attrLoading, setAttrLoading] = useState<Set<string>>(new Set());
 
@@ -308,6 +343,10 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
       capabilities: defaultCap,
       exclude_attributes: [] as string[],
       companion_of: null,
+      graph: null,
+      hours: 24,
+      period: 10,
+      animate: false,
     }];
     await patchEntities(updated);
     setAdding(false);
@@ -330,6 +369,10 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
       capabilities: defaultCap,
       exclude_attributes: [] as string[],
       companion_of: primaryEntityId,
+      graph: null,
+      hours: 24,
+      period: 10,
+      animate: false,
     }];
     await patchEntities(updated);
     setAdding(false);
@@ -355,25 +398,31 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
     });
   };
 
-  const toggleAttrExpand = async (entityId: string) => {
-    const isOpen = expandedAttrs.has(entityId);
-    setExpandedAttrs(prev => {
+  const toggleSettingsExpand = (entityId: string) => {
+    const isOpen = expandedSettings.has(entityId);
+    setExpandedSettings(prev => {
       const next = new Set(prev);
       if (isOpen) next.delete(entityId); else next.add(entityId);
       return next;
     });
     if (!isOpen && !attrCache[entityId]) {
       setAttrLoading(prev => new Set(prev).add(entityId));
-      try {
-        const keys = await api.ha.entityAttributes(entityId);
-        setAttrCache(prev => ({ ...prev, [entityId]: keys }));
-      } catch { /* entity may not exist */ }
-      setAttrLoading(prev => {
-        const next = new Set(prev);
-        next.delete(entityId);
-        return next;
-      });
+      api.ha.entityAttributes(entityId)
+        .then(keys => setAttrCache(prev => ({ ...prev, [entityId]: keys })))
+        .catch(() => {})
+        .finally(() => setAttrLoading(prev => {
+          const next = new Set(prev);
+          next.delete(entityId);
+          return next;
+        }));
     }
+  };
+
+  const updateGraphSetting = (entityId: string, field: "graph" | "hours" | "period", value: string | number | null) => {
+    if (!canEdit) return;
+    patchEntities(token.entities.map(en =>
+      en.entity_id === entityId ? { ...en, [field]: value } : en
+    ));
   };
 
   const toggleExcludeAttr = (entityId: string, attrKey: string) => {
@@ -401,103 +450,106 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
     >
       {grouped.map(g => {
         const e = g.primary;
+        const domain = e.entity_id.split(".")[0];
         const isRW = e.capabilities === "read-write";
         const companionCount = g.companions.length;
-        const isExpanded = expandedCompanions.has(e.entity_id);
+        const isCompanionExpanded = expandedCompanions.has(e.entity_id);
+        const isSettingsOpen = expandedSettings.has(e.entity_id);
+        const showGraphOption = HISTORY_DOMAINS.has(domain);
+        const showAnimateOption = domain === "fan";
+        const settingsBadge = (e.exclude_attributes.length > 0 || e.graph || e.animate) ? "entity-settings-badge" : "";
         return (
-          <div key={e.entity_id}>
-            <div className="widget-row" style={{ gridTemplateColumns: "32px 1fr auto auto auto", cursor: "default" }}>
-              <div className="widget-thumb" style={{ width: 32, height: 32 }}>
-                <Icon name="plug" size={16} />
+          <div key={e.entity_id} className="entity-card">
+            {/* Row 1: entity name + alias + delete */}
+            <div className="entity-row-1">
+              <div className="widget-thumb" style={{ width: 28, height: 28 }}>
+                <Icon name="plug" size={14} />
               </div>
-              <div className="widget-name">
-                <div className="widget-name-top mono" style={{ fontSize: 13 }}>{e.entity_id}</div>
-                <div className="widget-name-sub">
-                  {e.alias && <>Alias: <span className="mono">{e.alias}</span> - </>}
-                  <button
-                    className="btn-link"
-                    style={{ fontSize: 11 }}
-                    onClick={() => toggleCompanionExpand(e.entity_id)}
-                  >
-                    {companionCount > 0 ? `${companionCount} companion${companionCount > 1 ? "s" : ""}` : "Add companion"}
-                    {" "}<Icon name={isExpanded ? "chevron-up" : "chevron-down"} size={10} />
-                  </button>
-                  {" - "}
-                  <button
-                    className="btn-link"
-                    style={{ fontSize: 11 }}
-                    onClick={() => toggleAttrExpand(e.entity_id)}
-                  >
-                    {e.exclude_attributes.length > 0 ? `${e.exclude_attributes.length} excluded` : "Filter attributes"}
-                    {" "}<Icon name={expandedAttrs.has(e.entity_id) ? "chevron-up" : "chevron-down"} size={10} />
-                  </button>
-                </div>
-              </div>
-              <select
-                value={e.capabilities}
-                onChange={ev => toggleCap(e.entity_id, ev.target.value as "read" | "read-write")}
-                disabled={!canEdit}
-                className="input"
-                style={{
-                  fontSize: 11, fontWeight: 600, padding: "2px 6px",
-                  background: isRW ? "var(--info-weak)" : "var(--ok-weak)",
-                  color: isRW ? "var(--info)" : "var(--ok)",
-                  border: "none", borderRadius: 10,
-                }}
-              >
-                <option value="read">READ</option>
-                <option value="read-write">READ-WRITE</option>
-              </select>
+              <span className="entity-name mono">{e.entity_id}</span>
+              {e.alias && <span className="entity-alias mono">Alias: {e.alias}</span>}
               {canEdit && (
                 <button
                   onClick={() => setConfirmRemove(e.entity_id)}
-                  className="btn btn-sm btn-ghost"
-                  style={{ padding: "1px 4px" }}
+                  className="btn btn-sm btn-ghost entity-delete"
                   aria-label={`Remove ${e.entity_id}`}
                 >
                   <Icon name="close" size={12} />
                 </button>
               )}
             </div>
-            {isExpanded && (
-              <div style={{ paddingLeft: 44, paddingRight: 12, paddingBottom: 8 }}>
-                <div style={{ borderLeft: "2px solid var(--border)", paddingLeft: 12 }}>
-                  <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
-                    Companions ({companionCount}/{MAX_COMPANIONS})
-                  </div>
-                  {g.companions.map(c => (
-                    <div key={c.entity_id} className="chip" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                      <span style={{ flex: 1, fontSize: 12 }} className="mono">{c.entity_id}</span>
-                      {c.alias && <span className="muted" style={{ fontSize: 10 }}>alias: {c.alias}</span>}
-                      {canEdit && (
-                        <button
-                          onClick={() => removeCompanion(c.entity_id)}
-                          className="btn btn-sm btn-ghost"
-                          style={{ padding: "1px 4px" }}
-                          aria-label={`Remove companion ${c.entity_id}`}
-                        ><Icon name="close" size={10} /></button>
-                      )}
-                    </div>
-                  ))}
-                  {canEdit && companionCount < MAX_COMPANIONS && (
-                    <EntityAutocomplete
-                      value={companionInput}
-                      onChange={setCompanionInput}
-                      onSelect={(id) => { addCompanion(e.entity_id, id); setCompanionInput(""); }}
-                      disabled={adding || saving}
-                      excludeIds={existingIds}
-                      filterDomains={COMPANION_ALLOWED_DOMAINS}
-                      placeholder="Add companion entity..."
-                    />
-                  )}
+
+            {/* Row 2: controls */}
+            <div className="entity-row-2">
+              <select
+                value={e.capabilities}
+                onChange={ev => toggleCap(e.entity_id, ev.target.value as "read" | "read-write")}
+                disabled={!canEdit}
+                className="entity-cap-pill"
+                style={{
+                  background: isRW ? "var(--info-weak)" : "var(--ok-weak)",
+                  color: isRW ? "var(--info)" : "var(--ok)",
+                }}
+              >
+                <option value="read">READ</option>
+                <option value="read-write">READ-WRITE</option>
+              </select>
+              <button
+                className="btn-link entity-row-2-btn"
+                onClick={() => toggleCompanionExpand(e.entity_id)}
+              >
+                {companionCount > 0 ? `${companionCount} companion${companionCount > 1 ? "s" : ""}` : "Add companion"}
+                {" "}<Icon name={isCompanionExpanded ? "chevron-up" : "chevron-down"} size={10} />
+              </button>
+              <button
+                className={`btn-link entity-row-2-btn ${settingsBadge}`}
+                onClick={() => toggleSettingsExpand(e.entity_id)}
+              >
+                Settings
+                {" "}<Icon name={isSettingsOpen ? "chevron-up" : "chevron-down"} size={10} />
+              </button>
+            </div>
+
+            {/* Expandable: Companions */}
+            {isCompanionExpanded && (
+              <div className="entity-expand-panel">
+                <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
+                  Companions ({companionCount}/{MAX_COMPANIONS})
                 </div>
+                {g.companions.map(c => (
+                  <div key={c.entity_id} className="chip" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                    <span style={{ flex: 1, fontSize: 12 }} className="mono">{c.entity_id}</span>
+                    {c.alias && <span className="muted" style={{ fontSize: 10 }}>alias: {c.alias}</span>}
+                    {canEdit && (
+                      <button
+                        onClick={() => removeCompanion(c.entity_id)}
+                        className="btn btn-sm btn-ghost"
+                        style={{ padding: "1px 4px" }}
+                        aria-label={`Remove companion ${c.entity_id}`}
+                      ><Icon name="close" size={10} /></button>
+                    )}
+                  </div>
+                ))}
+                {canEdit && companionCount < MAX_COMPANIONS && (
+                  <EntityAutocomplete
+                    value={companionInput}
+                    onChange={setCompanionInput}
+                    onSelect={(id) => { addCompanion(e.entity_id, id); setCompanionInput(""); }}
+                    disabled={adding || saving}
+                    excludeIds={existingIds}
+                    filterDomains={COMPANION_ALLOWED_DOMAINS}
+                    placeholder="Add companion entity..."
+                  />
+                )}
               </div>
             )}
-            {expandedAttrs.has(e.entity_id) && (
-              <div style={{ paddingLeft: 44, paddingRight: 12, paddingBottom: 8 }}>
-                <div style={{ borderLeft: "2px solid var(--border)", paddingLeft: 12 }}>
+
+            {/* Expandable: Settings (Exclude attributes + Graph settings) */}
+            {isSettingsOpen && (
+              <div className="entity-expand-panel">
+                {/* Exclude attributes - always visible when settings open */}
+                <div style={{ marginBottom: showGraphOption ? 10 : 0 }}>
                   <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
-                    Exclude attributes
+                    Exclude{e.exclude_attributes.length > 0 ? ` ${e.exclude_attributes.length}` : ""} attributes
                     {e.exclude_attributes.length > 0 && canEdit && (
                       <>{" "}<button
                         className="btn-link"
@@ -531,6 +583,71 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
                     <div className="muted" style={{ fontSize: 12 }}>Entity not found in HA.</div>
                   )}
                 </div>
+
+                {/* Graph settings - only for applicable domains */}
+                {showGraphOption && (
+                  <div>
+                    <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>Graph settings</div>
+                    <div className="entity-graph-settings">
+                      <label className="entity-graph-field">
+                        Graph
+                        <select
+                          value={e.graph ?? ""}
+                          onChange={ev => updateGraphSetting(e.entity_id, "graph", ev.target.value || null)}
+                          disabled={!canEdit}
+                          className="input entity-graph-select"
+                        >
+                          <option value="">None</option>
+                          <option value="line">Line</option>
+                          <option value="bar">Bar</option>
+                        </select>
+                      </label>
+                      <label className="entity-graph-field">
+                        Hours
+                        <select
+                          value={e.hours ?? 24}
+                          onChange={ev => updateGraphSetting(e.entity_id, "hours", Number(ev.target.value))}
+                          disabled={!canEdit || !e.graph}
+                          className="input entity-graph-select"
+                        >
+                          {HOURS_OPTIONS.map(h => <option key={h} value={h}>{h}</option>)}
+                        </select>
+                      </label>
+                      <label className="entity-graph-field">
+                        Period
+                        <select
+                          value={e.period ?? 10}
+                          onChange={ev => updateGraphSetting(e.entity_id, "period", Number(ev.target.value))}
+                          disabled={!canEdit || !e.graph}
+                          className="input entity-graph-select"
+                        >
+                          {PERIOD_OPTIONS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                {/* Fan animation - only for fan domain */}
+                {showAnimateOption && (
+                  <div>
+                    <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>Fan settings</div>
+                    <label className="entity-graph-field" style={{ gap: 6, cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={e.animate ?? false}
+                        onChange={ev => {
+                          if (!canEdit) return;
+                          patchEntities(token.entities.map(en =>
+                            en.entity_id === e.entity_id ? { ...en, animate: ev.target.checked } : en
+                          ));
+                        }}
+                        disabled={!canEdit}
+                      />
+                      Animated
+                    </label>
+                  </div>
+                )}
               </div>
             )}
           </div>

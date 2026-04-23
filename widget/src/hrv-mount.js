@@ -27,9 +27,10 @@
  *   data-on-error     -> on-error
  *   data-offline-text -> offline-text
  *   data-error-text   -> error-text
- *   data-show-history -> show-history
- *   data-hours-to-show-> hours-to-show
  *   data-graph        -> graph
+ *   data-hours        -> hours
+ *   data-period       -> period
+ *   data-animate      -> animate
  *
  * Per CLAUDE.md Open Question #3: mountCard() walks parentElement until
  * document.body to find a parent .hrv-group and inherit token/ha-url when
@@ -152,9 +153,10 @@ function mountCard(el) {
   if (el.dataset.onError)          card.setAttribute("on-error",     el.dataset.onError);
   if (el.dataset.offlineText)      card.setAttribute("offline-text", el.dataset.offlineText);
   if (el.dataset.errorText)        card.setAttribute("error-text",   el.dataset.errorText);
-  if (el.dataset.showHistory)      card.setAttribute("show-history", el.dataset.showHistory);
-  if (el.dataset.hoursToShow)      card.setAttribute("hours-to-show",el.dataset.hoursToShow);
   if (el.dataset.graph)            card.setAttribute("graph",        el.dataset.graph);
+  if (el.dataset.hours)            card.setAttribute("hours",        el.dataset.hours);
+  if (el.dataset.period)           card.setAttribute("period",       el.dataset.period);
+  if (el.dataset.animate)          card.setAttribute("animate",      "");
 
   el.appendChild(card);
 }

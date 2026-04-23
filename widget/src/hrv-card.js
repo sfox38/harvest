@@ -64,7 +64,7 @@ export class HrvCard extends HTMLElement {
       "token", "ha-url", "entity", "alias", "companion",
       "on-offline", "on-error", "offline-text", "error-text",
       "tap-action", "hold-action", "double-tap-action",
-      "show-history", "hours-to-show", "graph",
+      "graph", "hours", "period", "animate",
       "lang", "a11y", "theme-url", "theme",
     ];
   }
@@ -179,6 +179,11 @@ export class HrvCard extends HTMLElement {
       this.setErrorState("HRV_STALE");
       this.#optimisticState = null;
     }
+
+    if (this.#config.graph && this.#client) {
+      const entityRef = this.#entityId || this.#alias;
+      this.#client.requestHistory(entityRef, this.#config.hours, this.#config.period);
+    }
   }
 
   /**
@@ -215,6 +220,9 @@ export class HrvCard extends HTMLElement {
       requestAnimationFrame(() => {
         this.#renderer?.applyState(state, attributes);
       });
+      if (this.#config.graph && state !== "unavailable" && state !== "unknown") {
+        this.#renderer.appendHistoryPoint?.(state);
+      }
     }
 
     // Clear stale/offline indicator once live data arrives.
@@ -226,9 +234,10 @@ export class HrvCard extends HTMLElement {
   /**
    * Called when a history_data message arrives.
    * @param {object[]} points
+   * @param {number} hours
    */
-  receiveHistoryData(points) {
-    this.#renderer?.receiveHistoryData?.(points);
+  receiveHistoryData(points, hours) {
+    this.#renderer?.receiveHistoryData?.(points, hours, this.#config.graph);
   }
 
   /**
@@ -400,9 +409,10 @@ export class HrvCard extends HTMLElement {
       tapAction:    this._parseJsonAttr("tap-action")        ?? { action: "toggle" },
       holdAction:   this._parseJsonAttr("hold-action")       ?? null,
       doubleTapAction: this._parseJsonAttr("double-tap-action") ?? null,
-      showHistory:  this.getAttribute("show-history") === "true",
-      hoursToShow:  parseInt(this.getAttribute("hours-to-show") ?? "", 10) || 24,
-      graph:        this.getAttribute("graph") ?? "line",
+      graph:        this.getAttribute("graph") || null,
+      hours:        parseInt(this.getAttribute("hours") ?? "", 10) || 24,
+      period:       parseInt(this.getAttribute("period") ?? "", 10) || 10,
+      animate:      this.hasAttribute("animate"),
       a11y:         this.getAttribute("a11y") ?? "standard",
       companions:   this.#companions,
       card:         this,

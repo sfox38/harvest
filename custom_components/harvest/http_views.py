@@ -159,6 +159,10 @@ def _parse_entities(raw_list: list) -> list[EntityAccess]:
             alias=e.get("alias") or None,
             exclude_attributes=list(e.get("exclude_attributes", [])),
             companion_of=e.get("companion_of") or None,
+            graph=e.get("graph") or None,
+            hours=int(e.get("hours", 24)),
+            period=int(e.get("period", 10)),
+            animate=bool(e.get("animate", False)),
         ))
     return entities
 
