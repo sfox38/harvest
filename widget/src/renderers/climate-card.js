@@ -106,6 +106,8 @@ export class ClimateCard extends BaseCard {
     fanMode: null, presetMode: null, swingMode: null,
   };
   /** @type {ReturnType<typeof setTimeout>|null} */ #pendingTimer = null;
+  /** @type {string} */ #lastState = "";
+  /** @type {object} */ #lastAttrs = {};
 
   constructor(def, root, config, i18n) {
     super(def, root, config, i18n);
@@ -162,7 +164,7 @@ export class ClimateCard extends BaseCard {
             <span part="current-temp" class="hrv-climate-temp">-</span>
           </div>
           <span part="state-label"></span>
-          ${isWritable ? /* html */`
+          ${isWritable && hvacModes.length > 0 ? /* html */`
             <div class="hrv-climate-row">
               <span class="hrv-climate-label">Mode</span>
               <select part="mode-select" aria-label="HVAC mode">
@@ -284,6 +286,8 @@ export class ClimateCard extends BaseCard {
   }
 
   applyState(state, attributes) {
+    this.#lastState = state;
+    this.#lastAttrs = { ...attributes };
     const unit = this.def.unit_of_measurement ?? "°";
 
     if (this.#currentTempEl && attributes.current_temperature !== undefined) {
@@ -371,6 +375,32 @@ export class ClimateCard extends BaseCard {
       ?? this.def.icon
       ?? _hvacIcon(action);
     this.renderIcon(iconName, "card-icon");
+  }
+
+  predictState(action, data) {
+    const attrs = { ...this.#lastAttrs };
+    if (action === "set_hvac_mode" && data.hvac_mode) {
+      return { state: data.hvac_mode, attributes: attrs };
+    }
+    if (action === "set_temperature") {
+      if (data.temperature !== undefined) attrs.temperature = data.temperature;
+      if (data.target_temp_low !== undefined) attrs.target_temp_low = data.target_temp_low;
+      if (data.target_temp_high !== undefined) attrs.target_temp_high = data.target_temp_high;
+      return { state: this.#lastState, attributes: attrs };
+    }
+    if (action === "set_fan_mode" && data.fan_mode) {
+      attrs.fan_mode = data.fan_mode;
+      return { state: this.#lastState, attributes: attrs };
+    }
+    if (action === "set_preset_mode" && data.preset_mode) {
+      attrs.preset_mode = data.preset_mode;
+      return { state: this.#lastState, attributes: attrs };
+    }
+    if (action === "set_swing_mode" && data.swing_mode) {
+      attrs.swing_mode = data.swing_mode;
+      return { state: this.#lastState, attributes: attrs };
+    }
+    return null;
   }
 
   #sendTargetTemp(value) {

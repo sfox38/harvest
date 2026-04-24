@@ -59,6 +59,38 @@ const FAN_CARD_STYLES = /* css */`
     margin-bottom: 2px;
   }
 
+  [part=oscillate-button] {
+    width: 100%;
+    padding: var(--hrv-spacing-xs) var(--hrv-spacing-s);
+    border: 1px solid var(--hrv-color-border);
+    border-radius: var(--hrv-radius-s);
+    background: var(--hrv-color-surface-alt);
+    color: var(--hrv-color-text);
+    font-size: var(--hrv-font-size-s);
+    font-family: inherit;
+    cursor: pointer;
+    transition: opacity var(--hrv-transition-speed), background var(--hrv-transition-speed);
+  }
+  [part=oscillate-button][aria-pressed=true] {
+    background: var(--hrv-color-primary);
+    color: var(--hrv-color-on-primary);
+  }
+  [part=oscillate-button]:hover { opacity: 0.88; }
+  [part=oscillate-button]:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  [part=preset-select],
+  [part=direction-select] {
+    width: 100%;
+    padding: var(--hrv-spacing-xs) var(--hrv-spacing-s);
+    border: 1px solid var(--hrv-color-border);
+    border-radius: var(--hrv-radius-s);
+    background: var(--hrv-color-surface);
+    color: var(--hrv-color-text);
+    font-size: var(--hrv-font-size-s);
+    font-family: inherit;
+    cursor: pointer;
+  }
+
   /* Fan spin animation - only active when data-on=true and data-animate=true */
   [part=card-icon][data-on=true][data-animate=true] svg {
     animation: hrv-fan-spin 2s linear infinite;
@@ -88,10 +120,15 @@ function _esc(str) {
 }
 
 export class FanCard extends BaseCard {
-  /** @type {HTMLButtonElement|null} */ #toggleBtn   = null;
-  /** @type {HTMLInputElement|null}  */ #speedSlider  = null;
-  /** @type {HTMLElement|null}       */ #speedValue   = null;
-  /** @type {HTMLElement|null}       */ #stateLabel   = null;
+  /** @type {HTMLButtonElement|null} */ #toggleBtn     = null;
+  /** @type {HTMLInputElement|null}  */ #speedSlider   = null;
+  /** @type {HTMLElement|null}       */ #speedValue    = null;
+  /** @type {HTMLElement|null}       */ #stateLabel    = null;
+  /** @type {HTMLButtonElement|null} */ #oscillateBtn  = null;
+  /** @type {HTMLSelectElement|null} */ #presetSelect  = null;
+  /** @type {HTMLSelectElement|null} */ #directionSelect = null;
+  /** @type {string}                 */ #lastState     = "";
+  /** @type {object}                 */ #lastAttrs     = {};
   /** @type {Function}               */ #speedDebounce;
 
   constructor(def, root, config, i18n) {
@@ -100,8 +137,14 @@ export class FanCard extends BaseCard {
   }
 
   render() {
-    const isWritable  = this.def.capabilities === "read-write";
-    const hasSpeed    = this.def.supported_features?.includes("set_speed");
+    const isWritable   = this.def.capabilities === "read-write";
+    const hasSpeed     = this.def.supported_features?.includes("set_speed");
+    const hasOscillate = this.def.supported_features?.includes("oscillate");
+    const hasDirection = this.def.supported_features?.includes("direction");
+    const hasPreset    = this.def.supported_features?.includes("preset_mode")
+                      || (this.def.feature_config?.preset_modes?.length > 0);
+    const presetModes  = this.def.feature_config?.preset_modes ?? [];
+    const presetOptions = presetModes.map((m) => `<option value="${_esc(m)}">${_esc(m)}</option>`).join("");
 
     this.root.innerHTML = /* html */`
       <style>${this.getSharedStyles()}${FAN_CARD_STYLES}</style>
@@ -123,16 +166,41 @@ export class FanCard extends BaseCard {
                 aria-label="Fan speed">
             </div>
           ` : ""}
+          ${isWritable && hasOscillate ? /* html */`
+            <button part="oscillate-button" type="button" aria-pressed="false">
+              Oscillate
+            </button>
+          ` : ""}
+          ${isWritable && hasDirection ? /* html */`
+            <div>
+              <div class="hrv-slider-label"><span>Direction</span></div>
+              <select part="direction-select" aria-label="Fan direction">
+                <option value="forward">Forward</option>
+                <option value="reverse">Reverse</option>
+              </select>
+            </div>
+          ` : ""}
+          ${isWritable && hasPreset && presetOptions ? /* html */`
+            <div>
+              <div class="hrv-slider-label"><span>Preset</span></div>
+              <select part="preset-select" aria-label="Fan preset mode">
+                ${presetOptions}
+              </select>
+            </div>
+          ` : ""}
         </div>
         ${this.renderCompanionZoneHTML()}
         <div part="stale-indicator" aria-hidden="true"></div>
       </div>
     `;
 
-    this.#toggleBtn  = this.root.querySelector("[part=toggle-button]");
-    this.#speedSlider = this.root.querySelector("[part=speed-slider]");
-    this.#speedValue  = this.root.querySelector("[part=speed-value]");
-    this.#stateLabel  = this.root.querySelector("[part=state-label]");
+    this.#toggleBtn    = this.root.querySelector("[part=toggle-button]");
+    this.#speedSlider  = this.root.querySelector("[part=speed-slider]");
+    this.#speedValue   = this.root.querySelector("[part=speed-value]");
+    this.#stateLabel   = this.root.querySelector("[part=state-label]");
+    this.#oscillateBtn   = this.root.querySelector("[part=oscillate-button]");
+    this.#directionSelect = this.root.querySelector("[part=direction-select]");
+    this.#presetSelect   = this.root.querySelector("[part=preset-select]");
 
     this.renderIcon(this.resolveIcon(this.def.icon, "mdi:fan-off"), "card-icon");
 
@@ -150,10 +218,31 @@ export class FanCard extends BaseCard {
       });
     }
 
+    if (this.#oscillateBtn) {
+      this.#oscillateBtn.addEventListener("click", () => {
+        const isOsc = this.#oscillateBtn.getAttribute("aria-pressed") === "true";
+        this.config.card?.sendCommand("oscillate", { oscillating: !isOsc });
+      });
+    }
+
+    if (this.#directionSelect) {
+      this.#directionSelect.addEventListener("change", (e) => {
+        this.config.card?.sendCommand("set_direction", { direction: e.target.value });
+      });
+    }
+
+    if (this.#presetSelect) {
+      this.#presetSelect.addEventListener("change", (e) => {
+        this.config.card?.sendCommand("set_preset_mode", { preset_mode: e.target.value });
+      });
+    }
+
     this.renderCompanions();
   }
 
   applyState(state, attributes) {
+    this.#lastState = state;
+    this.#lastAttrs = { ...attributes };
     const isOn          = state === "on";
     const isUnavailable = state === "unavailable" || state === "unknown";
     const label         = this.i18n.t(`state.${state}`) !== `state.${state}`
@@ -178,6 +267,20 @@ export class FanCard extends BaseCard {
       if (this.#speedValue) this.#speedValue.textContent = `${attributes.percentage}%`;
     }
 
+    if (this.#oscillateBtn) {
+      const osc = !!attributes.oscillating;
+      this.#oscillateBtn.setAttribute("aria-pressed", String(osc));
+      this.#oscillateBtn.disabled = isUnavailable;
+    }
+
+    if (this.#directionSelect && !this.isFocused(this.#directionSelect) && attributes.direction !== undefined) {
+      this.#directionSelect.value = String(attributes.direction);
+    }
+
+    if (this.#presetSelect && !this.isFocused(this.#presetSelect) && attributes.preset_mode !== undefined) {
+      this.#presetSelect.value = String(attributes.preset_mode);
+    }
+
     const iconEl     = this.root.querySelector("[part=card-icon]");
     const domainDefault = isOn ? "mdi:fan" : "mdi:fan-off";
     const rawIcon    = this.def.icon_state_map?.[state]
@@ -191,10 +294,29 @@ export class FanCard extends BaseCard {
     }
   }
 
-  predictState(action, _data) {
-    if (action !== "toggle") return null;
-    const isOn = this.#toggleBtn?.getAttribute("aria-pressed") === "true";
-    return { state: isOn ? "off" : "on", attributes: {} };
+  predictState(action, data) {
+    const attrs = { ...this.#lastAttrs };
+    if (action === "toggle") {
+      const isOn = this.#toggleBtn?.getAttribute("aria-pressed") === "true";
+      return { state: isOn ? "off" : "on", attributes: attrs };
+    }
+    if (action === "set_percentage" && data.percentage !== undefined) {
+      attrs.percentage = data.percentage;
+      return { state: this.#lastState, attributes: attrs };
+    }
+    if (action === "oscillate" && data.oscillating !== undefined) {
+      attrs.oscillating = data.oscillating;
+      return { state: this.#lastState, attributes: attrs };
+    }
+    if (action === "set_direction" && data.direction) {
+      attrs.direction = data.direction;
+      return { state: this.#lastState, attributes: attrs };
+    }
+    if (action === "set_preset_mode" && data.preset_mode) {
+      attrs.preset_mode = data.preset_mode;
+      return { state: this.#lastState, attributes: attrs };
+    }
+    return null;
   }
 
   #sendSpeed(value) {

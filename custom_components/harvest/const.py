@@ -13,6 +13,8 @@ SESSION_PREFIX = "hrs_"
 TOKEN_ID_LENGTH = 22        # base62 characters after prefix
 SESSION_ID_LENGTH = 22      # base62 characters after prefix
 ALIAS_LENGTH = 8            # base62 characters for entity aliases
+THEME_PREFIX = "hth_"
+THEME_ID_LENGTH = 12        # base62 characters after prefix
 BASE62_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 # WebSocket endpoint path registered with HA's HTTP server

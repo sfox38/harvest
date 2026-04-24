@@ -59,6 +59,7 @@ export class BinarySensorCard extends BaseCard {
           <div class="hrv-binary-indicator" aria-hidden="true"></div>
           <span part="state-label" aria-live="polite">-</span>
         </div>
+        ${this.renderHistoryZoneHTML()}
         ${this.renderCompanionZoneHTML()}
         <div part="stale-indicator" aria-hidden="true"></div>
       </div>

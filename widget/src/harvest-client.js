@@ -465,6 +465,7 @@ export class HarvestClient {
       case "session_expiring": return this.#handleSessionExpiring(msg);
       case "ack":              return this.#handleAck(msg);
       case "error":            return this.#handleError(msg);
+      case "theme":            return this.#handleTheme(msg);
       case "keepalive":        return; // heartbeat reset already done in #onMessage
       default:
         console.debug("[HArvest] Unknown message type:", msg.type);
@@ -633,6 +634,14 @@ export class HarvestClient {
       for (const card of this.#cards.values()) {
         card.receiveError?.(code);
       }
+    }
+  }
+
+  #handleTheme(msg) {
+    if (!msg.variables) return;
+    const theme = { variables: msg.variables, dark_variables: msg.dark_variables ?? {} };
+    for (const card of this.#cards.values()) {
+      card.receiveTheme?.(theme);
     }
   }
 

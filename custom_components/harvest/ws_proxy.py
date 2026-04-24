@@ -43,6 +43,7 @@ from .event_bus import EventBus
 from .harvest_action import HarvestActionManager
 from .rate_limiter import RateLimiter
 from .session_manager import Session, SessionManager
+from .theme_manager import ThemeManager, theme_url_to_id
 from .token_manager import EntityAccess, Token, TokenManager
 
 if TYPE_CHECKING:
@@ -134,6 +135,7 @@ class HarvestWsView(HomeAssistantView):
         action_manager: HarvestActionManager,
         config: dict,
         sensors: object = None,
+        theme_manager: ThemeManager | None = None,
     ) -> None:
         self._hass = hass
         self._token_manager = token_manager
@@ -144,6 +146,7 @@ class HarvestWsView(HomeAssistantView):
         self._action_manager = action_manager
         self._config = config
         self._sensors = sensors
+        self._theme_manager = theme_manager
 
     async def get(self, request: Request) -> WebSocketResponse:
         """Handle incoming WebSocket upgrade.
@@ -360,6 +363,17 @@ class HarvestWsView(HomeAssistantView):
 
         # Track which entities have already had history sent (debounce per session).
         history_sent: set[str] = set()
+
+        # --- Step 4a: Send theme data if token has a theme ---
+        if self._theme_manager and token.theme_url:
+            theme_id = theme_url_to_id(token.theme_url)
+            theme_def = self._theme_manager.get(theme_id)
+            if theme_def:
+                await ws.send_json({
+                    "type": "theme",
+                    "variables": theme_def.variables,
+                    "dark_variables": theme_def.dark_variables,
+                })
 
         # --- Steps 4b/6/7: Initial state, message loop, and cleanup ---
         # _send_initial_state and _register_listeners are inside the try block so

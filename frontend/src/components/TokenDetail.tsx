@@ -6,11 +6,12 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { Token, TokenUpdate, Session, ActivityPage } from "../types";
+import type { Token, TokenUpdate, Session, ActivityPage, ThemeDefinition } from "../types";
 import { validateLabel, DEFAULT_WIDGET_SCRIPT_URL } from "../types";
 import { api } from "../api";
-import { StatusBadge, ConfirmDialog, Spinner, ErrorBanner, Card, EventRow, fmtRel, EntityAutocomplete } from "./Shared";
+import { StatusBadge, ConfirmDialog, Spinner, ErrorBanner, Card, EventRow, fmtRel, EntityAutocomplete, useThemeThumbs } from "./Shared";
 import { Icon } from "./Icon";
+import { WidgetPreview } from "./WidgetPreview";
 import { loadKnownOrigins, addKnownOrigin, removeKnownOrigin, validateOriginUrl, displayOriginLabel } from "./originMemory";
 import { loadEntityCache, getEntityCache } from "../entityCache";
 
@@ -327,35 +328,59 @@ function CodeSection({ token, setToken, setError, hmacSecret }: { token: Token; 
 // Theme editor
 // ---------------------------------------------------------------------------
 
-const BUNDLED_THEMES = [
-  { label: "Default",       url: "" },
-  { label: "Glassmorphism", url: "bundled:glassmorphism" },
-  { label: "Accessible",    url: "bundled:accessible" },
-];
+function themeIdToUrl(id: string): string {
+  if (id === "default") return "";
+  if (id === "glassmorphism" || id === "accessible") return `bundled:${id}`;
+  return `custom:${id}`;
+}
+
+function themeUrlToId(url: string): string {
+  if (!url) return "default";
+  if (url.startsWith("bundled:")) return url.slice(8);
+  if (url.startsWith("custom:")) return url.slice(7);
+  return url;
+}
 
 function ThemeEditor({ token, setToken, setError }: { token: Token; setToken: (t: Token) => void; setError: (e: string | null) => void }) {
-  const current = token.theme_url ?? "";
+  const [themes, setThemes] = useState<ThemeDefinition[]>([]);
+  useEffect(() => { api.themes.list().then(setThemes).catch(() => {}); }, []);
+  const thumbUrls = useThemeThumbs(themes);
 
-  const change = async (url: string) => {
+  const currentId = themeUrlToId(token.theme_url ?? "");
+  const selectedTheme = themes.find(t => t.theme_id === currentId) ?? null;
+
+  const change = async (themeId: string) => {
     try {
-      const updated = await api.tokens.update(token.token_id, { theme_url: url });
+      const updated = await api.tokens.update(token.token_id, { theme_url: themeIdToUrl(themeId) });
       setToken(updated);
     } catch (e) { setError(String(e)); }
   };
 
   return (
     <Card title="Theme">
-      <div className="theme-grid">
-        {BUNDLED_THEMES.map(t => (
-          <button
-            key={t.url}
-            className={`theme-card${current === t.url ? " selected" : ""}`}
-            onClick={() => change(t.url)}
-          >
-            <div className="theme-preview" />
-            <span style={{ fontSize: 12 }}>{t.label}</span>
-          </button>
-        ))}
+      <div className="col" style={{ gap: 12 }}>
+        <div className="theme-grid">
+          {themes.map(t => (
+            <button
+              key={t.theme_id}
+              className={`theme-card${currentId === t.theme_id ? " selected" : ""}`}
+              onClick={() => change(t.theme_id)}
+            >
+              {thumbUrls[t.theme_id] ? (
+                <img className="theme-preview" src={thumbUrls[t.theme_id]} alt={t.name} draggable={false} />
+              ) : (
+                <div className="theme-preview" />
+              )}
+              <span style={{ fontSize: 12 }}>{t.name}</span>
+            </button>
+          ))}
+        </div>
+        {selectedTheme && (
+          <WidgetPreview
+            variables={selectedTheme.variables}
+            darkVariables={selectedTheme.dark_variables}
+          />
+        )}
       </div>
     </Card>
   );

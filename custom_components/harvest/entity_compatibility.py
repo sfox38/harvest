@@ -30,6 +30,7 @@ TIER1_DOMAINS: dict[str, str] = {
     "input_number":    "InputNumberCard",
     "input_select":    "InputSelectCard",
     "harvest_action":  "HarvestActionCard",
+    "timer":           "TimerCard",
 }
 
 SENSOR_DEVICE_CLASS_RENDERERS: dict[str, str] = {
@@ -55,13 +56,14 @@ ALLOWED_SERVICES: dict[str, set[str]] = {
     "light":          {"turn_on", "turn_off", "toggle"},
     "switch":         {"turn_on", "turn_off", "toggle"},
     "fan":            {"turn_on", "turn_off", "toggle", "set_percentage",
-                       "oscillate", "set_direction"},
+                       "oscillate", "set_direction", "set_preset_mode"},
     "cover":          {"open_cover", "close_cover", "stop_cover", "set_cover_position"},
     "climate":        {"turn_on", "turn_off", "set_temperature", "set_hvac_mode",
                        "set_fan_mode", "set_preset_mode", "set_swing_mode"},
     "input_boolean":  {"turn_on", "turn_off", "toggle"},
     "input_number":   {"set_value"},
     "input_select":   {"select_option"},
+    "timer":          {"start", "pause", "cancel", "finish"},
     "media_player":   {"media_play_pause", "media_next_track", "media_previous_track",
                        "volume_up", "volume_down", "volume_set", "turn_on", "turn_off"},
     "remote":         {"turn_on", "turn_off", "send_command"},

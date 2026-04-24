@@ -42,4 +42,6 @@ export class HrvGroup extends HTMLElement {
   get lang()    { return this.getAttribute("lang") ?? "auto"; }
 }
 
-customElements.define("hrv-group", HrvGroup);
+if (!customElements.get("hrv-group")) {
+  customElements.define("hrv-group", HrvGroup);
+}

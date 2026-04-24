@@ -111,6 +111,39 @@ function anyState(callback) {
 }
 
 // ---------------------------------------------------------------------------
+// Preview mode
+// ---------------------------------------------------------------------------
+
+/**
+ * Render a real widget card in preview mode - no WebSocket, no token needed.
+ * Returns the HrvCard element so the caller can update theme/state later.
+ *
+ * @param {HTMLElement} container - DOM element to mount the card into
+ * @param {object} entityDef     - EntityDefinition (domain, friendly_name, capabilities, supported_features, feature_config)
+ * @param {string} state         - Entity state value
+ * @param {object} attributes    - Entity attributes
+ * @param {object} [themeVars]   - CSS custom properties to apply
+ * @param {object} [options]     - Additional options (graph, hours, historyData)
+ * @returns {HrvCard}
+ */
+function preview(container, entityDef, state, attributes, themeVars, options) {
+  const card = document.createElement("hrv-card");
+  card.setAttribute("preview", "");
+  card.setAttribute("entity", entityDef.entity_id ?? "preview.entity");
+  if (options?.graph) card.setAttribute("graph", options.graph);
+  if (options?.hours) card.setAttribute("hours", String(options.hours));
+  container.appendChild(card);
+
+  // setPreview must run after connectedCallback (which is synchronous).
+  card.setPreview(entityDef, state, attributes, themeVars);
+
+  if (options?.graph && options?.historyData) {
+    card.receiveHistoryData(options.historyData, options.hours ?? 24, options.graph);
+  }
+  return card;
+}
+
+// ---------------------------------------------------------------------------
 // window.HArvest
 // ---------------------------------------------------------------------------
 
@@ -118,6 +151,7 @@ window.HArvest = {
   config,
   create,
   getCard,
+  preview,
   registerRenderer,
   renderers: {
     LightCard:            Renderers.LightCard,
@@ -135,6 +169,7 @@ window.HArvest = {
     InputNumberCard:      Renderers.InputNumberCard,
     InputSelectCard:      Renderers.InputSelectCard,
     HarvestActionCard:    Renderers.HarvestActionCard,
+    TimerCard:            Renderers.TimerCard,
     GenericCard:          Renderers.GenericCard,
   },
   track: {

@@ -31,6 +31,7 @@ import { InputBooleanCard }       from "./input-boolean-card.js";
 import { InputNumberCard }        from "./input-number-card.js";
 import { InputSelectCard }        from "./input-select-card.js";
 import { HarvestActionCard }      from "./harvest-action-card.js";
+import { TimerCard }              from "./timer-card.js";
 import { GenericCard }            from "./generic-card.js";
 
 /**
@@ -61,6 +62,9 @@ const _registry = new Map([
   ["input_boolean",           InputBooleanCard],
   ["input_number",            InputNumberCard],
   ["input_select",            InputSelectCard],
+
+  // Timer
+  ["timer",                   TimerCard],
 
   // Virtual domain
   ["harvest_action",          HarvestActionCard],
@@ -119,5 +123,6 @@ export {
   InputNumberCard,
   InputSelectCard,
   HarvestActionCard,
+  TimerCard,
   GenericCard,
 };

@@ -118,7 +118,7 @@ FEATURE_FLAGS: dict[str, dict[int, str]] = {
         1: "brightness", 2: "color_temp", 4: "effect",
         16: "flash", 32: "transition", 64: "transition", 128: "rgb_color", 1024: "white_value",
     },
-    "fan": {1: "set_speed", 2: "oscillate", 4: "direction"},
+    "fan": {1: "set_speed", 2: "oscillate", 4: "direction", 8: "preset_mode"},
     "cover": {4: "set_position", 128: "set_tilt_position", 8: "stop"},
     "climate": {
         1: "target_temperature", 2: "target_temperature_range",
@@ -222,6 +222,11 @@ _DOMAIN_ICON_DEFAULTS: dict[str, dict[str, str]] = {
         "triggered": "mdi:play-circle",
         "*":         "mdi:play-circle-outline",
     },
+    "timer": {
+        "active": "mdi:timer",
+        "paused": "mdi:timer-pause",
+        "*":      "mdi:timer-outline",
+    },
 }
 
 # Device-class icon overrides for binary_sensor and sensor.
@@ -306,6 +311,9 @@ def build_entity_definition(
         color_capable_modes = {"hs", "xy", "rgb", "rgbw", "rgbww"}
         if color_modes & color_capable_modes and "rgb_color" not in supported_features:
             supported_features.append("rgb_color")
+
+    if domain == "cover" and "buttons" not in supported_features:
+        supported_features.append("buttons")
 
     # icon_state_map (includes the icon for the current state as default icon).
     icon_state_map = build_icon_state_map(domain, state, entry, device_class)
@@ -436,10 +444,13 @@ def build_feature_config(domain: str, state: State) -> dict:
         return config
 
     if domain == "fan":
+        config = {}
         step = attrs.get("percentage_step")
         if step and step > 0:
-            return {"speed_count": int(100 / step)}
-        return {}
+            config["speed_count"] = int(100 / step)
+        if "preset_modes" in attrs:
+            config["preset_modes"] = attrs["preset_modes"]
+        return config
 
     if domain == "input_number":
         config = {}

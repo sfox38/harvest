@@ -7,9 +7,10 @@
  */
 
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import type { TokenStatus, ActivityEvent, HAEntity } from "../types";
+import type { TokenStatus, ActivityEvent, HAEntity, ThemeDefinition } from "../types";
 import { Icon } from "./Icon";
-import { getEntityCache } from "../entityCache";
+import { api } from "../api";
+import { getEntityCache, loadEntityCache } from "../entityCache";
 
 // ---------------------------------------------------------------------------
 // StatusBadge
@@ -611,6 +612,15 @@ export function EntityAutocomplete({ value, onChange, onSelect, disabled, filter
   const [highlighted, setHighlighted] = useState(0);
   const [dropdownRect, setDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [, forceUpdate] = useState(0);
+  const cacheChecked = useRef(false);
+
+  useEffect(() => {
+    if (!cacheChecked.current && getEntityCache().length === 0) {
+      cacheChecked.current = true;
+      loadEntityCache().then(() => forceUpdate(n => n + 1));
+    }
+  }, []);
 
   const excluded = useMemo(() => new Set(excludeIds ?? []), [excludeIds]);
 
@@ -699,4 +709,43 @@ export function EntityAutocomplete({ value, onChange, onSelect, disabled, filter
       )}
     </div>
   );
+}
+
+
+// ---------------------------------------------------------------------------
+// Theme thumbnail hook
+// ---------------------------------------------------------------------------
+
+export function useThemeThumbs(themes: ThemeDefinition[], refreshKey = 0): Record<string, string> {
+  const [urls, setUrls] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    const objectUrls: string[] = [];
+
+    Promise.all(themes.map(async (t) => {
+      try {
+        const blob = await api.themes.fetchThumbnail(t.theme_id);
+        const url = URL.createObjectURL(blob);
+        objectUrls.push(url);
+        return [t.theme_id, url] as const;
+      } catch {
+        return null;
+      }
+    })).then((results) => {
+      if (cancelled) return;
+      const map: Record<string, string> = {};
+      for (const r of results) {
+        if (r) map[r[0]] = r[1];
+      }
+      setUrls(map);
+    });
+
+    return () => {
+      cancelled = true;
+      objectUrls.forEach((u) => URL.revokeObjectURL(u));
+    };
+  }, [themes, refreshKey]);
+
+  return urls;
 }

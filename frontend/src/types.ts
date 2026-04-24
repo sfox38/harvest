@@ -151,6 +151,25 @@ export interface HarvestAction {
 }
 
 // ---------------------------------------------------------------------------
+// Theme
+// ---------------------------------------------------------------------------
+
+export interface ThemeDefinition {
+  theme_id: string;
+  name: string;
+  author: string;
+  version: string;
+  harvest_version: number;
+  variables: Record<string, string>;
+  dark_variables: Record<string, string>;
+  is_bundled: boolean;
+  has_thumbnail: boolean;
+  usage_count: number;
+  created_by: string;
+  created_at: string;
+}
+
+// ---------------------------------------------------------------------------
 // Integration config (Settings)
 // ---------------------------------------------------------------------------
 
@@ -219,6 +238,12 @@ export interface HAEntity {
   state: string;
 }
 
+export interface HAEntityDetail {
+  entity_id: string;
+  state: string;
+  attributes: Record<string, unknown>;
+}
+
 // ---------------------------------------------------------------------------
 // Panel navigation
 // ---------------------------------------------------------------------------
@@ -262,4 +287,4 @@ export interface TokenUpdateResponse extends Token {
 // Panel navigation
 // ---------------------------------------------------------------------------
 
-export type Screen = "dashboard" | "widgets" | "actions" | "activity" | "sessions" | "settings";
+export type Screen = "dashboard" | "widgets" | "themes" | "actions" | "activity" | "sessions" | "settings";

@@ -7,11 +7,12 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import type { Token } from "../types";
+import type { Token, ThemeDefinition } from "../types";
 import { validateLabel as validateLabelWiz, DEFAULT_WIDGET_SCRIPT_URL } from "../types";
 import { api } from "../api";
-import { CopyablePre, CopyButton, Spinner, ErrorBanner, ConfirmDialog, EntityAutocomplete } from "./Shared";
+import { CopyablePre, CopyButton, Spinner, ErrorBanner, ConfirmDialog, EntityAutocomplete, useThemeThumbs } from "./Shared";
 import { Icon } from "./Icon";
+import { WidgetPreview } from "./WidgetPreview";
 import { getEntityCache, loadEntityCache } from "../entityCache";
 import { loadKnownOrigins, addKnownOrigin, removeKnownOrigin, validateOriginUrl, displayOriginLabel } from "./originMemory";
 import type { HAEntity } from "../types";
@@ -711,13 +712,27 @@ function Step4({ state, onChange }: { state: WizardState; onChange: (u: Partial<
 // Step 5: Appearance
 // ---------------------------------------------------------------------------
 
-const BUNDLED_THEMES = [
-  { label: "Default",       url: "" },
-  { label: "Glassmorphism", url: "bundled:glassmorphism" },
-  { label: "Accessible",    url: "bundled:accessible" },
-];
+function themeIdToUrl(id: string): string {
+  if (id === "default") return "";
+  if (id === "glassmorphism" || id === "accessible") return `bundled:${id}`;
+  return `custom:${id}`;
+}
+
+function themeUrlToId(url: string): string {
+  if (!url) return "default";
+  if (url.startsWith("bundled:")) return url.slice(8);
+  if (url.startsWith("custom:")) return url.slice(7);
+  return url;
+}
 
 function Step5({ state, onChange }: { state: WizardState; onChange: (u: Partial<WizardState>) => void }) {
+  const [themes, setThemes] = useState<ThemeDefinition[]>([]);
+  useEffect(() => { api.themes.list().then(setThemes).catch(() => {}); }, []);
+  const thumbUrls = useThemeThumbs(themes);
+
+  const selectedId = themeUrlToId(state.themeUrl);
+  const selectedTheme = themes.find(t => t.theme_id === selectedId) ?? null;
+
   return (
     <div className="col" style={{ gap: 16 }}>
       <p className="muted" style={{ fontSize: 13 }}>
@@ -727,21 +742,32 @@ function Step5({ state, onChange }: { state: WizardState; onChange: (u: Partial<
       <div className="col" style={{ gap: 6 }}>
         <label style={{ fontSize: 13, fontWeight: 600 }}>Theme</label>
         <div className="theme-grid">
-          {BUNDLED_THEMES.map(t => (
+          {themes.map(t => (
             <button
-              key={t.url}
-              className={`theme-card${state.themeUrl === t.url ? " selected" : ""}`}
-              onClick={() => { onChange({ themeUrl: t.url }); saveMemory({ themeUrl: t.url }); }}
+              key={t.theme_id}
+              className={`theme-card${selectedId === t.theme_id ? " selected" : ""}`}
+              onClick={() => { const url = themeIdToUrl(t.theme_id); onChange({ themeUrl: url }); saveMemory({ themeUrl: url }); }}
             >
-              <div className="theme-preview" />
-              <span style={{ fontSize: 12 }}>{t.label}</span>
+              {thumbUrls[t.theme_id] ? (
+                <img className="theme-preview" src={thumbUrls[t.theme_id]} alt={t.name} draggable={false} />
+              ) : (
+                <div className="theme-preview" />
+              )}
+              <span style={{ fontSize: 12 }}>{t.name}</span>
             </button>
           ))}
         </div>
       </div>
 
+      {selectedTheme && (
+        <WidgetPreview
+          variables={selectedTheme.variables}
+          darkVariables={selectedTheme.dark_variables}
+        />
+      )}
+
       <p className="muted" style={{ fontSize: 12 }}>
-        Themes are fully customizable. Manage custom themes in Settings.
+        Themes are fully customizable. Manage themes in the Themes tab.
       </p>
     </div>
   );

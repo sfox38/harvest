@@ -20,6 +20,8 @@ import type {
   PanelStats,
   HourlyBucket,
   HAEntity,
+  HAEntityDetail,
+  ThemeDefinition,
 } from "./types";
 
 const BASE = "/api/harvest";
@@ -212,6 +214,57 @@ export const api = {
   },
 
   // ---------------------------------------------------------------------------
+  // Themes
+  // ---------------------------------------------------------------------------
+
+  themes: {
+    list: (): Promise<ThemeDefinition[]> =>
+      _get<ThemeDefinition[]>("/themes"),
+
+    get: (themeId: string): Promise<ThemeDefinition> =>
+      _get<ThemeDefinition>(`/themes/${themeId}`),
+
+    create: (data: { name: string; variables: Record<string, string>; dark_variables?: Record<string, string>; author?: string; version?: string }): Promise<ThemeDefinition> =>
+      _post<ThemeDefinition>("/themes", data),
+
+    update: (themeId: string, data: Partial<{ name: string; author: string; version: string; variables: Record<string, string>; dark_variables: Record<string, string> }>): Promise<ThemeDefinition> =>
+      _patch<ThemeDefinition>(`/themes/${themeId}`, data),
+
+    delete: (themeId: string): Promise<void> =>
+      _delete(`/themes/${themeId}`),
+
+    thumbnailUrl: (themeId: string): string =>
+      `${BASE}/themes/${encodeURIComponent(themeId)}/thumbnail`,
+
+    fetchThumbnail: async (themeId: string): Promise<Blob> => {
+      const token: string | undefined = (_hass as any)?.auth?.data?.access_token;
+      const res = await fetch(`${BASE}/themes/${encodeURIComponent(themeId)}/thumbnail`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      return res.blob();
+    },
+
+    uploadThumbnail: async (themeId: string, file: File): Promise<void> => {
+      const token: string | undefined = (_hass as any)?.auth?.data?.access_token;
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch(`${BASE}/themes/${encodeURIComponent(themeId)}/thumbnail`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: form,
+      });
+      if (!res.ok) {
+        const reason = await res.text().catch(() => "");
+        throw new Error(`Upload failed: ${res.status}${reason ? ` - ${reason}` : ""}`);
+      }
+    },
+
+    deleteThumbnail: (themeId: string): Promise<void> =>
+      _delete(`/themes/${themeId}/thumbnail`),
+  },
+
+  // ---------------------------------------------------------------------------
   // Config (Settings screen)
   // ---------------------------------------------------------------------------
 
@@ -239,6 +292,9 @@ export const api = {
   entities: {
     list: (): Promise<HAEntity[]> =>
       _get<HAEntity[]>("/entities"),
+
+    get: (entityId: string): Promise<HAEntityDetail> =>
+      _doReq<HAEntityDetail>("GET", `/api/states/${entityId}`),
   },
 
   // ---------------------------------------------------------------------------

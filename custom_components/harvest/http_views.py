@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import logging
 import re
 from datetime import datetime, timezone
 from typing import Any
+
+_LOGGER = logging.getLogger(__name__)
 
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
@@ -21,6 +24,7 @@ from .diagnostic_sensors import DiagnosticSensors
 from .event_bus import EventBus
 from .harvest_action import HarvestActionManager, ServiceCall
 from .session_manager import SessionManager
+from .theme_manager import ThemeManager, theme_to_api_dict, theme_url_to_id
 from .const import ERR_TOKEN_INACTIVE
 from .token_manager import (
     ActiveSchedule,
@@ -52,6 +56,7 @@ def register_views(
     action_manager: HarvestActionManager,
     sensors: DiagnosticSensors,
     event_bus: EventBus | None = None,
+    theme_manager: ThemeManager | None = None,
 ) -> None:
     """Register all HTTP API views with HA's HTTP server.
 
@@ -59,12 +64,17 @@ def register_views(
     All views require HA authentication (panel runs in authenticated context).
     """
     hass.http.register_view(HarvestTokensView(token_manager, session_manager, activity_store))
-    hass.http.register_view(HarvestTokenDetailView(hass, token_manager, session_manager, activity_store, event_bus))
+    hass.http.register_view(HarvestTokenDetailView(hass, token_manager, session_manager, activity_store, event_bus, theme_manager))
     hass.http.register_view(HarvestSessionsView(session_manager))
     hass.http.register_view(HarvestSessionTerminateView(session_manager))
     hass.http.register_view(HarvestActivityView(activity_store, token_manager))
     hass.http.register_view(HarvestActionsView(action_manager))
     hass.http.register_view(HarvestActionDetailView(action_manager))
+    if theme_manager is not None:
+        hass.http.register_view(HarvestThemesView(theme_manager, token_manager))
+        hass.http.register_view(HarvestThemeDetailView(theme_manager, token_manager))
+        hass.http.register_view(HarvestThemeThumbnailView(theme_manager))
+        _LOGGER.debug("HArvest: registered theme views")
     hass.http.register_view(HarvestConfigView(hass, session_manager))
     hass.http.register_view(HarvestStatsView(sensors, activity_store, session_manager, token_manager))
     # Additional views needed by the wizard flow.
@@ -366,12 +376,34 @@ class HarvestTokenDetailView(HomeAssistantView):
     name = "api:harvest:token_detail"
     requires_auth = True
 
-    def __init__(self, hass: HomeAssistant, token_manager: TokenManager, session_manager: SessionManager, activity_store: ActivityStore, event_bus: EventBus) -> None:
+    def __init__(self, hass: HomeAssistant, token_manager: TokenManager, session_manager: SessionManager, activity_store: ActivityStore, event_bus: EventBus, theme_manager: ThemeManager | None = None) -> None:
         self._hass = hass
         self._token_manager = token_manager
         self._session_manager = session_manager
         self._activity_store = activity_store
         self._event_bus = event_bus
+        self._theme_manager = theme_manager
+
+    async def _push_theme_to_sessions(self, token_id: str) -> None:
+        """Push updated theme data to all active sessions for a token."""
+        if not self._theme_manager:
+            return
+        token = self._token_manager.get(token_id)
+        if not token:
+            return
+        theme_id = theme_url_to_id(token.theme_url)
+        theme_def = self._theme_manager.get(theme_id)
+        msg = {
+            "type": "theme",
+            "variables": theme_def.variables if theme_def else {},
+            "dark_variables": theme_def.dark_variables if theme_def else {},
+        }
+        for session in self._session_manager.get_all_for_token(token_id):
+            if not session.ws.closed:
+                try:
+                    await session.ws.send_json(msg)
+                except Exception:
+                    pass
 
     async def get(self, request: web.Request, token_id: str) -> web.Response:
         user = request.get("hass_user")
@@ -476,6 +508,9 @@ class HarvestTokenDetailView(HomeAssistantView):
             for ws in ws_list:
                 if not ws.closed:
                     asyncio.create_task(_close_ws_with_auth_failed(ws))
+
+        if "theme_url" in updates:
+            await self._push_theme_to_sessions(token_id)
 
         result = _token_to_dict(token)
         if generated_secret is not None:
@@ -834,6 +869,206 @@ class HarvestActionDetailView(HomeAssistantView):
             await self._action_manager.delete(action_id)
         except KeyError:
             raise web.HTTPNotFound(reason=f"Action not found: {action_id}")
+        return web.Response(status=204)
+
+
+# ---------------------------------------------------------------------------
+# Theme views
+# ---------------------------------------------------------------------------
+
+
+class HarvestThemesView(HomeAssistantView):
+    """GET /api/harvest/themes  - list all themes.
+    POST /api/harvest/themes - create a custom theme.
+    """
+
+    url = "/api/harvest/themes"
+    name = "api:harvest:themes"
+    requires_auth = True
+
+    def __init__(self, theme_manager: ThemeManager, token_manager: TokenManager) -> None:
+        self._theme_manager = theme_manager
+        self._token_manager = token_manager
+
+    def _usage_counts(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for t in self._token_manager.get_all():
+            tid = theme_url_to_id(t.theme_url)
+            counts[tid] = counts.get(tid, 0) + 1
+        return counts
+
+    async def get(self, request: web.Request) -> web.Response:
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            raise web.HTTPForbidden()
+        counts = self._usage_counts()
+        result = []
+        for theme in self._theme_manager.get_all():
+            d = theme_to_api_dict(theme, has_thumbnail=self._theme_manager.has_thumbnail(theme.theme_id))
+            d["usage_count"] = counts.get(theme.theme_id, 0)
+            result.append(d)
+        return self.json(result)
+
+    async def post(self, request: web.Request) -> web.Response:
+        user = request.get("hass_user")
+        if user is None:
+            raise web.HTTPUnauthorized()
+        if not user.is_admin:
+            raise web.HTTPForbidden()
+
+        try:
+            body = await request.json()
+        except Exception:
+            raise web.HTTPBadRequest(reason="Invalid JSON body.")
+
+        name = str(body.get("name", "")).strip()
+        if not name:
+            raise web.HTTPBadRequest(reason="Theme name is required.")
+        variables = body.get("variables")
+        if not isinstance(variables, dict):
+            raise web.HTTPBadRequest(reason="variables must be an object.")
+
+        theme = await self._theme_manager.create(
+            name=name,
+            variables=variables,
+            dark_variables=body.get("dark_variables"),
+            created_by=user.id,
+            author=str(body.get("author", "")),
+            version=str(body.get("version", "1.0")),
+        )
+        return self.json(theme_to_api_dict(theme), status_code=201)
+
+
+class HarvestThemeDetailView(HomeAssistantView):
+    """GET /api/harvest/themes/{theme_id}    - get one theme.
+    PATCH /api/harvest/themes/{theme_id}  - update a custom theme.
+    DELETE /api/harvest/themes/{theme_id} - delete a custom theme.
+    """
+
+    url = "/api/harvest/themes/{theme_id}"
+    name = "api:harvest:theme_detail"
+    requires_auth = True
+
+    def __init__(self, theme_manager: ThemeManager, token_manager: TokenManager) -> None:
+        self._theme_manager = theme_manager
+        self._token_manager = token_manager
+
+    async def get(self, request: web.Request, theme_id: str) -> web.Response:
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            raise web.HTTPForbidden()
+        theme = self._theme_manager.get(theme_id)
+        if theme is None:
+            raise web.HTTPNotFound(reason=f"Theme not found: {theme_id}")
+        d = theme_to_api_dict(theme, has_thumbnail=self._theme_manager.has_thumbnail(theme_id))
+        count = sum(
+            1 for t in self._token_manager.get_all()
+            if theme_url_to_id(t.theme_url) == theme_id
+        )
+        d["usage_count"] = count
+        return self.json(d)
+
+    async def patch(self, request: web.Request, theme_id: str) -> web.Response:
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            raise web.HTTPForbidden()
+
+        try:
+            body = await request.json()
+        except Exception:
+            raise web.HTTPBadRequest(reason="Invalid JSON body.")
+
+        updates: dict = {}
+        if "name" in body:
+            name = str(body["name"]).strip()
+            if not name:
+                raise web.HTTPBadRequest(reason="Theme name cannot be empty.")
+            updates["name"] = name
+        if "author" in body:
+            updates["author"] = str(body["author"])
+        if "version" in body:
+            updates["version"] = str(body["version"])
+        if "variables" in body:
+            if not isinstance(body["variables"], dict):
+                raise web.HTTPBadRequest(reason="variables must be an object.")
+            updates["variables"] = body["variables"]
+        if "dark_variables" in body:
+            if not isinstance(body["dark_variables"], dict):
+                raise web.HTTPBadRequest(reason="dark_variables must be an object.")
+            updates["dark_variables"] = body["dark_variables"]
+
+        try:
+            theme = await self._theme_manager.update(theme_id, updates)
+        except ValueError as exc:
+            raise web.HTTPForbidden(reason=str(exc))
+        except KeyError:
+            raise web.HTTPNotFound(reason=f"Theme not found: {theme_id}")
+
+        return self.json(theme_to_api_dict(theme))
+
+    async def delete(self, request: web.Request, theme_id: str) -> web.Response:
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            raise web.HTTPForbidden()
+        try:
+            await self._theme_manager.delete(theme_id)
+        except ValueError as exc:
+            raise web.HTTPForbidden(reason=str(exc))
+        except KeyError:
+            raise web.HTTPNotFound(reason=f"Theme not found: {theme_id}")
+        return web.Response(status=204)
+
+
+class HarvestThemeThumbnailView(HomeAssistantView):
+    """GET /api/harvest/themes/{theme_id}/thumbnail  - serve thumbnail image.
+    POST /api/harvest/themes/{theme_id}/thumbnail - upload thumbnail for custom theme.
+    DELETE /api/harvest/themes/{theme_id}/thumbnail - remove custom thumbnail.
+    """
+
+    url = "/api/harvest/themes/{theme_id}/thumbnail"
+    name = "api:harvest:theme_thumbnail"
+    requires_auth = True
+
+    def __init__(self, theme_manager: ThemeManager) -> None:
+        self._theme_manager = theme_manager
+
+    async def get(self, request: web.Request, theme_id: str) -> web.Response:
+        path = self._theme_manager.get_thumbnail_path(theme_id)
+        if path is None:
+            path = self._theme_manager.get_fallback_thumbnail_path()
+        if not path.is_file():
+            raise web.HTTPNotFound()
+        suffix = path.suffix.lower()
+        ct = "image/png" if suffix == ".png" else "image/jpeg"
+        return web.Response(
+            body=path.read_bytes(),
+            content_type=ct,
+            headers={"Cache-Control": "public, max-age=300"},
+        )
+
+    async def post(self, request: web.Request, theme_id: str) -> web.Response:
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            raise web.HTTPForbidden()
+        reader = await request.multipart()
+        field = await reader.next()
+        if field is None or field.name != "file":
+            raise web.HTTPBadRequest(reason="Expected a 'file' field.")
+        filename = field.filename or "upload.png"
+        from pathlib import PurePosixPath
+        ext = PurePosixPath(filename).suffix.lower()
+        data = await field.read(decode=False)
+        try:
+            self._theme_manager.save_thumbnail(theme_id, data, ext)
+        except (ValueError, KeyError) as exc:
+            raise web.HTTPBadRequest(reason=str(exc))
+        return self.json({"ok": True, "has_thumbnail": True})
+
+    async def delete(self, request: web.Request, theme_id: str) -> web.Response:
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            raise web.HTTPForbidden()
+        self._theme_manager.delete_thumbnail(theme_id)
         return web.Response(status=204)
 
 

@@ -79,6 +79,13 @@ export class HrvCard extends HTMLElement {
 
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
 
+    // Preview mode: attach shadow DOM but skip WebSocket connection.
+    // State is injected via setPreview() after mount.
+    if (this.hasAttribute("preview")) {
+      this.#config.card = this;
+      return;
+    }
+
     // Show connecting skeleton immediately.
     this.setErrorState("HRV_CONNECTING");
 
@@ -240,6 +247,16 @@ export class HrvCard extends HTMLElement {
   }
 
   /**
+   * Called when the server pushes a theme update for this token.
+   * @param {object} theme - { variables, dark_variables }
+   */
+  receiveTheme(theme) {
+    if (theme && this.shadowRoot) {
+      ThemeLoader.apply(theme, this.shadowRoot);
+    }
+  }
+
+  /**
    * Called when a server error message is routed to this card.
    * @param {string} code
    */
@@ -278,6 +295,71 @@ export class HrvCard extends HTMLElement {
     if (code === "live") this.setAttribute("data-harvest-was-live", "");
     if (this.shadowRoot) {
       applyErrorState(this, this.shadowRoot, code, this.#config, this.#i18n);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Preview mode
+  // -------------------------------------------------------------------------
+
+  /**
+   * Render a card in preview mode with provided entity data and theme vars.
+   * Bypasses WebSocket - the card renders exactly as it would live but with
+   * injected state. Interactive controls use optimistic UI (local-only).
+   *
+   * @param {object}   entityDef  - EntityDefinition (domain, friendly_name, capabilities, supported_features, feature_config, icon)
+   * @param {string}   state      - Entity state ("on", "off", "22.4", etc.)
+   * @param {object}   attributes - Entity attributes ({brightness: 180, ...})
+   * @param {object}   [themeVars] - CSS custom properties to apply
+   */
+  setPreview(entityDef, state, attributes, themeVars) {
+    if (!this.shadowRoot) return;
+
+    // Force read-write unless entityDef says otherwise.
+    if (!entityDef.capabilities) entityDef.capabilities = "read-write";
+
+    // Instantiate the renderer exactly as receiveDefinition does.
+    const RendererClass = lookupRenderer(entityDef.domain, entityDef.device_class ?? null);
+    this.#renderer = new RendererClass(entityDef, this.shadowRoot, this.#config, this.#i18n);
+    this.#renderer.render();
+
+    // Apply state.
+    this.#renderer.applyState(state, attributes);
+    this.setErrorState("live");
+
+    // Apply theme CSS variables to the shadow host.
+    if (themeVars) {
+      this.applyPreviewTheme(themeVars);
+    }
+  }
+
+  /**
+   * Update only the theme CSS variables on a preview card without
+   * re-rendering the card structure.
+   *
+   * @param {object} themeVars - CSS custom properties object
+   */
+  applyPreviewTheme(themeVars) {
+    if (!this.shadowRoot) return;
+    const host = this.shadowRoot.host;
+    // Clear any previously set preview vars.
+    for (const name of Array.from(host.style)) {
+      if (name.startsWith("--hrv-")) host.style.removeProperty(name);
+    }
+    for (const [key, value] of Object.entries(themeVars)) {
+      host.style.setProperty(key, String(value));
+    }
+  }
+
+  /**
+   * Update only the entity state on a preview card.
+   *
+   * @param {string} state
+   * @param {object} attributes
+   */
+  updatePreviewState(state, attributes) {
+    if (this.#renderer) {
+      this.#renderer.applyState(state, attributes);
     }
   }
 
@@ -337,6 +419,17 @@ export class HrvCard extends HTMLElement {
    * @param {object} data
    */
   sendCommand(action, data) {
+    // Preview mode: apply optimistic UI only, no server call.
+    if (this.hasAttribute("preview")) {
+      const predicted = this.#renderer?.predictState(action, data ?? {});
+      if (predicted) {
+        requestAnimationFrame(() => {
+          this.#renderer?.applyState(predicted.state, predicted.attributes);
+        });
+      }
+      return;
+    }
+
     console.warn(`[HArvest] sendCommand: ${this.#entityId || this.#alias} ${action}`, data);
     if (!this.#client) {
       console.warn("[HArvest] sendCommand: no client");
@@ -516,5 +609,6 @@ function _makeCompanionProxy(entityId, parentCard) {
   };
 }
 
-// Register the custom element.
-customElements.define("hrv-card", HrvCard);
+if (!customElements.get("hrv-card")) {
+  customElements.define("hrv-card", HrvCard);
+}

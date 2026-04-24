@@ -134,6 +134,13 @@ export class InputNumberCard extends BaseCard {
     }
   }
 
+  predictState(action, data) {
+    if (action === "set_value" && data.value !== undefined) {
+      return { state: String(data.value), attributes: {} };
+    }
+    return null;
+  }
+
   #sendValue(value) {
     this.config.card?.sendCommand("set_value", { value });
   }

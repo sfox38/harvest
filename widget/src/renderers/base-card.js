@@ -512,10 +512,14 @@ export class BaseCard {
 
     this.#historyPoints = [];
     for (const p of points) {
-      const v = parseFloat(p.s);
-      if (!isNaN(v)) {
-        this.#historyPoints.push({ t: new Date(p.t).getTime(), s: v });
+      let v = parseFloat(p.s);
+      if (isNaN(v)) {
+        const lower = String(p.s).toLowerCase();
+        if (lower === "on" || lower === "true" || lower === "home") v = 1;
+        else if (lower === "off" || lower === "false" || lower === "not_home") v = 0;
+        else continue;
       }
+      this.#historyPoints.push({ t: new Date(p.t).getTime(), s: v });
     }
 
     this.#renderHistoryGraph();
@@ -572,7 +576,9 @@ export class BaseCard {
     const scaleX = (t) => PAD_X + ((t - tMin) / tRange) * (W - 2 * PAD_X);
     const scaleY = (s) => (H - PAD_Y) - ((s - sMin) / sRange) * (H - 2 * PAD_Y);
 
-    if (this.#historyGraphType === "bar") {
+    if (this.#historyGraphType === "step") {
+      zone.innerHTML = this.#renderStepGraph(pts, W, H, scaleX, scaleY);
+    } else if (this.#historyGraphType === "bar") {
       zone.innerHTML = this.#renderBarGraph(pts, W, H, scaleX, scaleY, sMin);
     } else {
       zone.innerHTML = this.#renderLineGraph(pts, W, H, scaleX, scaleY);
@@ -613,6 +619,28 @@ export class BaseCard {
       }
     }
     return `<svg part="history-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}</svg>`;
+  }
+
+  #renderStepGraph(pts, W, H, scaleX, scaleY) {
+    let path = "";
+    for (let i = 0; i < pts.length; i++) {
+      const x = scaleX(pts[i].t);
+      const y = scaleY(pts[i].s);
+      if (i === 0) {
+        path += `M${x.toFixed(1)},${y.toFixed(1)}`;
+      } else {
+        path += ` H${x.toFixed(1)} V${y.toFixed(1)}`;
+      }
+    }
+    const lastX = scaleX(pts[pts.length - 1].t);
+    path += ` H${W.toFixed(1)}`;
+
+    const fillPath = path + ` V${H} H${scaleX(pts[0].t).toFixed(1)} Z`;
+
+    return `<svg part="history-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <path d="${fillPath}" fill="var(--hrv-color-primary)" opacity="0.1"/>
+      <path d="${path}" fill="none" stroke="var(--hrv-color-primary)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+    </svg>`;
   }
 }
 

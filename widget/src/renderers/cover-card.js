@@ -72,6 +72,8 @@ export class CoverCard extends BaseCard {
   /** @type {HTMLElement|null}       */ #positionValue  = null;
   /** @type {HTMLElement|null}       */ #stateLabel     = null;
   /** @type {Function}               */ #positionDebounce;
+  /** @type {string} */ #lastState = "";
+  /** @type {object} */ #lastAttrs = {};
 
   constructor(def, root, config, i18n) {
     super(def, root, config, i18n);
@@ -81,6 +83,7 @@ export class CoverCard extends BaseCard {
   render() {
     const isWritable   = this.def.capabilities === "read-write";
     const hasPosition  = this.def.supported_features?.includes("set_position");
+    const hasButtons   = !this.def.supported_features || this.def.supported_features.includes("buttons");
 
     this.root.innerHTML = /* html */`
       <style>${this.getSharedStyles()}${COVER_STYLES}</style>
@@ -91,7 +94,7 @@ export class CoverCard extends BaseCard {
         </div>
         <div part="card-body">
           <span part="state-label"></span>
-          ${isWritable ? /* html */`
+          ${isWritable && hasButtons ? /* html */`
             <div class="hrv-cover-controls">
               <button part="open-button" class="hrv-cover-btn" type="button"
                 aria-label="${_esc(this.i18n.t("cover.open"))}">
@@ -146,6 +149,8 @@ export class CoverCard extends BaseCard {
   }
 
   applyState(state, attributes) {
+    this.#lastState = state;
+    this.#lastAttrs = { ...attributes };
     const label = this.i18n.t(`state.${state}`) !== `state.${state}`
       ? this.i18n.t(`state.${state}`)
       : state;
@@ -164,6 +169,26 @@ export class CoverCard extends BaseCard {
       ?? this.def.icon
       ?? _coverIcon(state, attributes);
     this.renderIcon(iconName, "card-icon");
+  }
+
+  predictState(action, data) {
+    const attrs = { ...this.#lastAttrs };
+    if (action === "open_cover") {
+      attrs.current_position = 100;
+      return { state: "open", attributes: attrs };
+    }
+    if (action === "close_cover") {
+      attrs.current_position = 0;
+      return { state: "closed", attributes: attrs };
+    }
+    if (action === "stop_cover") {
+      return { state: this.#lastState, attributes: attrs };
+    }
+    if (action === "set_cover_position" && data.position !== undefined) {
+      attrs.current_position = data.position;
+      return { state: data.position > 0 ? "open" : "closed", attributes: attrs };
+    }
+    return null;
   }
 
   #sendPosition(value) {
