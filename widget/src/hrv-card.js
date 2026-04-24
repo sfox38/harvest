@@ -529,6 +529,9 @@ export class HrvCard extends HTMLElement {
         if (!this.#config.tokenSecret) this.#config.tokenSecret = ancestor.getAttribute("token-secret") ?? null;
         if (!this.#config.themeUrl) this.#config.themeUrl = ancestor.getAttribute("theme-url") ?? null;
         if (this.#config.lang === "auto") this.#config.lang = ancestor.getAttribute("lang") ?? "auto";
+        if (this.#config.a11y === "standard" && ancestor.hasAttribute("a11y")) {
+          this.#config.a11y = ancestor.getAttribute("a11y") || "enhanced";
+        }
         break;
       }
       ancestor = ancestor.parentElement;
@@ -544,6 +547,7 @@ export class HrvCard extends HTMLElement {
     if (!this.#config.tokenSecret && _pageConfig.tokenSecret) this.#config.tokenSecret = _pageConfig.tokenSecret;
     if (!this.#config.themeUrl   && _pageConfig.themeUrl)     this.#config.themeUrl   = _pageConfig.themeUrl;
     if (this.#config.lang === "auto" && _pageConfig.lang)     this.#config.lang       = _pageConfig.lang;
+    if (this.#config.a11y === "standard" && _pageConfig.a11y)  this.#config.a11y       = _pageConfig.a11y;
   }
 
   /**

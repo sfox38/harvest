@@ -114,17 +114,16 @@ function buildCardSnippetFromState(
     const entityAttr = useAliases && e.alias ? `alias="${e.alias}"` : `entity="${e.entity_id}"`;
     const cl = e.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
     const companionAttr = cl.length > 0 ? ` companion="${cl.join(", ")}"` : "";
-    return `${indent}<hrv-card ${entityAttr}${companionAttr}${a11yAttr}></hrv-card>`;
+    return `${indent}<hrv-card ${entityAttr}${companionAttr}></hrv-card>`;
   }
 
   if (mode === "page") {
-    const cards = entities.map(e => cardLine(e));
-    return cards.join("\n");
+    return entities.map(e => cardLine(e)).join("\n");
   }
 
   const groupAttrs = `ha-url="${haUrl}" token="${tokenId}"`;
   if (mode === "group") {
-    return `<hrv-group ${groupAttrs}>\n${entities.map(e => cardLine(e, "  ")).join("\n")}\n</hrv-group>`;
+    return `<hrv-group ${groupAttrs}${a11yAttr}>\n${entities.map(e => cardLine(e, "  ")).join("\n")}\n</hrv-group>`;
   }
   const e = entities[0];
   if (!e) return "";
@@ -142,7 +141,7 @@ function buildWordPressSnippetFromState(
     const entityAttr = useAliases && e.alias ? `alias="${e.alias}"` : `entity="${e.entity_id}"`;
     const cl = e.companions.map(c => useAliases && c.alias ? c.alias : c.entity_id);
     const companionAttr = cl.length > 0 ? ` companion="${cl.join(",")}"` : "";
-    return `${indent}[harvest ${entityAttr}${companionAttr}${a11yAttr}]`;
+    return `${indent}[harvest ${entityAttr}${companionAttr}]`;
   }
 
   if (mode === "page") {
@@ -155,7 +154,7 @@ function buildWordPressSnippetFromState(
   }
 
   if (mode === "group") {
-    return `[harvest_group token="${tokenId}"]\n${entities.map(e => shortcodeLine(e, "  ")).join("\n")}\n[/harvest_group]`;
+    return `[harvest_group token="${tokenId}"${a11yAttr}]\n${entities.map(e => shortcodeLine(e, "  ")).join("\n")}\n[/harvest_group]`;
   }
 
   const e = entities[0];
@@ -810,8 +809,10 @@ function Step6({ token, tokenSecret, originMode, originUrl, overrideHost, select
   const scriptUrl = widgetScriptUrl.trim() || DEFAULT_WIDGET_SCRIPT_URL;
   const isPage = cardMode === "page";
   const scriptTag = `<script src="${scriptUrl}"></script>`;
+  const pageConfigParts = [`haUrl: "${haUrl}"`, `token: "${token.token_id}"`];
+  if (isPage && useA11y) pageConfigParts.push(`a11y: "enhanced"`);
   const pageSetup = isPage
-    ? `${scriptTag}\n<script>HArvest.config({ haUrl: "${haUrl}", token: "${token.token_id}" });</script>`
+    ? `${scriptTag}\n<script>HArvest.config({ ${pageConfigParts.join(", ")} });</script>`
     : scriptTag;
   const cardSnippet = tab === "web"
     ? buildCardSnippetFromState(selectedEntities, useAliases, cardMode, token.token_id, haUrl, useA11y)

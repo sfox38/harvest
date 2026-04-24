@@ -136,7 +136,7 @@ function buildCardSnippet(token: Token, useAliases: boolean, mode: CardMode, haU
     const companionAttr = cl.length > 0 ? ` companion="${cl.join(", ")}"` : "";
     const hist = graphAttrs(g.primary, "html");
     const extra = extraAttrs(g.primary, "html");
-    return `${indent}<hrv-card ${attr}${companionAttr}${hist}${extra}${a11yAttr}></hrv-card>`;
+    return `${indent}<hrv-card ${attr}${companionAttr}${hist}${extra}></hrv-card>`;
   }
 
   if (mode === "page") {
@@ -145,7 +145,7 @@ function buildCardSnippet(token: Token, useAliases: boolean, mode: CardMode, haU
 
   const groupAttrs = `ha-url="${haUrl}" token="${token.token_id}"${secretAttr}`;
   if (mode === "group") {
-    return `<hrv-group ${groupAttrs}>\n${groups.map(g => cardLine(g, "  ")).join("\n")}\n</hrv-group>`;
+    return `<hrv-group ${groupAttrs}${a11yAttr}>\n${groups.map(g => cardLine(g, "  ")).join("\n")}\n</hrv-group>`;
   }
   const g = groups[0];
   if (!g) return "";
@@ -168,7 +168,7 @@ function buildWordPressSnippet(token: Token, useAliases: boolean, mode: CardMode
     const companionAttr = cl.length > 0 ? ` companion="${cl.join(",")}"` : "";
     const hist = graphAttrs(g.primary, "shortcode");
     const extra = extraAttrs(g.primary, "shortcode");
-    return `${indent}[harvest ${attr}${companionAttr}${hist}${extra}${a11yAttr}]`;
+    return `${indent}[harvest ${attr}${companionAttr}${hist}${extra}]`;
   }
 
   if (mode === "page") {
@@ -183,7 +183,7 @@ function buildWordPressSnippet(token: Token, useAliases: boolean, mode: CardMode
   }
 
   if (mode === "group") {
-    return `[harvest_group token="${token.token_id}"${secretAttr}]\n${groups.map(g => shortcodeLine(g, "  ")).join("\n")}\n[/harvest_group]`;
+    return `[harvest_group token="${token.token_id}"${secretAttr}${a11yAttr}]\n${groups.map(g => shortcodeLine(g, "  ")).join("\n")}\n[/harvest_group]`;
   }
 
   const g = groups[0];
@@ -235,6 +235,7 @@ function CodeSection({ token, setToken, setError, hmacSecret }: { token: Token; 
   const scriptTag = `<script src="${scriptUrl}"></script>`;
   const pageConfigParts = [`haUrl: "${haUrl}"`, `token: "${token.token_id}"`];
   if (isPage && hmacSecret) pageConfigParts.push(`tokenSecret: "${hmacSecret}"`);
+  if (isPage && useA11y) pageConfigParts.push(`a11y: "enhanced"`);
   const setupSnippet = isPage
     ? `${scriptTag}\n<script>HArvest.config({ ${pageConfigParts.join(", ")} });</script>`
     : scriptTag;
