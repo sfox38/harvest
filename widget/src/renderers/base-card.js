@@ -392,7 +392,7 @@ export class BaseCard {
    */
   renderCompanionZoneHTML() {
     if (!this.config.companions?.length) return "";
-    return `<div part="companion-zone" role="group" aria-label="Companion devices"></div>`;
+    return `<div part="companion-zone" role="group" aria-label="${this.i18n.t("ui.companions")}"></div>`;
   }
 
   /**
@@ -515,7 +515,7 @@ export class BaseCard {
    */
   renderHistoryZoneHTML() {
     if (!this.config.graph) return "";
-    return `<div part="history-graph" aria-label="History graph"></div>`;
+    return `<div part="history-graph" aria-label="${this.i18n.t("ui.history")}"></div>`;
   }
 
   /** @type {Array<{t:number, s:number}>} */ #historyPoints = [];

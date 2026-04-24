@@ -160,61 +160,61 @@ export class ClimateCard extends BaseCard {
         </div>
         <div part="card-body">
           <div class="hrv-climate-row">
-            <span class="hrv-climate-label">Current</span>
+            <span class="hrv-climate-label">${_esc(this.i18n.t("climate.current"))}</span>
             <span part="current-temp" class="hrv-climate-temp">-</span>
           </div>
           <span part="state-label"></span>
           ${isWritable && hvacModes.length > 0 ? /* html */`
             <div class="hrv-climate-row">
-              <span class="hrv-climate-label">Mode</span>
-              <select part="mode-select" aria-label="${_esc(this.def.friendly_name)} - HVAC mode">
+              <span class="hrv-climate-label">${_esc(this.i18n.t("climate.mode"))}</span>
+              <select part="mode-select" aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("climate.mode"))}">
                 ${modeOptions}
               </select>
             </div>
           ` : ""}
           ${isWritable && hasTarget && !hasRange ? /* html */`
             <div class="hrv-climate-row">
-              <span class="hrv-climate-label">Target</span>
+              <span class="hrv-climate-label">${_esc(this.i18n.t("climate.target"))}</span>
               <input part="target-temp-input" type="number"
                 min="${minTemp}" max="${maxTemp}" step="${step}"
-                aria-label="${_esc(this.def.friendly_name)} - Target temperature">
+                aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("climate.target"))}">
             </div>
           ` : ""}
           ${isWritable && hasRange ? /* html */`
             <div class="hrv-climate-row">
-              <span class="hrv-climate-label">Low</span>
+              <span class="hrv-climate-label">${_esc(this.i18n.t("climate.target_low"))}</span>
               <input part="target-temp-low-input" type="number"
                 min="${minTemp}" max="${maxTemp}" step="${step}"
-                aria-label="${_esc(this.def.friendly_name)} - Target temperature low">
+                aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("climate.target_low"))}">
             </div>
             <div class="hrv-climate-row">
-              <span class="hrv-climate-label">High</span>
+              <span class="hrv-climate-label">${_esc(this.i18n.t("climate.target_high"))}</span>
               <input part="target-temp-high-input" type="number"
                 min="${minTemp}" max="${maxTemp}" step="${step}"
-                aria-label="${_esc(this.def.friendly_name)} - Target temperature high">
+                aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("climate.target_high"))}">
             </div>
           ` : ""}
           ${hasFanMode ? /* html */`
             <div class="hrv-climate-row">
-              <span class="hrv-climate-label">Fan</span>
+              <span class="hrv-climate-label">${_esc(this.i18n.t("climate.fan_mode"))}</span>
               ${isWritable && fanOptions
-                ? `<select part="fan-mode-select" aria-label="${_esc(this.def.friendly_name)} - Fan mode">${fanOptions}</select>`
+                ? `<select part="fan-mode-select" aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("climate.fan_mode"))}">${fanOptions}</select>`
                 : `<span part="fan-mode-label" class="hrv-climate-label"></span>`}
             </div>
           ` : ""}
           ${hasPreset ? /* html */`
             <div class="hrv-climate-row">
-              <span class="hrv-climate-label">Preset</span>
+              <span class="hrv-climate-label">${_esc(this.i18n.t("climate.preset_mode"))}</span>
               ${isWritable && presetOptions
-                ? `<select part="preset-select" aria-label="${_esc(this.def.friendly_name)} - Preset mode">${presetOptions}</select>`
+                ? `<select part="preset-select" aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("climate.preset_mode"))}">${presetOptions}</select>`
                 : `<span part="preset-label" class="hrv-climate-label"></span>`}
             </div>
           ` : ""}
           ${hasSwing ? /* html */`
             <div class="hrv-climate-row">
-              <span class="hrv-climate-label">Swing</span>
+              <span class="hrv-climate-label">${_esc(this.i18n.t("climate.swing_mode"))}</span>
               ${isWritable && swingOptions
-                ? `<select part="swing-select" aria-label="${_esc(this.def.friendly_name)} - Swing mode">${swingOptions}</select>`
+                ? `<select part="swing-select" aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("climate.swing_mode"))}">${swingOptions}</select>`
                 : `<span part="swing-label" class="hrv-climate-label"></span>`}
             </div>
           ` : ""}

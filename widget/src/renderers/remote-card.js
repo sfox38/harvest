@@ -68,7 +68,7 @@ export class RemoteCard extends BaseCard {
           <span part="state-label"></span>
           ${isWritable ? /* html */`
             <button part="command-button" type="button"
-              aria-label="${_esc(this.def.friendly_name)} - Send ${_esc(commandLabel)}">
+              aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("action.send"))} ${_esc(commandLabel)}">
               ${_esc(commandLabel)}
             </button>
           ` : ""}

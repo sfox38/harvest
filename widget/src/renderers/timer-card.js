@@ -110,13 +110,13 @@ export class TimerCard extends BaseCard {
           ${isWritable ? /* html */`
             <div class="hrv-timer-controls">
               <button part="start-button" class="hrv-timer-btn hrv-timer-btn-primary" type="button"
-                aria-label="${_esc(this.def.friendly_name)} - Start">Start</button>
+                aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("timer.start"))}">${_esc(this.i18n.t("timer.start"))}</button>
               <button part="pause-button" class="hrv-timer-btn" type="button"
-                aria-label="${_esc(this.def.friendly_name)} - Pause">Pause</button>
+                aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("timer.pause"))}">${_esc(this.i18n.t("timer.pause"))}</button>
               <button part="cancel-button" class="hrv-timer-btn" type="button"
-                aria-label="${_esc(this.def.friendly_name)} - Cancel">Cancel</button>
+                aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("timer.cancel"))}">${_esc(this.i18n.t("timer.cancel"))}</button>
               <button part="finish-button" class="hrv-timer-btn" type="button"
-                aria-label="${_esc(this.def.friendly_name)} - Finish">Finish</button>
+                aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("timer.finish"))}">${_esc(this.i18n.t("timer.finish"))}</button>
             </div>
           ` : ""}
         </div>
@@ -202,12 +202,15 @@ export class TimerCard extends BaseCard {
     if (this.#finishBtn) this.#finishBtn.disabled = isIdle;
 
     if (this.#startBtn) {
-      const btnLabel = isPaused ? "Resume" : "Start";
+      const btnLabel = isPaused ? this.i18n.t("timer.resume") : this.i18n.t("timer.start");
       this.#startBtn.textContent = btnLabel;
       this.#startBtn.setAttribute("aria-label", `${this.def.friendly_name} - ${btnLabel}`);
     }
 
-    this.announceState(`${this.def.friendly_name}, ${label}`);
+    const stateLabel = this.i18n.t(`state.${state}`) !== `state.${state}`
+      ? this.i18n.t(`state.${state}`)
+      : state;
+    this.announceState(`${this.def.friendly_name}, ${stateLabel}`);
   }
 
   #updateDisplay(state) {

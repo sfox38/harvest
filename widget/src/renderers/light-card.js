@@ -175,31 +175,31 @@ export class LightCard extends BaseCard {
           ${isWritable && hasBrightness ? /* html */`
             <div>
               <div class="hrv-slider-label">
-                <span>Brightness</span>
+                <span>${_esc(this.i18n.t("light.brightness"))}</span>
                 <span part="brightness-value">-</span>
               </div>
               <input part="brightness-slider" type="range" min="0" max="255"
-                aria-label="${_esc(this.def.friendly_name)} - Brightness">
+                aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("light.brightness"))}">
             </div>
           ` : ""}
           ${isWritable && hasColor ? /* html */`
             <div data-hrv-slider="color">
               <div class="hrv-slider-label">
-                <span>Color</span>
+                <span>${_esc(this.i18n.t("light.color"))}</span>
               </div>
               <input part="color-slider" type="range" min="0" max="360"
-                aria-label="${_esc(this.def.friendly_name)} - Color">
+                aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("light.color"))}">
             </div>
           ` : ""}
           ${isWritable && hasColorTemp ? /* html */`
             <div data-hrv-slider="temp">
               <div class="hrv-slider-label">
-                <span>Temperature</span>
+                <span>${_esc(this.i18n.t("light.color_temp"))}</span>
                 <span part="color-temp-value">-</span>
               </div>
               <input part="color-temp-slider" type="range"
                 min="${minCt}" max="${maxCt}"
-                aria-label="${_esc(this.def.friendly_name)} - Color temperature">
+                aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("light.color_temp"))}">
             </div>
           ` : ""}
         </div>

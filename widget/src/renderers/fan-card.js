@@ -159,32 +159,32 @@ export class FanCard extends BaseCard {
           ${isWritable && hasSpeed ? /* html */`
             <div>
               <div class="hrv-slider-label">
-                <span>Speed</span>
+                <span>${_esc(this.i18n.t("fan.speed"))}</span>
                 <span part="speed-value">-</span>
               </div>
               <input part="speed-slider" type="range" min="0" max="100"
-                aria-label="${_esc(this.def.friendly_name)} - Speed">
+                aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("fan.speed"))}">
             </div>
           ` : ""}
           ${isWritable && hasOscillate ? /* html */`
             <button part="oscillate-button" type="button" aria-pressed="false"
-              aria-label="${_esc(this.def.friendly_name)} - Oscillate">
-              Oscillate
+              aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("fan.oscillate"))}">
+              ${_esc(this.i18n.t("fan.oscillate"))}
             </button>
           ` : ""}
           ${isWritable && hasDirection ? /* html */`
             <div>
-              <div class="hrv-slider-label"><span>Direction</span></div>
-              <select part="direction-select" aria-label="${_esc(this.def.friendly_name)} - Direction">
-                <option value="forward">Forward</option>
-                <option value="reverse">Reverse</option>
+              <div class="hrv-slider-label"><span>${_esc(this.i18n.t("fan.direction"))}</span></div>
+              <select part="direction-select" aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("fan.direction"))}">
+                <option value="forward">${_esc(this.i18n.t("fan.forward"))}</option>
+                <option value="reverse">${_esc(this.i18n.t("fan.reverse"))}</option>
               </select>
             </div>
           ` : ""}
           ${isWritable && hasPreset && presetOptions ? /* html */`
             <div>
-              <div class="hrv-slider-label"><span>Preset</span></div>
-              <select part="preset-select" aria-label="${_esc(this.def.friendly_name)} - Preset mode">
+              <div class="hrv-slider-label"><span>${_esc(this.i18n.t("fan.preset"))}</span></div>
+              <select part="preset-select" aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("fan.preset"))}">
                 ${presetOptions}
               </select>
             </div>
@@ -273,7 +273,7 @@ export class FanCard extends BaseCard {
       const osc = !!attributes.oscillating;
       this.#oscillateBtn.setAttribute("aria-pressed", String(osc));
       this.#oscillateBtn.setAttribute("aria-label",
-        `${this.def.friendly_name} - Oscillate, ${this.i18n.t("action.currently")} ${osc ? this.i18n.t("state.on") : this.i18n.t("state.off")}`);
+        `${this.def.friendly_name} - ${this.i18n.t("fan.oscillate")}, ${this.i18n.t("action.currently")} ${osc ? this.i18n.t("state.on") : this.i18n.t("state.off")}`);
       this.#oscillateBtn.disabled = isUnavailable;
     }
 
