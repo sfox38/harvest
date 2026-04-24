@@ -75,6 +75,7 @@ async function _doReq<T>(
     throw new Error(`${method} ${path} failed: ${res.status}${reason ? ` - ${reason}` : ""}`);
   }
 
+  if (res.status === 204) return undefined as T;
   if (responseType === "text") return res.text() as Promise<T>;
   return res.json() as Promise<T>;
 }
