@@ -139,6 +139,7 @@ class Token:
     revoke_reason: str | None
     paused: bool = False
     embed_mode: str = "single"             # "single", "group", or "page"
+    theme_url: str = ""                    # bundled theme URL or custom theme URL; empty means default
 
 
 class TokenManager:
@@ -235,6 +236,7 @@ class TokenManager:
         active_schedule: ActiveSchedule | None,
         allowed_ips: list[str],
         embed_mode: str = "single",
+        theme_url: str = "",
     ) -> Token:
         """Create, persist, and return a new token.
 
@@ -281,6 +283,7 @@ class TokenManager:
             revoked_at=None,
             revoke_reason=None,
             embed_mode=embed_mode,
+            theme_url=theme_url,
         )
         self._tokens[token.token_id] = token
         await self.save()
@@ -438,7 +441,7 @@ class TokenManager:
         _UPDATABLE_FIELDS = {
             "label", "origins", "entities", "expires", "token_secret",
             "rate_limits", "session", "max_sessions", "allowed_ips",
-            "active_schedule", "paused", "embed_mode",
+            "active_schedule", "paused", "embed_mode", "theme_url",
         }
         for field_name, value in updates.items():
             if field_name in _UPDATABLE_FIELDS:
@@ -807,6 +810,7 @@ class TokenManager:
             revoke_reason=d.get("revoke_reason"),
             paused=d.get("paused", False),
             embed_mode=d.get("embed_mode", "single"),
+            theme_url=d.get("theme_url", ""),
         )
 
 

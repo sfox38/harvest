@@ -341,6 +341,7 @@ class HarvestTokensView(HomeAssistantView):
                 active_schedule=schedule,
                 allowed_ips=list(body.get("allowed_ips", [])),
                 embed_mode=str(body.get("embed_mode", "single")),
+                theme_url=str(body.get("theme_url", "")),
             )
         except ValueError as exc:
             raise web.HTTPBadRequest(reason=str(exc))
@@ -447,6 +448,8 @@ class HarvestTokenDetailView(HomeAssistantView):
             if body["embed_mode"] not in ("single", "group", "page"):
                 raise web.HTTPBadRequest(reason="embed_mode must be single, group, or page.")
             updates["embed_mode"] = body["embed_mode"]
+        if "theme_url" in body:
+            updates["theme_url"] = str(body["theme_url"] or "")
 
         generated_secret: str | None = None
         if "token_secret" in body:

@@ -1031,6 +1031,7 @@ export function Wizard({ onClose }: WizardProps) {
           origins,
           expires,
           embed_mode: wState.mode,
+          theme_url: wState.themeUrl,
         });
         if (wState.previewTokenId) {
           api.tokens.revoke(wState.previewTokenId).catch(() => {});

@@ -71,6 +71,7 @@ export interface Token {
   active_sessions: number;
   paused: boolean;
   embed_mode: "single" | "group" | "page";
+  theme_url: string;
 }
 
 // ---------------------------------------------------------------------------

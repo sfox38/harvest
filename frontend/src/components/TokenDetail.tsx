@@ -324,6 +324,44 @@ function CodeSection({ token, setToken, setError, hmacSecret }: { token: Token; 
 }
 
 // ---------------------------------------------------------------------------
+// Theme editor
+// ---------------------------------------------------------------------------
+
+const BUNDLED_THEMES = [
+  { label: "Default",       url: "" },
+  { label: "Glassmorphism", url: "bundled:glassmorphism" },
+  { label: "Accessible",    url: "bundled:accessible" },
+];
+
+function ThemeEditor({ token, setToken, setError }: { token: Token; setToken: (t: Token) => void; setError: (e: string | null) => void }) {
+  const current = token.theme_url ?? "";
+
+  const change = async (url: string) => {
+    try {
+      const updated = await api.tokens.update(token.token_id, { theme_url: url });
+      setToken(updated);
+    } catch (e) { setError(String(e)); }
+  };
+
+  return (
+    <Card title="Theme">
+      <div className="theme-grid">
+        {BUNDLED_THEMES.map(t => (
+          <button
+            key={t.url}
+            className={`theme-card${current === t.url ? " selected" : ""}`}
+            onClick={() => change(t.url)}
+          >
+            <div className="theme-preview" />
+            <span style={{ fontSize: 12 }}>{t.label}</span>
+          </button>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Entities editor
 // ---------------------------------------------------------------------------
 
@@ -1689,6 +1727,9 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
 
           {/* Code section */}
           {!readonly && <CodeSection token={token} setToken={t => setToken({ ...t, created_by_name: token.created_by_name })} setError={setError} hmacSecret={hmacSecret} />}
+
+          {/* Theme */}
+          {!readonly && <ThemeEditor token={token} setToken={t => setToken({ ...t, created_by_name: token.created_by_name })} setError={setError} />}
 
           {/* Entities */}
           <EntitiesEditor
