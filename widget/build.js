@@ -28,6 +28,8 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC_ENTRY = resolve(__dirname, "src/harvest-entry.js");
 const DIST_DIR  = resolve(__dirname, "dist");
+const PACK_ENTRY = resolve(__dirname, "src/packs/examples-pack.js");
+const PACK_OUT   = resolve(__dirname, "../custom_components/harvest/packs/examples.js");
 
 const isWatch = process.argv.includes("--watch");
 
@@ -71,6 +73,28 @@ async function build() {
   console.log(`Built ${kb} KB`);
   console.log(`  dist/harvest.min.${hash}.js`);
   console.log(`  dist/harvest.min.js`);
+
+  // Build renderer packs
+  const packResult = await esbuild.build({
+    entryPoints: [PACK_ENTRY],
+    bundle:      false,
+    minify:      true,
+    format:      "iife",
+    target:      ["es2020"],
+    charset:     "utf8",
+    write:       false,
+    logLevel:    "info",
+  });
+
+  if (packResult.errors.length > 0) {
+    console.error("Pack build failed:", packResult.errors);
+    process.exit(1);
+  }
+
+  const packBytes = packResult.outputFiles[0].contents;
+  writeFileSync(PACK_OUT, packBytes);
+  const pkb = (packBytes.byteLength / 1024).toFixed(1);
+  console.log(`Pack: ${pkb} KB  packs/examples.js`);
 }
 
 if (isWatch) {

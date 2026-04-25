@@ -24,6 +24,7 @@ from .diagnostic_sensors import DiagnosticSensors
 from .event_bus import EventBus
 from .harvest_action import HarvestActionManager, ServiceCall
 from .session_manager import SessionManager
+from .pack_manager import PackManager
 from .theme_manager import ThemeManager, theme_to_api_dict, theme_url_to_id
 from .const import ERR_TOKEN_INACTIVE
 from .token_manager import (
@@ -57,6 +58,7 @@ def register_views(
     sensors: DiagnosticSensors,
     event_bus: EventBus | None = None,
     theme_manager: ThemeManager | None = None,
+    pack_manager: PackManager | None = None,
 ) -> None:
     """Register all HTTP API views with HA's HTTP server.
 
@@ -64,7 +66,7 @@ def register_views(
     All views require HA authentication (panel runs in authenticated context).
     """
     hass.http.register_view(HarvestTokensView(token_manager, session_manager, activity_store))
-    hass.http.register_view(HarvestTokenDetailView(hass, token_manager, session_manager, activity_store, event_bus, theme_manager))
+    hass.http.register_view(HarvestTokenDetailView(hass, token_manager, session_manager, activity_store, event_bus, theme_manager, pack_manager))
     hass.http.register_view(HarvestSessionsView(session_manager))
     hass.http.register_view(HarvestSessionTerminateView(session_manager))
     hass.http.register_view(HarvestActivityView(activity_store, token_manager))
@@ -76,6 +78,11 @@ def register_views(
         hass.http.register_view(HarvestThemeDetailView(theme_manager, token_manager))
         hass.http.register_view(HarvestThemeThumbnailView(hass, theme_manager))
         _LOGGER.debug("HArvest: registered theme views")
+    if pack_manager is not None:
+        hass.http.register_view(HarvestPacksView(pack_manager))
+        hass.http.register_view(HarvestPackAgreeView(pack_manager))
+        hass.http.register_view(HarvestPackFileView(hass, pack_manager))
+        _LOGGER.warning("HArvest: registered pack views")
     hass.http.register_view(HarvestConfigView(hass, session_manager))
     hass.http.register_view(HarvestStatsView(sensors, activity_store, session_manager, token_manager))
     # Additional views needed by the wizard flow.
@@ -377,13 +384,14 @@ class HarvestTokenDetailView(HomeAssistantView):
     name = "api:harvest:token_detail"
     requires_auth = True
 
-    def __init__(self, hass: HomeAssistant, token_manager: TokenManager, session_manager: SessionManager, activity_store: ActivityStore, event_bus: EventBus, theme_manager: ThemeManager | None = None) -> None:
+    def __init__(self, hass: HomeAssistant, token_manager: TokenManager, session_manager: SessionManager, activity_store: ActivityStore, event_bus: EventBus, theme_manager: ThemeManager | None = None, pack_manager: PackManager | None = None) -> None:
         self._hass = hass
         self._token_manager = token_manager
         self._session_manager = session_manager
         self._activity_store = activity_store
         self._event_bus = event_bus
         self._theme_manager = theme_manager
+        self._pack_manager = pack_manager
 
     async def _push_theme_to_sessions(self, token_id: str) -> None:
         """Push updated theme data to all active sessions for a token."""
@@ -399,6 +407,23 @@ class HarvestTokenDetailView(HomeAssistantView):
             "variables": theme_def.variables if theme_def else {},
             "dark_variables": theme_def.dark_variables if theme_def else {},
         }
+        for session in self._session_manager.get_all_for_token(token_id):
+            if not session.ws.closed:
+                try:
+                    await session.ws.send_json(msg)
+                except Exception:
+                    pass
+
+    async def _push_renderer_pack_to_sessions(self, token_id: str) -> None:
+        """Push renderer pack URL to all active sessions for a token."""
+        token = self._token_manager.get(token_id)
+        if not token:
+            return
+        msg: dict[str, Any] = {"type": "renderer_pack", "url": ""}
+        if token.renderer_pack and self._pack_manager:
+            pack_def = self._pack_manager.get(token.renderer_pack)
+            if pack_def:
+                msg["url"] = f"/api/harvest/packs/{token.renderer_pack}.js"
         for session in self._session_manager.get_all_for_token(token_id):
             if not session.ws.closed:
                 try:
@@ -483,6 +508,12 @@ class HarvestTokenDetailView(HomeAssistantView):
             updates["embed_mode"] = body["embed_mode"]
         if "theme_url" in body:
             updates["theme_url"] = str(body["theme_url"] or "")
+        if "renderer_pack" in body:
+            pack_val = str(body["renderer_pack"] or "")
+            if pack_val and self._pack_manager:
+                if not self._pack_manager.get(pack_val):
+                    raise web.HTTPBadRequest(reason=f"Unknown renderer pack: {pack_val}")
+            updates["renderer_pack"] = pack_val
 
         generated_secret: str | None = None
         if "token_secret" in body:
@@ -512,6 +543,9 @@ class HarvestTokenDetailView(HomeAssistantView):
 
         if "theme_url" in updates:
             await self._push_theme_to_sessions(token_id)
+
+        if "renderer_pack" in updates:
+            await self._push_renderer_pack_to_sessions(token_id)
 
         result = _token_to_dict(token)
         if generated_secret is not None:
@@ -1091,6 +1125,91 @@ class HarvestThemeThumbnailView(HomeAssistantView):
             raise web.HTTPForbidden()
         self._theme_manager.delete_thumbnail(theme_id)
         return web.Response(status=204)
+
+
+# ---------------------------------------------------------------------------
+# Renderer pack views
+# ---------------------------------------------------------------------------
+
+
+class HarvestPacksView(HomeAssistantView):
+    """GET /api/harvest/packs - list available renderer packs + consent state."""
+
+    url = "/api/harvest/packs"
+    name = "api:harvest:packs"
+    requires_auth = True
+
+    def __init__(self, pack_manager: PackManager) -> None:
+        self._pack_manager = pack_manager
+
+    async def get(self, request: web.Request) -> web.Response:
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            raise web.HTTPForbidden()
+        packs = self._pack_manager.get_all()
+        return self.json({
+            "agreed": self._pack_manager.agreed,
+            "packs": [
+                {
+                    "pack_id": p.pack_id,
+                    "name": p.name,
+                    "description": p.description,
+                    "version": p.version,
+                    "author": p.author,
+                    "is_bundled": p.is_bundled,
+                }
+                for p in packs
+            ],
+        })
+
+
+class HarvestPackAgreeView(HomeAssistantView):
+    """POST /api/harvest/packs/agree - set renderer pack consent state."""
+
+    url = "/api/harvest/packs/agree"
+    name = "api:harvest:packs:agree"
+    requires_auth = True
+
+    def __init__(self, pack_manager: PackManager) -> None:
+        self._pack_manager = pack_manager
+
+    async def post(self, request: web.Request) -> web.Response:
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            raise web.HTTPForbidden()
+        try:
+            body = await request.json()
+        except Exception:
+            raise web.HTTPBadRequest(reason="Invalid JSON body.")
+        agreed = bool(body.get("agreed", False))
+        await self._pack_manager.set_agreed(agreed)
+        return self.json({"agreed": agreed})
+
+
+class HarvestPackFileView(HomeAssistantView):
+    """GET /api/harvest/packs/{pack_id}.js - serve a renderer pack JS file.
+
+    No auth required - the widget on a remote page needs to fetch it.
+    """
+
+    url = "/api/harvest/packs/{pack_id}.js"
+    name = "api:harvest:pack_file"
+    requires_auth = False
+
+    def __init__(self, hass: HomeAssistant, pack_manager: PackManager) -> None:
+        self._hass = hass
+        self._pack_manager = pack_manager
+
+    async def get(self, request: web.Request, pack_id: str) -> web.Response:
+        path = self._pack_manager.get_pack_path(pack_id)
+        if path is None:
+            raise web.HTTPNotFound()
+        data = await self._hass.async_add_executor_job(path.read_bytes)
+        return web.Response(
+            body=data,
+            content_type="application/javascript",
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
 
 
 # ---------------------------------------------------------------------------

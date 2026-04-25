@@ -22,6 +22,7 @@ import type {
   HAEntity,
   HAEntityDetail,
   ThemeDefinition,
+  PacksResponse,
 } from "./types";
 
 const BASE = "/api/harvest";
@@ -265,6 +266,18 @@ export const api = {
 
     deleteThumbnail: (themeId: string): Promise<void> =>
       _delete(`/themes/${themeId}/thumbnail`),
+  },
+
+  // ---------------------------------------------------------------------------
+  // Renderer packs
+  // ---------------------------------------------------------------------------
+
+  packs: {
+    list: (): Promise<PacksResponse> =>
+      _get<PacksResponse>("/packs"),
+
+    agree: (agreed: boolean): Promise<{ agreed: boolean }> =>
+      _post<{ agreed: boolean }>("/packs/agree", { agreed }),
   },
 
   // ---------------------------------------------------------------------------

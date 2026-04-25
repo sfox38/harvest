@@ -1,7 +1,7 @@
 /**
  * renderers/timer-card.js - Renderer for the "timer" domain.
  *
- * Displays a countdown when active/paused and Start/Pause/Cancel/Finish
+ * Displays a countdown when active/paused and Play/Pause, Cancel, Finish
  * buttons when read-write. The countdown ticks locally using the
  * finishes_at attribute from HA.
  */
@@ -82,12 +82,11 @@ function _formatTime(totalSeconds) {
 }
 
 export class TimerCard extends BaseCard {
-  /** @type {HTMLElement|null}       */ #displayEl   = null;
-  /** @type {HTMLElement|null}       */ #stateLabel  = null;
-  /** @type {HTMLButtonElement|null} */ #startBtn    = null;
-  /** @type {HTMLButtonElement|null} */ #pauseBtn    = null;
-  /** @type {HTMLButtonElement|null} */ #cancelBtn   = null;
-  /** @type {HTMLButtonElement|null} */ #finishBtn   = null;
+  /** @type {HTMLElement|null}       */ #displayEl      = null;
+  /** @type {HTMLElement|null}       */ #stateLabel     = null;
+  /** @type {HTMLButtonElement|null} */ #playPauseBtn   = null;
+  /** @type {HTMLButtonElement|null} */ #cancelBtn      = null;
+  /** @type {HTMLButtonElement|null} */ #finishBtn      = null;
   /** @type {ReturnType<typeof setInterval>|null} */ #tickInterval = null;
   /** @type {string}  */ #lastState     = "idle";
   /** @type {object}  */ #lastAttrs     = {};
@@ -109,10 +108,8 @@ export class TimerCard extends BaseCard {
           <span part="state-label"></span>
           ${isWritable ? /* html */`
             <div class="hrv-timer-controls">
-              <button part="start-button" class="hrv-timer-btn hrv-timer-btn-primary" type="button"
+              <button part="playpause-button" class="hrv-timer-btn hrv-timer-btn-primary" type="button"
                 aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("timer.start"))}">${_esc(this.i18n.t("timer.start"))}</button>
-              <button part="pause-button" class="hrv-timer-btn" type="button"
-                aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("timer.pause"))}">${_esc(this.i18n.t("timer.pause"))}</button>
               <button part="cancel-button" class="hrv-timer-btn" type="button"
                 aria-label="${_esc(this.def.friendly_name)} - ${_esc(this.i18n.t("timer.cancel"))}">${_esc(this.i18n.t("timer.cancel"))}</button>
               <button part="finish-button" class="hrv-timer-btn" type="button"
@@ -126,17 +123,18 @@ export class TimerCard extends BaseCard {
       </div>
     `;
 
-    this.#displayEl  = this.root.querySelector("[part=timer-display]");
-    this.#stateLabel = this.root.querySelector("[part=state-label]");
-    this.#startBtn   = this.root.querySelector("[part=start-button]");
-    this.#pauseBtn   = this.root.querySelector("[part=pause-button]");
-    this.#cancelBtn  = this.root.querySelector("[part=cancel-button]");
-    this.#finishBtn  = this.root.querySelector("[part=finish-button]");
+    this.#displayEl    = this.root.querySelector("[part=timer-display]");
+    this.#stateLabel   = this.root.querySelector("[part=state-label]");
+    this.#playPauseBtn = this.root.querySelector("[part=playpause-button]");
+    this.#cancelBtn    = this.root.querySelector("[part=cancel-button]");
+    this.#finishBtn    = this.root.querySelector("[part=finish-button]");
 
     this.renderIcon(this.def.icon ?? "mdi:timer-outline", "card-icon");
 
-    this.#startBtn?.addEventListener("click",  () => this.config.card?.sendCommand("start", {}));
-    this.#pauseBtn?.addEventListener("click",  () => this.config.card?.sendCommand("pause", {}));
+    this.#playPauseBtn?.addEventListener("click", () => {
+      const cmd = this.#lastState === "active" ? "pause" : "start";
+      this.config.card?.sendCommand(cmd, {});
+    });
     this.#cancelBtn?.addEventListener("click", () => this.config.card?.sendCommand("cancel", {}));
     this.#finishBtn?.addEventListener("click", () => this.config.card?.sendCommand("finish", {}));
 
@@ -160,7 +158,6 @@ export class TimerCard extends BaseCard {
     this.#updateButtons(state);
     this.#updateDisplay(state);
 
-    // Start or stop the tick interval based on state.
     if (state === "active" && this.#finishesAt) {
       this.#startTick();
     } else {
@@ -199,16 +196,15 @@ export class TimerCard extends BaseCard {
     const isActive = state === "active";
     const isPaused = state === "paused";
 
-    if (this.#startBtn)  this.#startBtn.disabled  = isActive;
-    if (this.#pauseBtn)  this.#pauseBtn.disabled  = !isActive;
+    if (this.#playPauseBtn) {
+      const label = isActive
+        ? this.i18n.t("timer.pause")
+        : (isPaused ? this.i18n.t("timer.resume") : this.i18n.t("timer.start"));
+      this.#playPauseBtn.textContent = label;
+      this.#playPauseBtn.setAttribute("aria-label", `${this.def.friendly_name} - ${label}`);
+    }
     if (this.#cancelBtn) this.#cancelBtn.disabled = isIdle;
     if (this.#finishBtn) this.#finishBtn.disabled = isIdle;
-
-    if (this.#startBtn) {
-      const btnLabel = isPaused ? this.i18n.t("timer.resume") : this.i18n.t("timer.start");
-      this.#startBtn.textContent = btnLabel;
-      this.#startBtn.setAttribute("aria-label", `${this.def.friendly_name} - ${btnLabel}`);
-    }
 
     const stateLabel = this.i18n.t(`state.${state}`) !== `state.${state}`
       ? this.i18n.t(`state.${state}`)

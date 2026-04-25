@@ -43,6 +43,7 @@ from .event_bus import EventBus
 from .harvest_action import HarvestActionManager
 from .rate_limiter import RateLimiter
 from .session_manager import Session, SessionManager
+from .pack_manager import PackManager
 from .theme_manager import ThemeManager, theme_url_to_id
 from .token_manager import EntityAccess, Token, TokenManager
 
@@ -136,6 +137,7 @@ class HarvestWsView(HomeAssistantView):
         config: dict,
         sensors: object = None,
         theme_manager: ThemeManager | None = None,
+        pack_manager: PackManager | None = None,
     ) -> None:
         self._hass = hass
         self._token_manager = token_manager
@@ -147,6 +149,7 @@ class HarvestWsView(HomeAssistantView):
         self._config = config
         self._sensors = sensors
         self._theme_manager = theme_manager
+        self._pack_manager = pack_manager
 
     def _resolve_theme_manager(self) -> ThemeManager | None:
         """Resolve the theme manager, falling back to hass.data lookup.
@@ -161,6 +164,15 @@ class HarvestWsView(HomeAssistantView):
         for entry_data in self._hass.data.get(DOMAIN, {}).values():
             if isinstance(entry_data, dict) and "theme_manager" in entry_data:
                 return entry_data["theme_manager"]
+        return None
+
+    def _resolve_pack_manager(self) -> PackManager | None:
+        """Resolve the pack manager, falling back to hass.data lookup."""
+        if self._pack_manager is not None:
+            return self._pack_manager
+        for entry_data in self._hass.data.get(DOMAIN, {}).values():
+            if isinstance(entry_data, dict) and "pack_manager" in entry_data:
+                return entry_data["pack_manager"]
         return None
 
     async def get(self, request: Request) -> WebSocketResponse:
@@ -389,6 +401,15 @@ class HarvestWsView(HomeAssistantView):
                     "type": "theme",
                     "variables": theme_def.variables,
                     "dark_variables": theme_def.dark_variables,
+                })
+
+        # --- Step 4a.2: Send renderer pack URL if token has one ---
+        if token.renderer_pack:
+            pack_mgr = self._resolve_pack_manager()
+            if pack_mgr and pack_mgr.agreed and pack_mgr.get(token.renderer_pack):
+                await ws.send_json({
+                    "type": "renderer_pack",
+                    "url": f"/api/harvest/packs/{token.renderer_pack}.js",
                 })
 
         # --- Steps 4b/6/7: Initial state, message loop, and cleanup ---

@@ -41,7 +41,8 @@ const LIGHT_CARD_STYLES = /* css */`
   }
 
   [part=toggle-button]:hover { opacity: 0.88; }
-  [part=toggle-button]:active { opacity: 0.75; }
+  [part=toggle-button]:active,
+  [part=toggle-button][data-pressing=true] { opacity: 0.65; filter: brightness(1.15); }
 
   [part=toggle-button][aria-pressed=true] {
     background: var(--hrv-color-state-on);
@@ -140,6 +141,7 @@ export class LightCard extends BaseCard {
   /** @type {HTMLElement|null}       */   #stateLabel        = null;
   /** @type {HTMLElement|null}       */   #brightnessValue   = null;
   /** @type {HTMLElement|null}       */   #colorTempValue    = null;
+  /** @type {object}                 */   #lastAttrs         = {};
   /** @type {Function}               */   #brightnessDebounce;
   /** @type {Function}               */   #colorTempDebounce;
   /** @type {Function}               */   #colorDebounce;
@@ -255,10 +257,18 @@ export class LightCard extends BaseCard {
       });
     }
 
+    if (this.#toggleBtn) {
+      this.#toggleBtn.addEventListener("pointerdown",  () => this.#toggleBtn.setAttribute("data-pressing", "true"));
+      this.#toggleBtn.addEventListener("pointerup",    () => this.#toggleBtn.removeAttribute("data-pressing"));
+      this.#toggleBtn.addEventListener("pointerleave", () => this.#toggleBtn.removeAttribute("data-pressing"));
+      this.#toggleBtn.addEventListener("pointercancel",() => this.#toggleBtn.removeAttribute("data-pressing"));
+    }
+
     this.renderCompanions();
   }
 
   applyState(state, attributes) {
+    this.#lastAttrs = { ...attributes };
     const isOn = state === "on";
     const isUnavailable = state === "unavailable" || state === "unknown";
 
@@ -346,11 +356,19 @@ export class LightCard extends BaseCard {
     this.announceState(`${this.def.friendly_name}, ${label}`);
   }
 
-  predictState(action, _data) {
-    if (action !== "toggle") return null;
-    const currentPressed = this.#toggleBtn?.getAttribute("aria-pressed");
-    const currentlyOn    = currentPressed === "true";
-    return { state: currentlyOn ? "off" : "on", attributes: {} };
+  predictState(action, data) {
+    if (action === "toggle") {
+      const isOn = this.#toggleBtn?.getAttribute("aria-pressed") === "true";
+      return { state: isOn ? "off" : "on", attributes: { ...this.#lastAttrs } };
+    }
+    if (action === "turn_on") {
+      const attrs = { ...this.#lastAttrs };
+      if (data.brightness !== undefined)       attrs.brightness = data.brightness;
+      if (data.color_temp_kelvin !== undefined) attrs.color_temp_kelvin = data.color_temp_kelvin;
+      if (data.hs_color !== undefined)          attrs.hs_color = data.hs_color;
+      return { state: "on", attributes: attrs };
+    }
+    return null;
   }
 
   // -------------------------------------------------------------------------

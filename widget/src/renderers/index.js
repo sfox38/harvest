@@ -15,6 +15,7 @@
  * entry (built-in or previously registered).
  */
 
+import { BaseCard }               from "./base-card.js";
 import { LightCard }              from "./light-card.js";
 import { SwitchCard }             from "./switch-card.js";
 import { FanCard }                from "./fan-card.js";
@@ -107,6 +108,7 @@ export function registerRenderer(key, rendererClass) {
 // Re-export all renderer classes so they are accessible via
 // window.HArvest.renderers (assembled in the build entry point).
 export {
+  BaseCard,
   LightCard,
   SwitchCard,
   FanCard,

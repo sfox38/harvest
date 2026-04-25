@@ -19,6 +19,7 @@ from .diagnostic_sensors import DiagnosticSensors
 from .event_bus import EventBus
 from .harvest_action import HarvestActionManager
 from .http_views import register_views
+from .pack_manager import PackManager
 from .theme_manager import ThemeManager
 from .panel import register_panel
 from .rate_limiter import RateLimiter
@@ -64,6 +65,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await theme_manager.load()
     _LOGGER.debug("HArvest theme manager loaded: %d themes", len(theme_manager.get_all()))
 
+    pack_manager = PackManager(hass)
+    await pack_manager.load()
+    _LOGGER.warning("HArvest pack manager loaded: %d packs, agreed=%s", len(pack_manager.get_all()), pack_manager.agreed)
+
     # DiagnosticSensors takes token_manager in addition to the spec's 3 args
     # because HarvestActiveTokensSensor needs to query get_active().
     sensors = DiagnosticSensors(hass, session_manager, activity_store, token_manager)
@@ -75,13 +80,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         action_manager, config,
         sensors=sensors,
         theme_manager=theme_manager,
+        pack_manager=pack_manager,
     )
     hass.http.register_view(ws_view)
 
     # --- Register HTTP panel API views ---
     register_views(hass, token_manager, session_manager,
                    activity_store, action_manager, sensors, event_bus,
-                   theme_manager=theme_manager)
+                   theme_manager=theme_manager,
+                   pack_manager=pack_manager)
 
     # --- Register sidebar panel ---
     await register_panel(hass)
@@ -142,6 +149,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "event_bus":       event_bus,
         "action_manager":  action_manager,
         "theme_manager":   theme_manager,
+        "pack_manager":    pack_manager,
         "sensors":         sensors,
         "unsub_purge":     unsub_purge,
         "unsub_preview":   unsub_preview,

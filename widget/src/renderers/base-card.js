@@ -459,7 +459,11 @@ export class BaseCard {
       if (iconWrap) iconWrap.innerHTML = renderIconSVG(def.icon, "companion-icon-svg");
     }
     if (def.friendly_name) {
-      pill.setAttribute("aria-label", def.friendly_name);
+      // Preserve any existing state suffix (e.g. " - on") when updating the name.
+      const existing = pill.getAttribute("aria-label") ?? "";
+      const stateSuffix = existing.match(/ - (.+)$/)?.[0] ?? "";
+      pill.setAttribute("aria-label", `${def.friendly_name}${stateSuffix}`);
+      pill.title = `${def.friendly_name}${stateSuffix}`;
     }
   }
 
@@ -481,6 +485,8 @@ export class BaseCard {
     if (stateEl) stateEl.textContent = label;
     const name = pill.getAttribute("aria-label")?.replace(/ - .*$/, "") ?? entityId;
     pill.setAttribute("aria-label", `${name} - ${label}`);
+    pill.setAttribute("data-on", String(state === "on"));
+    pill.title = `${name} - ${label}`;
   }
 
   /**

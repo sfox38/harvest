@@ -72,6 +72,7 @@ export interface Token {
   paused: boolean;
   embed_mode: "single" | "group" | "page";
   theme_url: string;
+  renderer_pack: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +168,24 @@ export interface ThemeDefinition {
   usage_count: number;
   created_by: string;
   created_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Renderer packs
+// ---------------------------------------------------------------------------
+
+export interface RendererPack {
+  pack_id: string;
+  name: string;
+  description: string;
+  version: string;
+  author: string;
+  is_bundled: boolean;
+}
+
+export interface PacksResponse {
+  agreed: boolean;
+  packs: RendererPack[];
 }
 
 // ---------------------------------------------------------------------------

@@ -448,7 +448,8 @@ def build_feature_config(domain: str, state: State) -> dict:
         config = {}
         step = attrs.get("percentage_step")
         if step and step > 0:
-            config["speed_count"] = int(100 / step)
+            config["percentage_step"] = step
+            config["speed_count"] = int(round(100 / step))
         if "preset_modes" in attrs:
             config["preset_modes"] = attrs["preset_modes"]
         return config

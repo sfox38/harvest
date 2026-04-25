@@ -54,6 +54,12 @@ export class HrvCard extends HTMLElement {
   /** @type {object|null}  */ #optimisticState  = null;
   /** @type {ReturnType<typeof setTimeout>|null} */ #optimisticTimer = null;
   /** @type {object|null}  */ #i18n          = null;
+  /** @type {object|null}  */ #entityDef     = null;
+  /** @type {string|null}  */ #lastState     = null;
+  /** @type {object|null}  */ #lastAttributes = null;
+  /** @type {Map<string, {state:string, attributes:object}>} */ #lastCompanionStates = new Map();
+  /** @type {Map<string, object>} */ #lastCompanionDefs   = new Map();
+  /** @type {{points:object[], hours:number}|null} */ #lastHistoryData = null;
 
   // -------------------------------------------------------------------------
   // Observed attributes
@@ -168,7 +174,9 @@ export class HrvCard extends HTMLElement {
     console.warn(
       `[HArvest] receiveDefinition: ${def.entity_id} domain=${def.domain} capabilities=${def.capabilities}`,
     );
-    const RendererClass = lookupRenderer(def.domain, def.device_class ?? null);
+    this.#entityDef = def;
+    const RendererClass = this.#client?._getPackRenderer?.(def.domain, def.device_class ?? null)
+      || lookupRenderer(def.domain, def.device_class ?? null);
     this.#renderer = new RendererClass(def, this.shadowRoot, this.#config, this.#i18n);
     this.#renderer.render();
 
@@ -186,6 +194,14 @@ export class HrvCard extends HTMLElement {
       this.#optimisticState = null;
     }
 
+    // Replay companion definitions then states so friendly names appear in tooltips.
+    for (const [entityId, def] of this.#lastCompanionDefs) {
+      this.#renderer.updateCompanionDefinition?.(entityId, def);
+    }
+    for (const [entityId, { state, attributes }] of this.#lastCompanionStates) {
+      this.#renderer.updateCompanionState?.(entityId, state, attributes);
+    }
+
     if (this.#config.graph && this.#client) {
       const entityRef = this.#entityId || this.#alias;
       this.#client.requestHistory(entityRef, this.#config.hours, this.#config.period);
@@ -201,6 +217,8 @@ export class HrvCard extends HTMLElement {
    */
   receiveStateUpdate(state, attributes, _lastUpdated) {
     console.warn(`[HArvest] stateUpdate: ${this.#entityId || this.#alias} state="${state}"`, attributes);
+    this.#lastState = state;
+    this.#lastAttributes = attributes;
     // Cancel any pending optimistic revert.
     if (this.#optimisticTimer) {
       clearTimeout(this.#optimisticTimer);
@@ -243,6 +261,7 @@ export class HrvCard extends HTMLElement {
    * @param {number} hours
    */
   receiveHistoryData(points, hours) {
+    this.#lastHistoryData = { points, hours };
     this.#renderer?.receiveHistoryData?.(points, hours, this.#config.graph);
   }
 
@@ -253,6 +272,34 @@ export class HrvCard extends HTMLElement {
   receiveTheme(theme) {
     if (theme && this.shadowRoot) {
       ThemeLoader.apply(theme, this.shadowRoot);
+    }
+  }
+
+  _reRender() {
+    if (!this.#entityDef || !this.#renderer) return;
+    const NewRenderer = this.#client?._getPackRenderer?.(this.#entityDef.domain, this.#entityDef.device_class ?? null)
+      || lookupRenderer(this.#entityDef.domain, this.#entityDef.device_class ?? null);
+    if (NewRenderer === this.#renderer.constructor) return;
+    this.#renderer = new NewRenderer(this.#entityDef, this.shadowRoot, this.#config, this.#i18n);
+    this.#renderer.render();
+    ThemeLoader.resolve(this.#config).then((theme) => {
+      if (theme) ThemeLoader.apply(theme, this.shadowRoot);
+    });
+    if (this.#lastState !== null) {
+      this.#renderer.applyState(this.#lastState, this.#lastAttributes);
+    }
+    for (const [entityId, def] of this.#lastCompanionDefs) {
+      this.#renderer.updateCompanionDefinition?.(entityId, def);
+    }
+    for (const [entityId, { state, attributes }] of this.#lastCompanionStates) {
+      this.#renderer.updateCompanionState?.(entityId, state, attributes);
+    }
+    if (this.#lastHistoryData && this.#config.graph) {
+      this.#renderer.receiveHistoryData?.(
+        this.#lastHistoryData.points,
+        this.#lastHistoryData.hours,
+        this.#config.graph,
+      );
     }
   }
 
@@ -381,6 +428,7 @@ export class HrvCard extends HTMLElement {
       comp.capabilities = def.capabilities ?? "read";
       comp.domain = def.domain ?? entityId.split(".")[0];
     }
+    this.#lastCompanionDefs.set(entityId, def);
     this.#renderer?.updateCompanionDefinition?.(entityId, def);
   }
 
@@ -394,6 +442,7 @@ export class HrvCard extends HTMLElement {
    * @param {object} attributes
    */
   _receiveCompanionState(entityId, state, attributes) {
+    this.#lastCompanionStates.set(entityId, { state, attributes });
     this.#renderer?.updateCompanionState?.(entityId, state, attributes);
   }
 

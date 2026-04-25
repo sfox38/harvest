@@ -140,6 +140,7 @@ class Token:
     paused: bool = False
     embed_mode: str = "single"             # "single", "group", or "page"
     theme_url: str = ""                    # bundled theme URL or custom theme URL; empty means default
+    renderer_pack: str = ""                # "" = none, "examples" = bundled pack ID
 
 
 class TokenManager:
@@ -442,6 +443,7 @@ class TokenManager:
             "label", "origins", "entities", "expires", "token_secret",
             "rate_limits", "session", "max_sessions", "allowed_ips",
             "active_schedule", "paused", "embed_mode", "theme_url",
+            "renderer_pack",
         }
         for field_name, value in updates.items():
             if field_name in _UPDATABLE_FIELDS:
@@ -811,6 +813,7 @@ class TokenManager:
             paused=d.get("paused", False),
             embed_mode=d.get("embed_mode", "single"),
             theme_url=d.get("theme_url", ""),
+            renderer_pack=d.get("renderer_pack", ""),
         )
 
 

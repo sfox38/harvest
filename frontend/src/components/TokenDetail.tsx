@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { Token, TokenUpdate, Session, ActivityPage, ThemeDefinition } from "../types";
+import type { Token, TokenUpdate, Session, ActivityPage, ThemeDefinition, RendererPack, PacksResponse } from "../types";
 import { validateLabel, DEFAULT_WIDGET_SCRIPT_URL } from "../types";
 import { api } from "../api";
 import { StatusBadge, ConfirmDialog, Spinner, ErrorBanner, Card, EventRow, fmtRel, EntityAutocomplete, useThemeThumbs } from "./Shared";
@@ -359,6 +359,115 @@ function themeUrlToId(url: string): string {
   if (url.startsWith("bundled:")) return url.slice(8);
   if (url.startsWith("custom:")) return url.slice(7);
   return url;
+}
+
+// ---------------------------------------------------------------------------
+// Renderer pack editor
+// ---------------------------------------------------------------------------
+
+function RendererPackEditor({ token, setToken, setError }: { token: Token; setToken: (t: Token) => void; setError: (e: string | null) => void }) {
+  const [packsData, setPacksData] = useState<PacksResponse | null>(null);
+  const [showAgree, setShowAgree] = useState(false);
+  const [agreeText, setAgreeText] = useState("");
+  const [pendingPackId, setPendingPackId] = useState<string | null>(null);
+
+  useEffect(() => { api.packs.list().then(setPacksData).catch(() => {}); }, []);
+
+  const enablePack = async (packId: string) => {
+    if (!packsData?.agreed) {
+      setPendingPackId(packId);
+      setShowAgree(true);
+      return;
+    }
+    try {
+      const updated = await api.tokens.update(token.token_id, { renderer_pack: packId });
+      setToken(updated);
+    } catch (e) { setError(String(e)); }
+  };
+
+  const disablePack = async () => {
+    try {
+      const updated = await api.tokens.update(token.token_id, { renderer_pack: "" });
+      setToken(updated);
+    } catch (e) { setError(String(e)); }
+  };
+
+  const confirmAgree = async () => {
+    try {
+      await api.packs.agree(true);
+      setPacksData(prev => prev ? { ...prev, agreed: true } : prev);
+      setShowAgree(false);
+      setAgreeText("");
+      if (pendingPackId) {
+        const updated = await api.tokens.update(token.token_id, { renderer_pack: pendingPackId });
+        setToken(updated);
+        setPendingPackId(null);
+      }
+    } catch (e) { setError(String(e)); }
+  };
+
+  if (!packsData || packsData.packs.length === 0) return null;
+
+  return (
+    <>
+      <Card title="Renderer Packs">
+        <div className="col" style={{ gap: 10 }}>
+          {packsData.packs.map(pack => {
+            const active = token.renderer_pack === pack.pack_id;
+            return (
+              <div key={pack.pack_id} className={`pack-item${active ? " active" : ""}`}>
+                <div className="pack-info">
+                  <strong>{pack.name}</strong>
+                  <span className="pack-meta">v{pack.version} by {pack.author}</span>
+                  <span className="pack-desc">{pack.description}</span>
+                </div>
+                <button
+                  className={`btn btn-sm ${active ? "btn-danger" : "btn-primary"}`}
+                  onClick={() => active ? disablePack() : enablePack(pack.pack_id)}
+                >
+                  {active ? "Disable" : "Enable"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      {showAgree && (
+        <div className="overlay" onClick={() => { setShowAgree(false); setAgreeText(""); setPendingPackId(null); }}>
+          <div className="dialog" onClick={e => e.stopPropagation()}>
+            <h3 className="dialog-title">Renderer Pack Warning</h3>
+            <div className="dialog-body">
+              <p>
+                Renderer packs execute JavaScript from your HA instance inside the widget on the embedding page.
+                Only enable packs you trust.
+              </p>
+              <p style={{ marginTop: 12 }}>
+                Type <strong>AGREE</strong> below to confirm.
+              </p>
+              <input
+                type="text"
+                className="input"
+                value={agreeText}
+                onChange={e => setAgreeText(e.target.value)}
+                placeholder="Type AGREE"
+                autoFocus
+                style={{ marginTop: 8 }}
+              />
+            </div>
+            <div className="dialog-actions">
+              <button className="btn btn-ghost" onClick={() => { setShowAgree(false); setAgreeText(""); setPendingPackId(null); }}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" disabled={agreeText !== "AGREE"} onClick={confirmAgree}>
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
 }
 
 function ThemeEditor({ token, setToken, setError }: { token: Token; setToken: (t: Token) => void; setError: (e: string | null) => void }) {
@@ -1775,6 +1884,9 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
 
           {/* Theme */}
           {!readonly && <ThemeEditor token={token} setToken={t => setToken({ ...t, created_by_name: token.created_by_name })} setError={setError} />}
+
+          {/* Renderer Packs */}
+          {!readonly && <RendererPackEditor token={token} setToken={t => setToken({ ...t, created_by_name: token.created_by_name })} setError={setError} />}
 
           {/* Entities */}
           <EntitiesEditor

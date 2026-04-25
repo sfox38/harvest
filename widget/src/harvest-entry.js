@@ -154,6 +154,7 @@ window.HArvest = {
   preview,
   registerRenderer,
   renderers: {
+    BaseCard:             Renderers.BaseCard,
     LightCard:            Renderers.LightCard,
     SwitchCard:           Renderers.SwitchCard,
     FanCard:              Renderers.FanCard,

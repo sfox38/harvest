@@ -119,6 +119,8 @@ export class HarvestClient {
   // Permanent shutdown flag - set after MAX_REAUTH_ATTEMPTS failures
   /** @type {boolean} */ #permanentFailure = false;
 
+  /** @type {string|null} */ #activePack = null;
+
   /**
    * @param {string} haUrl   - Base URL of the HA instance (e.g. https://ha.example.com)
    * @param {string} tokenId - HArvest token ID (hwt_...)
@@ -262,6 +264,14 @@ export class HarvestClient {
    */
   _getCard(entityId) {
     return this.#cards.get(entityId) ?? null;
+  }
+
+  _getPackRenderer(domain, deviceClass) {
+    if (!this.#activePack) return null;
+    const pack = window.HArvest?._packs?.[this.#activePack];
+    if (!pack) return null;
+    const specificKey = deviceClass ? `${domain}.${deviceClass}` : null;
+    return (specificKey && pack[specificKey]) || pack[domain] || null;
   }
 
   /**
@@ -466,6 +476,7 @@ export class HarvestClient {
       case "ack":              return this.#handleAck(msg);
       case "error":            return this.#handleError(msg);
       case "theme":            return this.#handleTheme(msg);
+      case "renderer_pack":   return this.#handleRendererPack(msg);
       case "keepalive":        return; // heartbeat reset already done in #onMessage
       default:
         console.debug("[HArvest] Unknown message type:", msg.type);
@@ -643,6 +654,39 @@ export class HarvestClient {
     for (const card of this.#cards.values()) {
       card.receiveTheme?.(theme);
     }
+  }
+
+  #handleRendererPack(msg) {
+    if (!msg.url) {
+      this.#activePack = null;
+      for (const card of this.#cards.values()) {
+        card._reRender?.();
+      }
+      return;
+    }
+    const match = msg.url.match(/\/([^/]+)\.js$/);
+    const packId = match ? match[1] : null;
+    if (window.HArvest?._packs?.[packId]) {
+      this.#activePack = packId;
+      for (const card of this.#cards.values()) {
+        card._reRender?.();
+      }
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = this.#haUrl + msg.url + "?_=" + Date.now();
+    script.onload = () => {
+      document.head.removeChild(script);
+      this.#activePack = packId;
+      for (const card of this.#cards.values()) {
+        card._reRender?.();
+      }
+    };
+    script.onerror = () => {
+      console.warn("[HArvest] Failed to load renderer pack:", msg.url);
+      document.head.removeChild(script);
+    };
+    document.head.appendChild(script);
   }
 
   // -------------------------------------------------------------------------
