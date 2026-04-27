@@ -889,6 +889,9 @@ class HarvestSessionsView(HomeAssistantView):
         self._session_manager = session_manager
 
     async def get(self, request: web.Request) -> web.Response:
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            raise web.HTTPForbidden()
         token_id = request.query.get("token_id")
         if token_id:
             sessions = self._session_manager.get_all_for_token(token_id)
@@ -961,6 +964,9 @@ class HarvestActivityView(HomeAssistantView):
         self._token_manager = token_manager
 
     async def get(self, request: web.Request) -> web.Response:
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            raise web.HTTPForbidden()
         token_id = request.query.get("token_id") or None
         # Accept both singular (frontend) and plural (legacy) param names.
         display_type = request.query.get("event_type") or request.query.get("event_types") or None
@@ -1007,6 +1013,9 @@ class HarvestActivityExportView(HomeAssistantView):
         self._activity_store = activity_store
 
     async def get(self, request: web.Request) -> web.Response:
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            raise web.HTTPForbidden()
         token_id = request.query.get("token_id") or None
         display_type = request.query.get("event_type") or request.query.get("event_types") or None
         search = request.query.get("search") or None
@@ -1041,6 +1050,9 @@ class HarvestAggregatesView(HomeAssistantView):
         self._activity_store = activity_store
 
     async def get(self, request: web.Request) -> web.Response:
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            raise web.HTTPForbidden()
         try:
             hours = max(1, min(8760, int(request.query.get("hours", "24"))))
         except ValueError:
@@ -1074,6 +1086,9 @@ class HarvestActionsView(HomeAssistantView):
         self._action_manager = action_manager
 
     async def get(self, request: web.Request) -> web.Response:
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            raise web.HTTPForbidden()
         actions = self._action_manager.get_all()
         return self.json([dataclasses.asdict(a) for a in actions])
 
@@ -1693,6 +1708,9 @@ class HarvestConfigView(HomeAssistantView):
         self._session_manager = session_manager
 
     async def get(self, request: web.Request) -> web.Response:
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            raise web.HTTPForbidden()
         from .const import DOMAIN, DEFAULTS, PLATFORM_VERSION
         entries = self._hass.config_entries.async_entries(DOMAIN)
         if not entries:
@@ -1829,6 +1847,9 @@ class HarvestStatsView(HomeAssistantView):
         self._token_manager = token_manager
 
     async def get(self, request: web.Request) -> web.Response:
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            raise web.HTTPForbidden()
         today = await self._activity_store.count_today()
         db_size = await self._activity_store.get_db_size_bytes()
         return self.json({
@@ -1859,7 +1880,10 @@ class HarvestEntitiesView(HomeAssistantView):
     def __init__(self, hass: HomeAssistant) -> None:
         self._hass = hass
 
-    async def get(self, _request: web.Request) -> web.Response:
+    async def get(self, request: web.Request) -> web.Response:
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            raise web.HTTPForbidden()
         from .entity_compatibility import get_support_tier
         return self.json([
             {
@@ -1893,6 +1917,9 @@ class HarvestAliasView(HomeAssistantView):
         self._token_manager = token_manager
 
     async def post(self, request: web.Request) -> web.Response:
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            raise web.HTTPForbidden()
         try:
             body = await request.json()
             entity_id = str(body.get("entity_id", ""))
@@ -1919,8 +1946,8 @@ class HarvestPreviewTokenView(HomeAssistantView):
 
     async def post(self, request: web.Request) -> web.Response:
         user = request.get("hass_user")
-        if user is None:
-            raise web.HTTPUnauthorized()
+        if user is None or not user.is_admin:
+            raise web.HTTPForbidden()
 
         try:
             body = await request.json()

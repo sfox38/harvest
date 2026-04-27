@@ -763,13 +763,18 @@ export class HarvestClient {
   }
 
   /**
-   * Generate a 16-character random hex nonce.
+   * Generate a 16-character random base62 nonce.
    * @returns {string}
    */
   #generateNonce() {
-    const bytes = new Uint8Array(8);
+    const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    const bytes = new Uint8Array(16);
     crypto.getRandomValues(bytes);
-    return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+    let nonce = "";
+    for (let i = 0; i < 16; i++) {
+      nonce += alphabet[bytes[i] % 62];
+    }
+    return nonce;
   }
 
   // -------------------------------------------------------------------------

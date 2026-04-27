@@ -68,7 +68,11 @@ class RateLimiter:
         # Keyed by token_id: (attempt_count, window_start_monotonic).
         # Only failed auth attempts are counted.
         self._auth_token_counters: dict[str, tuple[int, float]] = {}
-        # Keyed by IP string: (attempt_count, window_start_monotonic).
+        # Keyed by IP string: (failed_auth_count, window_start_monotonic).
+        # Tracks failed auth attempts per IP (CONF_MAX_AUTH_PER_IP).
+        self._auth_ip_counters: dict[str, tuple[int, float]] = {}
+        # Keyed by IP string: (connection_count, window_start_monotonic).
+        # Tracks total connection attempts per IP (CONF_MAX_CONNECTIONS_PER_MINUTE).
         self._ip_counters: dict[str, tuple[int, float]] = {}
 
     def check_push(self, session_id: str, entity_id: str, rate: int) -> bool:
@@ -133,6 +137,33 @@ class RateLimiter:
             self._auth_token_counters[token_id] = (1, now)
         else:
             self._auth_token_counters[token_id] = (count + 1, window_start)
+
+    def check_auth_for_ip(self, ip: str) -> bool:
+        """Return True if the IP is under its failed auth attempt limit.
+
+        Uses a fixed 60-second window. The counter is reset when the window expires.
+        """
+        limit: int = self._config.get(
+            CONF_MAX_AUTH_PER_IP, DEFAULTS[CONF_MAX_AUTH_PER_IP]
+        )
+        now = time.monotonic()
+        count, window_start = self._auth_ip_counters.get(ip, (0, now))
+
+        if now - window_start >= _AUTH_WINDOW_SECONDS:
+            self._auth_ip_counters[ip] = (0, now)
+            return True
+
+        return count < limit
+
+    def record_auth_attempt_ip(self, ip: str) -> None:
+        """Record a failed auth attempt for an IP address."""
+        now = time.monotonic()
+        count, window_start = self._auth_ip_counters.get(ip, (0, now))
+
+        if now - window_start >= _AUTH_WINDOW_SECONDS:
+            self._auth_ip_counters[ip] = (1, now)
+        else:
+            self._auth_ip_counters[ip] = (count + 1, window_start)
 
     def check_ip(self, ip: str) -> bool:
         """Return True if the IP is under its connection attempt limit.

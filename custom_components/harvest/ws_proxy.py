@@ -270,9 +270,17 @@ class HarvestWsView(HomeAssistantView):
         page_path: str | None = msg.get("page_path")
         msg_id = msg.get("msg_id")
 
+        # Per-IP auth rate limit check (distributed brute-force protection).
+        if not self._rate_limiter.check_auth_for_ip(source_ip):
+            self._rate_limiter.record_auth_attempt_ip(source_ip)
+            await ws.send_json({"type": "auth_failed", "code": ERR_RATE_LIMITED, "msg_id": msg_id})
+            await ws.close()
+            return
+
         # Per-token auth rate limit check (brute-force protection).
         if not self._rate_limiter.check_auth_for_token(token_id):
             self._rate_limiter.record_auth_attempt(token_id)
+            self._rate_limiter.record_auth_attempt_ip(source_ip)
             await ws.send_json({"type": "auth_failed", "code": ERR_RATE_LIMITED, "msg_id": msg_id})
             await ws.close()
             return
@@ -292,6 +300,7 @@ class HarvestWsView(HomeAssistantView):
         if error_code is not None:
             # Record failed auth attempt and fire events.
             self._rate_limiter.record_auth_attempt(token_id)
+            self._rate_limiter.record_auth_attempt_ip(source_ip)
             self._activity_store.record_auth(AuthEvent(
                 token_id=token_id,
                 origin=origin,
@@ -357,6 +366,7 @@ class HarvestWsView(HomeAssistantView):
             "session_id": session.session_id,
             "expires_at": session.expires_at.isoformat(),
             "absolute_expires_at": session.absolute_expires_at.isoformat(),
+            "max_renewals": token.session.max_renewals,
             "entity_ids": entity_refs,  # echo back exactly as received
             "msg_id": msg_id,
         })
@@ -873,6 +883,7 @@ class HarvestWsView(HomeAssistantView):
             "session_id": session.session_id,
             "expires_at": session.expires_at.isoformat(),
             "absolute_expires_at": session.absolute_expires_at.isoformat(),
+            "max_renewals": token.session.max_renewals,
             "entity_ids": outgoing_entity_ids,
             "msg_id": msg_id,
         })
