@@ -581,11 +581,12 @@
         this.#dialThumbHit.addEventListener("pointercancel", this.#onPointerUp.bind(this));
       }
 
+      if (showDial) this.#buildModeMap();
+
       if (this.#modeSwitch) {
         this.#modeSwitch.addEventListener("click", this.#onModeSwitchClick.bind(this));
         this.#modeSwitch.addEventListener("keydown", this.#onModeSwitchKey.bind(this));
         this.#modeSwitch.addEventListener("mousemove", this.#onModeSwitchHover.bind(this));
-        this.#buildModeMap();
       }
 
       this.#applyModeVisuals();
@@ -628,6 +629,9 @@
       if (has[1]) this.#modeMap.push(1);
       if (has[2]) this.#modeMap.push(2);
       if (this.#modeMap.length === 0) this.#modeMap.push(0);
+      if (!this.#modeMap.includes(this.#mode)) {
+        this.#mode = this.#modeMap[0];
+      }
     }
 
     #onModeSwitchClick(e) {
@@ -911,6 +915,7 @@
     .hrv-fan-feat-btn[data-on=false] { opacity: 0.45; box-shadow: none; }
     .hrv-fan-feat-btn:hover { opacity: 0.88; }
     .hrv-dial-controls [part=toggle-button] { margin-top: 8px; }
+    .hrv-fan-horiz .hrv-dial-controls [part=toggle-button] { margin-top: 0; }
     .hrv-dial-controls { padding-bottom: var(--hrv-card-padding, 16px); }
     .hrv-dial-wrap { max-width: 200px; margin: 0 auto; }
     .hrv-fan-stepped-wrap {
@@ -1118,7 +1123,7 @@
           <div part="card-header">
             <span part="card-name">${_esc(this.def.friendly_name)}</span>
           </div>
-          <div part="card-body" class="${showDial ? "" : "hrv-no-dial"}">
+          <div part="card-body" class="${showDial ? (useHoriz ? "hrv-fan-horiz" : "") : "hrv-no-dial"}">
             ${showDial ? /* html */`
               <div class="hrv-dial-column">
                 ${useHoriz ? /* html */`

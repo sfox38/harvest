@@ -54,6 +54,17 @@ const COVER_STYLES = /* css */`
     font-size: var(--hrv-font-size-s);
     color: var(--hrv-color-text-secondary);
   }
+
+  [part=card][data-readonly=true] [part=card-body] {
+    align-items: center;
+  }
+
+  [part=card][data-readonly=true] [part=state-label] {
+    font-size: var(--hrv-font-size-l);
+    font-weight: var(--hrv-font-weight-medium);
+    color: var(--hrv-color-text);
+    text-align: center;
+  }
 `;
 
 function _esc(str) {
@@ -93,7 +104,7 @@ export class CoverCard extends BaseCard {
           <span part="card-name">${_esc(this.def.friendly_name)}</span>
         </div>
         <div part="card-body">
-          <span part="state-label"></span>
+          ${!isWritable ? `<span part="state-label"></span>` : ""}
           ${isWritable && hasButtons ? /* html */`
             <div class="hrv-cover-controls">
               <button part="open-button" class="hrv-cover-btn" type="button"
@@ -133,6 +144,10 @@ export class CoverCard extends BaseCard {
     this.#positionSlider = this.root.querySelector("[part=position-slider]");
     this.#positionValue  = this.root.querySelector("[part=position-value]");
     this.#stateLabel     = this.root.querySelector("[part=state-label]");
+
+    if (!isWritable) {
+      this.root.querySelector("[part=card]")?.setAttribute("data-readonly", "true");
+    }
 
     this.renderIcon(this.def.icon ?? "mdi:window-shutter", "card-icon");
 

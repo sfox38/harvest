@@ -108,6 +108,18 @@ const LIGHT_CARD_STYLES = /* css */`
     transition: color var(--hrv-transition-speed);
   }
 
+  [part=card][data-readonly=true] [part=card-body] {
+    align-items: center;
+    justify-content: center;
+  }
+
+  [part=card][data-readonly=true] [part=state-label] {
+    font-size: var(--hrv-font-size-l);
+    font-weight: var(--hrv-font-weight-medium);
+    color: var(--hrv-color-text);
+    text-align: center;
+  }
+
   :host([data-harvest-state=live]) [part=card-icon][data-on=true] {
     color: var(--hrv-color-state-on);
   }
@@ -210,6 +222,10 @@ export class LightCard extends BaseCard {
         <div part="stale-indicator" aria-hidden="true"></div>
       </div>
     `;
+
+    if (!isWritable) {
+      this.root.querySelector("[part=card]")?.setAttribute("data-readonly", "true");
+    }
 
     // Cache element references.
     this.#toggleBtn        = this.root.querySelector("[part=toggle-button]");

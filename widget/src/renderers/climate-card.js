@@ -70,6 +70,22 @@ const CLIMATE_STYLES = /* css */`
     font-size: var(--hrv-font-size-s);
     color: var(--hrv-color-text-secondary);
   }
+
+  [part=card][data-readonly=true] [part=card-body] {
+    align-items: center;
+  }
+
+  [part=card][data-readonly=true] .hrv-climate-row {
+    justify-content: center;
+    gap: var(--hrv-spacing-m);
+  }
+
+  [part=card][data-readonly=true] [part=state-label] {
+    font-size: var(--hrv-font-size-l);
+    font-weight: var(--hrv-font-weight-medium);
+    color: var(--hrv-color-text);
+    text-align: center;
+  }
 `;
 
 const HVAC_MODES = ["off", "heat", "cool", "heat_cool", "auto", "dry", "fan_only"];
@@ -163,7 +179,7 @@ export class ClimateCard extends BaseCard {
             <span class="hrv-climate-label">${_esc(this.i18n.t("climate.current"))}</span>
             <span part="current-temp" class="hrv-climate-temp">-</span>
           </div>
-          <span part="state-label"></span>
+          ${!isWritable ? `<span part="state-label"></span>` : ""}
           ${isWritable && hvacModes.length > 0 ? /* html */`
             <div class="hrv-climate-row">
               <span class="hrv-climate-label">${_esc(this.i18n.t("climate.mode"))}</span>
@@ -237,6 +253,10 @@ export class ClimateCard extends BaseCard {
     this.#tempHighInput   = this.root.querySelector("[part=target-temp-high-input]");
     this.#currentTempEl   = this.root.querySelector("[part=current-temp]");
     this.#stateLabel      = this.root.querySelector("[part=state-label]");
+
+    if (!isWritable) {
+      this.root.querySelector("[part=card]")?.setAttribute("data-readonly", "true");
+    }
 
     this.renderIcon(this.def.icon ?? "mdi:thermostat", "card-icon");
 

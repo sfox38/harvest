@@ -57,8 +57,14 @@ class ThemeManager:
         self._bundled: dict[str, ThemeDefinition] = {}
         self._custom: dict[str, ThemeDefinition] = {}
 
-    async def load(self) -> None:
-        """Load bundled themes from disk and custom themes from HA storage."""
+    async def load(self) -> dict[str, str | None]:
+        """Load bundled themes from disk and custom themes from HA storage.
+
+        Returns a dict mapping theme_id to an error string (or None on success)
+        for each bundled theme file attempted.
+        """
+        self._bundled = {}
+        results: dict[str, str | None] = {}
         for filename in ("default.json", "glass.json", "access.json", "minimus.json"):
             path = _THEMES_DIR / filename
             theme_id = filename.removesuffix(".json")
@@ -80,12 +86,15 @@ class ThemeManager:
                     created_at="",
                     is_bundled=True,
                 )
-            except Exception:
-                _LOGGER.warning("HArvest: failed to load bundled theme %s", filename)
+                results[theme_id] = None
+            except Exception as exc:
+                _LOGGER.warning("HArvest: failed to load bundled theme %s: %s", filename, exc)
+                results[theme_id] = str(exc)
 
+        self._custom = {}
         raw = await self._store.async_load()
         if not raw:
-            return
+            return results
         for item in raw.get("themes", []):
             try:
                 theme = _theme_from_dict(item)
@@ -93,6 +102,7 @@ class ThemeManager:
                 _LOGGER.warning("HArvest: skipping malformed theme: %s", item)
                 continue
             self._custom[theme.theme_id] = theme
+        return results
 
     async def _save(self) -> None:
         """Persist custom themes to HA storage."""

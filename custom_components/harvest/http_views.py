@@ -79,7 +79,7 @@ def register_views(
     if theme_manager is not None:
         hass.http.register_view(HarvestThemesView(theme_manager, token_manager))
         hass.http.register_view(HarvestThemeReloadView(theme_manager, token_manager, session_manager, pack_manager))
-        hass.http.register_view(HarvestThemeDetailView(theme_manager, token_manager, pack_manager))
+        hass.http.register_view(HarvestThemeDetailView(theme_manager, token_manager, session_manager, pack_manager))
         hass.http.register_view(HarvestThemeThumbnailView(hass, theme_manager))
         _LOGGER.debug("HArvest: registered theme views")
     if pack_manager is not None:
@@ -635,6 +635,7 @@ class HarvestTokenDetailView(HomeAssistantView):
         return {
             "lang": token.lang if token.lang != "auto" else gcfg.get("default_lang", "auto"),
             "a11y": token.a11y if token.a11y != "standard" else gcfg.get("default_a11y", "standard"),
+            "color_scheme": token.color_scheme,
             "on_offline": token.on_offline if use_custom else gcfg.get("default_on_offline", "last-state"),
             "on_error": token.on_error if use_custom else gcfg.get("default_on_error", "message"),
             "offline_text": token.offline_text if use_custom else gcfg.get("default_offline_text", ""),
@@ -755,6 +756,11 @@ class HarvestTokenDetailView(HomeAssistantView):
             if val not in ("standard", "enhanced"):
                 raise web.HTTPBadRequest(reason="a11y must be standard or enhanced.")
             updates["a11y"] = val
+        if "color_scheme" in body:
+            val = str(body["color_scheme"])
+            if val not in ("auto", "light", "dark"):
+                raise web.HTTPBadRequest(reason="color_scheme must be auto, light, or dark.")
+            updates["color_scheme"] = val
         if "on_offline" in body:
             val = str(body["on_offline"])
             if val not in _VALID_ON_OFFLINE:
@@ -807,7 +813,7 @@ class HarvestTokenDetailView(HomeAssistantView):
             await self._push_theme_to_sessions(token_id)
             await self._push_renderer_pack_to_sessions(token_id)
 
-        _TOKEN_CONFIG_FIELDS = {"lang", "a11y", "custom_messages", "on_offline", "on_error", "offline_text", "error_text"}
+        _TOKEN_CONFIG_FIELDS = {"lang", "a11y", "color_scheme", "custom_messages", "on_offline", "on_error", "offline_text", "error_text"}
         if _TOKEN_CONFIG_FIELDS & updates.keys():
             await self._push_token_config_to_sessions(token_id)
 
@@ -1302,7 +1308,8 @@ class HarvestThemeReloadView(HomeAssistantView):
         user = request.get("hass_user")
         if user is None or not user.is_admin:
             raise web.HTTPForbidden()
-        await self._theme_manager.load()
+        load_results = await self._theme_manager.load()
+        errors = {tid: err for tid, err in load_results.items() if err is not None}
         ts = int(datetime.now(timezone.utc).timestamp())
         for token in self._token_manager.get_all():
             theme_id = theme_url_to_id(token.theme_url)
@@ -1327,6 +1334,8 @@ class HarvestThemeReloadView(HomeAssistantView):
                             await session.ws.send_json(pack_msg)
                     except Exception:
                         pass
+        if errors:
+            return self.json({"status": "partial", "errors": errors})
         return self.json({"status": "ok"})
 
 
@@ -1340,10 +1349,28 @@ class HarvestThemeDetailView(HomeAssistantView):
     name = "api:harvest:theme_detail"
     requires_auth = True
 
-    def __init__(self, theme_manager: ThemeManager, token_manager: TokenManager, pack_manager: PackManager | None = None) -> None:
+    def __init__(self, theme_manager: ThemeManager, token_manager: TokenManager, session_manager: SessionManager, pack_manager: PackManager | None = None) -> None:
         self._theme_manager = theme_manager
         self._token_manager = token_manager
+        self._session_manager = session_manager
         self._pack_manager = pack_manager
+
+    async def _push_theme_to_tokens(self, theme_id: str, theme: object) -> None:
+        """Push updated theme variables to all active sessions using this theme."""
+        msg = {
+            "type": "theme",
+            "variables": theme.variables,
+            "dark_variables": theme.dark_variables,
+        }
+        for token in self._token_manager.get_all():
+            if theme_url_to_id(token.theme_url) != theme_id:
+                continue
+            for session in self._session_manager.get_all_for_token(token.token_id):
+                if not session.ws.closed:
+                    try:
+                        await session.ws.send_json(msg)
+                    except Exception:
+                        pass
 
     async def get(self, request: web.Request, theme_id: str) -> web.Response:
         user = request.get("hass_user")
@@ -1404,6 +1431,9 @@ class HarvestThemeDetailView(HomeAssistantView):
             raise web.HTTPForbidden(reason=str(exc))
         except KeyError:
             raise web.HTTPNotFound(reason=f"Theme not found: {theme_id}")
+
+        if "variables" in updates or "dark_variables" in updates:
+            await self._push_theme_to_tokens(theme_id, theme)
 
         return self.json(theme_to_api_dict(theme))
 

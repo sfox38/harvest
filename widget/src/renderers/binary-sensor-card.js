@@ -11,27 +11,15 @@ const BINARY_SENSOR_STYLES = /* css */`
   [part=card-body] {
     display: flex;
     align-items: center;
-    gap: var(--hrv-spacing-s);
+    justify-content: center;
     margin-top: var(--hrv-spacing-xs);
   }
 
-  .hrv-binary-indicator {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    background: var(--hrv-color-state-off);
-    transition: background var(--hrv-transition-speed);
-  }
-
-  .hrv-binary-indicator[data-on=true] {
-    background: var(--hrv-color-state-on);
-  }
-
   [part=state-label] {
-    font-size: var(--hrv-font-size-m);
+    font-size: var(--hrv-font-size-l);
     font-weight: var(--hrv-font-weight-medium);
     color: var(--hrv-color-text);
+    text-align: center;
   }
 `;
 
@@ -44,7 +32,6 @@ function _esc(str) {
 }
 
 export class BinarySensorCard extends BaseCard {
-  /** @type {HTMLElement|null} */ #indicator = null;
   /** @type {HTMLElement|null} */ #stateLabel = null;
 
   render() {
@@ -56,7 +43,6 @@ export class BinarySensorCard extends BaseCard {
           <span part="card-name">${_esc(this.def.friendly_name)}</span>
         </div>
         <div part="card-body">
-          <div class="hrv-binary-indicator" aria-hidden="true"></div>
           <span part="state-label" aria-live="polite">-</span>
         </div>
         ${this.renderHistoryZoneHTML()}
@@ -66,7 +52,6 @@ export class BinarySensorCard extends BaseCard {
       </div>
     `;
 
-    this.#indicator  = this.root.querySelector(".hrv-binary-indicator");
     this.#stateLabel = this.root.querySelector("[part=state-label]");
 
     this.renderIcon(
@@ -83,7 +68,6 @@ export class BinarySensorCard extends BaseCard {
       ? this.i18n.t(`state.${state}`)
       : state;
 
-    if (this.#indicator) this.#indicator.setAttribute("data-on", String(isOn));
     if (this.#stateLabel) this.#stateLabel.textContent = label;
 
     const iconName = this.def.icon_state_map?.[state]

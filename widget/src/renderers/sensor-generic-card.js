@@ -11,6 +11,7 @@ const GENERIC_SENSOR_STYLES = /* css */`
   [part=card-body] {
     display: flex;
     align-items: baseline;
+    justify-content: center;
     gap: var(--hrv-spacing-xs);
     margin-top: var(--hrv-spacing-xs);
   }

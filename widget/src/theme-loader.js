@@ -118,10 +118,11 @@ export class ThemeLoader {
    * as _harvThemeCleanup) so that toggling system dark mode re-applies the
    * correct variable set without a page reload. Call detach() to remove it.
    *
-   * @param {object}     theme      - ThemeObject
-   * @param {ShadowRoot} shadowRoot
+   * @param {object}      theme       - ThemeObject
+   * @param {ShadowRoot}  shadowRoot
+   * @param {"light"|"dark"|"auto"} [colorScheme="auto"] - Force light or dark regardless of OS
    */
-  static apply(theme, shadowRoot) {
+  static apply(theme, shadowRoot, colorScheme = "auto") {
     const host = /** @type {HTMLElement} */ (shadowRoot.host);
 
     // Remove any previous listener before attaching a new one.
@@ -135,7 +136,8 @@ export class ThemeLoader {
     }
 
     const applyVars = () => {
-      const vars = (_darkMq.matches && theme.dark_variables)
+      const isDark = colorScheme === "dark" || (colorScheme !== "light" && _darkMq.matches);
+      const vars = (isDark && theme.dark_variables)
         ? { ...theme.variables, ...theme.dark_variables }
         : theme.variables;
 
@@ -146,8 +148,11 @@ export class ThemeLoader {
 
     applyVars();
 
-    _darkCallbacks.add(applyVars);
-    host[_CLEANUP_KEY] = () => _darkCallbacks.delete(applyVars);
+    // Only register OS-change listener when not forced to a specific scheme.
+    if (colorScheme === "auto") {
+      _darkCallbacks.add(applyVars);
+      host[_CLEANUP_KEY] = () => _darkCallbacks.delete(applyVars);
+    }
   }
 
   /**

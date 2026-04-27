@@ -35,7 +35,7 @@ const HARVEST_ACTION_STYLES = /* css */`
   [part=trigger-button]:disabled { opacity: 0.4; cursor: not-allowed; }
 
   [part=trigger-button][data-state=triggered] {
-    background: var(--hrv-color-success);
+    opacity: 0.55;
   }
 
   [part=state-label] {

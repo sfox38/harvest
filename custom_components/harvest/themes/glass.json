@@ -1,7 +1,7 @@
 {
   "name": "Glass",
-  "author": "HArvest Contributors",
-  "version": "3.0",
+  "author": "sfox38",
+  "version": "1.0",
   "harvest_version": 1,
   "variables": {
     "--hrv-color-primary":         "#6200ea",
@@ -9,7 +9,7 @@
     "--hrv-color-on-primary":      "#ffffff",
     "--hrv-color-surface":         "rgba(255,255,255,0.18)",
     "--hrv-color-surface-alt":     "rgba(255,255,255,0.25)",
-    "--hrv-color-border":          "rgba(255,255,255,0.35)",
+    "--hrv-color-border":          "rgba(0,0,0,0.12)",
     "--hrv-color-text":            "#1a1a1a",
     "--hrv-color-text-secondary":  "#757575",
     "--hrv-color-icon":            "#1a1a1a",
@@ -29,6 +29,8 @@
   },
   "dark_variables": {
     "--hrv-color-primary":         "#bb86fc",
+    "--hrv-color-on-primary":      "#1a1a1a",
+    "--hrv-color-text-inverse":    "#1a1a1a",
     "--hrv-color-surface":         "rgba(30,30,46,0.55)",
     "--hrv-color-surface-alt":     "rgba(42,42,78,0.5)",
     "--hrv-color-border":          "rgba(255,255,255,0.12)",
@@ -37,7 +39,8 @@
     "--hrv-color-icon":            "#e0e0ff",
     "--hrv-color-state-on":        "#bb86fc",
     "--hrv-color-state-off":       "#6b6b8a",
-    "--hrv-color-state-unavailable": "#4a4a6a",
+    "--hrv-color-state-unavailable": "#7878a0",
+    "--hrv-color-error":           "#ef5350",
     "--hrv-card-background":       "linear-gradient(135deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.04) 50%, rgba(255,255,255,0.08) 100%)",
     "--hrv-card-backdrop-filter":  "blur(14px) saturate(1.5)",
     "--hrv-card-border":           "1px solid rgba(255,255,255,0.15)",

@@ -235,8 +235,8 @@ export const api = {
     delete: (themeId: string): Promise<void> =>
       _delete(`/themes/${themeId}`),
 
-    reload: (): Promise<void> =>
-      _post<void>("/themes/reload", {}),
+    reload: (): Promise<{ status: string; errors?: Record<string, string> }> =>
+      _post<{ status: string; errors?: Record<string, string> }>("/themes/reload", {}),
 
     thumbnailUrl: (themeId: string): string =>
       `${BASE}/themes/${encodeURIComponent(themeId)}/thumbnail`,

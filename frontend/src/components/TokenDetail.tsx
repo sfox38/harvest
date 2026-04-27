@@ -490,6 +490,7 @@ function DisplaySettings({ token, readonly, saving, setSaving, setToken, setErro
 
   const saveLang = (val: string) => patchToken({ lang: val } as Partial<Token>);
   const saveA11y = (val: string) => patchToken({ a11y: val } as Partial<Token>);
+  const saveColorScheme = (val: string) => patchToken({ color_scheme: val } as Partial<Token>);
   const saveOnOffline = (val: string) => patchToken({ on_offline: val } as Partial<Token>);
   const saveOnError = (val: string) => patchToken({ on_error: val } as Partial<Token>);
 
@@ -514,6 +515,28 @@ function DisplaySettings({ token, readonly, saving, setSaving, setToken, setErro
   return (
     <Card title="Display">
       <div className="col" style={{ gap: 14 }}>
+
+        {/* Theme mode */}
+        <div className="display-settings-row">
+          <div>
+            <div className="display-settings-label">Theme mode</div>
+            <div className="muted" style={{ fontSize: 11 }}>Force light or dark theme regardless of the visitor's OS setting.</div>
+          </div>
+          <div className="segmented" role="group" aria-label="Theme mode" style={{ flexShrink: 0 }}>
+            {(["auto", "light", "dark"] as const).map(v => (
+              <button
+                key={v}
+                aria-pressed={token.color_scheme === v}
+                onClick={() => canEdit && saveColorScheme(v)}
+                disabled={!canEdit}
+              >
+                {v.charAt(0).toUpperCase() + v.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ height: 1, background: "var(--divider)" }} />
 
         {/* Accessibility */}
         <div className="display-settings-row">

@@ -88,6 +88,7 @@ export interface Token {
   renderer_pack: string;
   lang: string;
   a11y: "standard" | "enhanced";
+  color_scheme: "auto" | "light" | "dark";
   custom_messages: boolean;
   on_offline: "dim" | "hide" | "message" | "last-state";
   on_error: "dim" | "hide" | "message";

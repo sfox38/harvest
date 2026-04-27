@@ -38,6 +38,16 @@ const REMOTE_STYLES = /* css */`
     font-size: var(--hrv-font-size-s);
     color: var(--hrv-color-text-secondary);
   }
+
+  [part=card][data-readonly=true] [part=card-body] {
+    justify-content: center;
+  }
+
+  [part=card][data-readonly=true] [part=state-label] {
+    font-size: var(--hrv-font-size-l);
+    font-weight: var(--hrv-font-weight-medium);
+    color: var(--hrv-color-text);
+  }
 `;
 
 function _esc(str) {
@@ -81,6 +91,10 @@ export class RemoteCard extends BaseCard {
 
     this.#commandBtn = this.root.querySelector("[part=command-button]");
     this.#stateLabel = this.root.querySelector("[part=state-label]");
+
+    if (!isWritable) {
+      this.root.querySelector("[part=card]")?.setAttribute("data-readonly", "true");
+    }
 
     this.renderIcon(this.def.icon ?? "mdi:remote", "card-icon");
 

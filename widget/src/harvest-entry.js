@@ -130,15 +130,18 @@ function preview(container, entityDef, state, attributes, themeVars, options) {
   const card = document.createElement("hrv-card");
   card.setAttribute("preview", "");
   card.setAttribute("entity", entityDef.entity_id ?? "preview.entity");
-  if (options?.graph) card.setAttribute("graph", options.graph);
-  if (options?.hours) card.setAttribute("hours", String(options.hours));
   container.appendChild(card);
 
   // setPreview must run after connectedCallback (which is synchronous).
-  card.setPreview(entityDef, state, attributes, themeVars, options?.packId ?? null);
+  card.setPreview(
+    entityDef, state, attributes, themeVars,
+    options?.packId ?? null,
+    options?.graph ?? null,
+    !!options?.animate,
+  );
 
   if (options?.graph && options?.historyData) {
-    card.receiveHistoryData(options.historyData, options.hours ?? 24, options.graph);
+    card.receiveHistoryData(options.historyData, options.hours ?? 24);
   }
   return card;
 }

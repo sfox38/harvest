@@ -11,7 +11,7 @@ const INPUT_BOOLEAN_STYLES = /* css */`
   [part=card-body] {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-end;
     gap: var(--hrv-spacing-s);
   }
 
@@ -45,6 +45,16 @@ const INPUT_BOOLEAN_STYLES = /* css */`
     font-size: var(--hrv-font-size-s);
     color: var(--hrv-color-text-secondary);
   }
+
+  [part=card][data-readonly=true] [part=card-body] {
+    justify-content: center;
+  }
+
+  [part=card][data-readonly=true] [part=state-label] {
+    font-size: var(--hrv-font-size-l);
+    font-weight: var(--hrv-font-weight-medium);
+    color: var(--hrv-color-text);
+  }
 `;
 
 function _esc(str) {
@@ -70,7 +80,7 @@ export class InputBooleanCard extends BaseCard {
           <span part="card-name">${_esc(this.def.friendly_name)}</span>
         </div>
         <div part="card-body">
-          <span part="state-label"></span>
+          ${!isWritable ? `<span part="state-label"></span>` : ""}
           ${isWritable ? `<button part="toggle-button" type="button"></button>` : ""}
         </div>
         ${this.renderAriaLiveHTML()}
@@ -81,6 +91,10 @@ export class InputBooleanCard extends BaseCard {
 
     this.#toggleBtn  = this.root.querySelector("[part=toggle-button]");
     this.#stateLabel = this.root.querySelector("[part=state-label]");
+
+    if (!isWritable) {
+      this.root.querySelector("[part=card]")?.setAttribute("data-readonly", "true");
+    }
 
     this.renderIcon(
       this.def.icon ?? "mdi:toggle-switch-off",

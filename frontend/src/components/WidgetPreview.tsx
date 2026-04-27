@@ -10,6 +10,7 @@ import type { ThemeDefinition, HAEntityDetail } from "../types";
 import { api } from "../api";
 import { EntityAutocomplete } from "./Shared";
 import { Icon } from "./Icon";
+import buildVersion from "../buildVersion.json";
 
 // ---------------------------------------------------------------------------
 // Domain feature definitions
@@ -32,6 +33,7 @@ export const DOMAIN_FEATURES: Record<string, FeatureOption[]> = {
     { key: "oscillating", label: "Oscillating", default: false },
     { key: "direction", label: "Direction", default: false },
     { key: "preset_mode", label: "Preset modes", default: false },
+    { key: "animate", label: "Animate icon", default: false },
   ],
   cover: [
     { key: "current_position", label: "Position slider", default: true },
@@ -182,16 +184,16 @@ declare global {
   }
 }
 
+const _WIDGET_SRC = `/harvest_assets/harvest.min.js?v=${buildVersion.build}`;
 let _widgetScriptLoaded = false;
 let _widgetScriptLoading: Promise<void> | null = null;
 
 function loadWidgetScript(): Promise<void> {
-  if (_widgetScriptLoaded && window.HArvest) return Promise.resolve();
+  if (_widgetScriptLoaded) return Promise.resolve();
   if (_widgetScriptLoading) return _widgetScriptLoading;
   _widgetScriptLoading = new Promise<void>((resolve, reject) => {
-    if (window.HArvest) { _widgetScriptLoaded = true; resolve(); return; }
     const script = document.createElement("script");
-    script.src = "/harvest_assets/harvest.min.js";
+    script.src = _WIDGET_SRC;
     script.onload = () => { _widgetScriptLoaded = true; resolve(); };
     script.onerror = () => reject(new Error("Failed to load harvest.min.js"));
     document.head.appendChild(script);
@@ -406,6 +408,7 @@ function RealWidget({ mock, vars, capability, features, graphType, packId }: {
       graphOpts.historyData = generateMockHistory(mock.domain, graphType, mock.state);
     }
     if (packId) graphOpts.packId = packId;
+    if (features.animate) graphOpts.animate = true;
     const opts = Object.keys(graphOpts).length > 0 ? graphOpts : undefined;
 
     const card = window.HArvest.preview(container, entityDef, mock.state, attrs, vars, opts as any);
@@ -455,16 +458,48 @@ interface WidgetPreviewProps {
   packId?: string;
 }
 
-export function WidgetPreview({ variables, darkVariables, packId }: WidgetPreviewProps) {
-  const [renderer, setRenderer] = useState("light");
-  const [capability, setCapability] = useState<"read" | "read-write">("read-write");
-  const [colorMode, setColorMode] = useState<"light" | "dark" | "auto">("auto");
-  const [features, setFeatures] = useState<Record<string, boolean>>(defaultFeatures("light"));
-  const [graphType, setGraphType] = useState<GraphType>("none");
+const _ls = {
+  get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* */ } },
+  del: (k: string) => { try { localStorage.removeItem(k); } catch { /* */ } },
+};
 
-  const [previewEntity, setPreviewEntity] = useState("");
+export function WidgetPreview({ variables, darkVariables, packId }: WidgetPreviewProps) {
+  const _initRenderer = _ls.get("hrv_preview_renderer") ?? "light";
+  const _initEntity   = _ls.get("hrv_preview_entity") ?? "";
+
+  const [renderer, setRenderer] = useState(_initRenderer);
+  const [capability, setCapability] = useState<"read" | "read-write">(() =>
+    _ls.get("hrv_preview_capability") === "read" ? "read" : "read-write"
+  );
+  const [colorMode, setColorMode] = useState<"light" | "dark" | "auto">(() => {
+    const stored = _ls.get("hrv_preview_color_mode");
+    return (stored === "light" || stored === "dark" || stored === "auto") ? stored : "auto";
+  });
+  const [features, setFeatures] = useState<Record<string, boolean>>(defaultFeatures(_initRenderer));
+  const [graphType, setGraphType] = useState<GraphType>(() => {
+    const stored = _ls.get("hrv_preview_graph_type") as GraphType | null;
+    return stored ?? DEFAULT_GRAPH[_initRenderer] ?? "none";
+  });
+
+  const [previewEntity, setPreviewEntity] = useState(_initEntity);
   const [realEntity, setRealEntity] = useState<HAEntityDetail | null>(null);
   const selectingRef = useRef(false);
+
+  // On mount, re-fetch stored custom entity details
+  useEffect(() => {
+    if (!_initEntity) return;
+    api.entities.get(_initEntity).then(detail => {
+      setRealEntity(detail);
+      const domain = detail.entity_id.split(".")[0];
+      setRenderer("custom");
+      setFeatures(detectFeatures(domain, detail.attributes));
+    }).catch(() => {
+      _ls.del("hrv_preview_entity");
+      setPreviewEntity("");
+      setRenderer(_ls.get("hrv_preview_renderer") ?? "light");
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRendererChange = (value: string) => {
     setRenderer(value);
@@ -472,11 +507,15 @@ export function WidgetPreview({ variables, darkVariables, packId }: WidgetPrevie
     setRealEntity(null);
     setFeatures(defaultFeatures(value));
     setGraphType(DEFAULT_GRAPH[value] ?? "none");
+    _ls.set("hrv_preview_renderer", value);
+    _ls.del("hrv_preview_entity");
+    _ls.set("hrv_preview_graph_type", DEFAULT_GRAPH[value] ?? "none");
   };
 
   const handleEntitySelect = async (entityId: string) => {
     selectingRef.current = true;
     setPreviewEntity(entityId);
+    _ls.set("hrv_preview_entity", entityId);
     try {
       const detail = await api.entities.get(entityId);
       setRealEntity(detail);
@@ -484,8 +523,11 @@ export function WidgetPreview({ variables, darkVariables, packId }: WidgetPrevie
       setRenderer("custom");
       setFeatures(detectFeatures(domain, detail.attributes));
       setGraphType(DEFAULT_GRAPH[domain] ?? "none");
+      _ls.set("hrv_preview_renderer", "custom");
+      _ls.set("hrv_preview_graph_type", DEFAULT_GRAPH[domain] ?? "none");
     } catch {
       setRenderer("custom");
+      _ls.set("hrv_preview_renderer", "custom");
     }
   };
 
@@ -502,6 +544,7 @@ export function WidgetPreview({ variables, darkVariables, packId }: WidgetPrevie
     setPreviewEntity("");
     setRealEntity(null);
     setFeatures(defaultFeatures(renderer));
+    _ls.del("hrv_preview_entity");
   };
 
   const realDomain = realEntity ? realEntity.entity_id.split(".")[0] : null;
@@ -536,13 +579,13 @@ export function WidgetPreview({ variables, darkVariables, packId }: WidgetPrevie
           ))}
         </select>
         <div className="segmented" role="group" aria-label="Capability">
-          <button aria-pressed={capability === "read"} onClick={() => setCapability("read")}>Read</button>
-          <button aria-pressed={capability === "read-write"} onClick={() => setCapability("read-write")}>Read-Write</button>
+          <button aria-pressed={capability === "read"} onClick={() => { setCapability("read"); _ls.set("hrv_preview_capability", "read"); }}>Read</button>
+          <button aria-pressed={capability === "read-write"} onClick={() => { setCapability("read-write"); _ls.set("hrv_preview_capability", "read-write"); }}>Read-Write</button>
         </div>
         <div className="segmented" role="group" aria-label="Color mode">
-          <button aria-pressed={colorMode === "light"} onClick={() => setColorMode("light")}>Light</button>
-          <button aria-pressed={colorMode === "dark"} onClick={() => setColorMode("dark")}>Dark</button>
-          <button aria-pressed={colorMode === "auto"} onClick={() => setColorMode("auto")}>Auto</button>
+          <button aria-pressed={colorMode === "light"} onClick={() => { setColorMode("light"); _ls.set("hrv_preview_color_mode", "light"); }}>Light</button>
+          <button aria-pressed={colorMode === "dark"} onClick={() => { setColorMode("dark"); _ls.set("hrv_preview_color_mode", "dark"); }}>Dark</button>
+          <button aria-pressed={colorMode === "auto"} onClick={() => { setColorMode("auto"); _ls.set("hrv_preview_color_mode", "auto"); }}>Auto</button>
         </div>
       </div>
 
@@ -564,7 +607,7 @@ export function WidgetPreview({ variables, darkVariables, packId }: WidgetPrevie
               <select
                 className="input"
                 value={graphType}
-                onChange={e => setGraphType(e.target.value as GraphType)}
+                onChange={e => { setGraphType(e.target.value as GraphType); _ls.set("hrv_preview_graph_type", e.target.value); }}
                 style={{ fontSize: 12, padding: "2px 4px" }}
               >
                 {graphOptions.map(g => (
@@ -594,7 +637,12 @@ export function WidgetPreview({ variables, darkVariables, packId }: WidgetPrevie
         )}
       </div>
 
-      <div className="theme-preview-stage">
+      <div
+        className="theme-preview-stage"
+        style={{
+          background: colorMode === "light" ? "#ffffff" : colorMode === "dark" ? "#000000" : undefined,
+        }}
+      >
         <RealWidget mock={previewMock} vars={vars} capability={capability} features={features} graphType={graphType} packId={packId} />
       </div>
     </div>

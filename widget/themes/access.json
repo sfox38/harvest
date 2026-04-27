@@ -1,7 +1,7 @@
 {
   "name": "Access",
-  "author": "HArvest Contributors",
-  "version": "2.0",
+  "author": "sfox38",
+  "version": "1.0",
   "harvest_version": 1,
   "variables": {
     "--hrv-color-primary":         "#0047ab",
@@ -19,6 +19,7 @@
     "--hrv-color-error":           "#9b1c1c",
     "--hrv-card-radius":           "4px",
     "--hrv-card-shadow":           "none",
+    "--hrv-card-border":           "2px solid #000000",
     "--hrv-card-padding":          "16px",
     "--hrv-icon-size":             "28px",
     "--hrv-font-family":           "system-ui, -apple-system, sans-serif",
@@ -39,6 +40,7 @@
     "--hrv-color-state-on":        "#6699ff",
     "--hrv-color-state-off":       "#a0a0a0",
     "--hrv-color-state-unavailable": "#767676",
-    "--hrv-color-error":           "#ffaaaa"
+    "--hrv-color-error":           "#ffaaaa",
+    "--hrv-card-border":           "2px solid #ffffff"
   }
 }

@@ -43,6 +43,16 @@ const INPUT_NUMBER_STYLES = /* css */`
     font-size: var(--hrv-font-size-xs);
     color: var(--hrv-color-text-secondary);
   }
+
+  [part=card][data-readonly=true] .hrv-number-row {
+    justify-content: center;
+  }
+
+  [part=card][data-readonly=true] [part=state-label] {
+    font-size: var(--hrv-font-size-l);
+    font-weight: var(--hrv-font-weight-medium);
+    color: var(--hrv-color-text);
+  }
 `;
 
 function _esc(str) {
@@ -106,6 +116,10 @@ export class InputNumberCard extends BaseCard {
     this.#slider      = this.root.querySelector("[part=value-slider]");
     this.#numberInput = this.root.querySelector("[part=value-input]");
     this.#stateLabel  = this.root.querySelector("[part=state-label]");
+
+    if (!isWritable) {
+      this.root.querySelector("[part=card]")?.setAttribute("data-readonly", "true");
+    }
 
     this.renderIcon(this.def.icon ?? "mdi:ray-vertex", "card-icon");
 

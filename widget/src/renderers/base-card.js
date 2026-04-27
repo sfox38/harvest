@@ -70,7 +70,7 @@ const SHARED_CSS_VARS = /* css */`
     --hrv-color-icon:          #374151;
 
     /* State colours */
-    --hrv-color-state-on:      #f59e0b;
+    --hrv-color-state-on:      var(--hrv-color-primary);
     --hrv-color-state-off:     #9ca3af;
     --hrv-color-state-unavailable: #d1d5db;
 
@@ -97,7 +97,7 @@ const SHARED_CSS_VARS = /* css */`
 
   /* Dark mode overrides - applied when no explicit theme is set */
   @media (prefers-color-scheme: dark) {
-    :host {
+    :host(:not([data-color-scheme=light])) {
       --hrv-color-surface:       #1f2937;
       --hrv-color-surface-alt:   #374151;
       --hrv-color-border:        #374151;
@@ -105,7 +105,22 @@ const SHARED_CSS_VARS = /* css */`
       --hrv-color-text-secondary:#9ca3af;
       --hrv-color-icon:          #d1d5db;
       --hrv-color-primary-dim:   #312e81;
+      --hrv-color-state-unavailable: #4b5563;
+      --hrv-card-shadow:         0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
     }
+  }
+
+  /* Forced dark mode regardless of OS setting */
+  :host([data-color-scheme=dark]) {
+    --hrv-color-surface:       #1f2937;
+    --hrv-color-surface-alt:   #374151;
+    --hrv-color-border:        #374151;
+    --hrv-color-text:          #f9fafb;
+    --hrv-color-text-secondary:#9ca3af;
+    --hrv-color-icon:          #d1d5db;
+    --hrv-color-primary-dim:   #312e81;
+    --hrv-color-state-unavailable: #4b5563;
+    --hrv-card-shadow:         0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
   }
 
   /* Reduced motion: disable all transitions and animations */
@@ -243,11 +258,6 @@ const HISTORY_CSS = /* css */`
     width: 100%;
     height: 48px;
     display: block;
-  }
-
-  [part=history-empty] {
-    font-size: var(--hrv-font-size-xs);
-    color: var(--hrv-color-text-secondary);
   }
 `;
 
@@ -753,7 +763,7 @@ export class BaseCard {
     if (!zone) return;
 
     if (this.#historyPoints.length < 2) {
-      zone.innerHTML = `<span part="history-empty">${this.i18n.t("history.unavailable")}</span>`;
+      zone.innerHTML = "";
       return;
     }
 

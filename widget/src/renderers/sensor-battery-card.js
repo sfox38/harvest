@@ -11,6 +11,7 @@ const BATTERY_STYLES = /* css */`
   [part=card-body] {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: var(--hrv-spacing-s);
     margin-top: var(--hrv-spacing-xs);
   }

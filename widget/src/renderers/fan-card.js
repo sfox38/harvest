@@ -133,6 +133,18 @@ const FAN_CARD_STYLES = /* css */`
     cursor: pointer;
   }
 
+  [part=card][data-readonly=true] [part=card-body] {
+    align-items: center;
+    justify-content: center;
+  }
+
+  [part=card][data-readonly=true] [part=state-label] {
+    font-size: var(--hrv-font-size-l);
+    font-weight: var(--hrv-font-weight-medium);
+    color: var(--hrv-color-text);
+    text-align: center;
+  }
+
   [part=card-icon][data-on=true][data-animate=true] svg {
     animation: hrv-fan-spin 2s linear infinite;
     transform-origin: center;
@@ -238,7 +250,7 @@ export class FanCard extends BaseCard {
         </div>
         <div part="card-body">
           ${isWritable ? `<button part="toggle-button" type="button"></button>` : ""}
-          <span part="state-label"></span>
+          ${!isWritable ? `<span part="state-label"></span>` : ""}
           ${speedHTML}
           ${isWritable && hasOscillate ? /* html */`
             <button part="oscillate-button" type="button"
@@ -277,6 +289,10 @@ export class FanCard extends BaseCard {
     this.#oscillateBtn  = this.root.querySelector("[part=oscillate-button]");
     this.#presetBtn     = this.root.querySelector("[part=preset-button]");
     this.#directionSelect = this.root.querySelector("[part=direction-select]");
+
+    if (!isWritable) {
+      this.root.querySelector("[part=card]")?.setAttribute("data-readonly", "true");
+    }
 
     this.renderIcon(this.resolveIcon(this.def.icon, "mdi:fan-off"), "card-icon");
 

@@ -144,6 +144,7 @@ class Token:
     renderer_pack: str = ""                # "" = none, "minimus" = bundled pack ID
     lang: str = "auto"                     # BCP 47 language tag or "auto"
     a11y: str = "standard"                 # "standard" or "enhanced"
+    color_scheme: str = "auto"             # "auto" | "light" | "dark"
     custom_messages: bool = False           # when False, widget uses global defaults for error/offline
     on_offline: str = "last-state"         # "dim" | "hide" | "message" | "last-state"
     on_error: str = "message"              # "dim" | "hide" | "message"
@@ -451,7 +452,7 @@ class TokenManager:
             "label", "origins", "entities", "expires", "token_secret",
             "rate_limits", "session", "max_sessions", "allowed_ips",
             "active_schedule", "paused", "embed_mode", "theme_url",
-            "renderer_pack", "lang", "a11y", "custom_messages",
+            "renderer_pack", "lang", "a11y", "color_scheme", "custom_messages",
             "on_offline", "on_error", "offline_text", "error_text",
         }
         for field_name, value in updates.items():
@@ -826,6 +827,7 @@ class TokenManager:
             renderer_pack=d.get("renderer_pack", ""),
             lang=d.get("lang", "auto"),
             a11y=d.get("a11y", "standard"),
+            color_scheme=d.get("color_scheme", "auto"),
             custom_messages=d.get("custom_messages", False),
             on_offline=d.get("on_offline", "last-state"),
             on_error=d.get("on_error", "message"),

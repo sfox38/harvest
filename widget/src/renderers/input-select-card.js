@@ -30,6 +30,19 @@ const INPUT_SELECT_STYLES = /* css */`
     display: block;
     margin-top: var(--hrv-spacing-xs);
   }
+
+  [part=card][data-readonly=true] [part=card-body] {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  [part=card][data-readonly=true] [part=state-label] {
+    font-size: var(--hrv-font-size-l);
+    font-weight: var(--hrv-font-weight-medium);
+    color: var(--hrv-color-text);
+    margin-top: 0;
+  }
 `;
 
 function _esc(str) {
@@ -68,6 +81,10 @@ export class InputSelectCard extends BaseCard {
 
     this.#select     = this.root.querySelector("[part=option-select]");
     this.#stateLabel = this.root.querySelector("[part=state-label]");
+
+    if (!isWritable) {
+      this.root.querySelector("[part=card]")?.setAttribute("data-readonly", "true");
+    }
 
     this.renderIcon(this.def.icon ?? "mdi:format-list-bulleted", "card-icon");
 

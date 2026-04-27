@@ -31,7 +31,20 @@ function themeUrlToId(themeUrl: string): string {
 function useCopy(text: string) {
   const [copied, setCopied] = useState(false);
   const copy = useCallback(() => {
-    try { navigator.clipboard.writeText(text); } catch { /* textarea fallback omitted for panel */ }
+    const fallback = () => {
+      const el = document.createElement("textarea");
+      el.value = text;
+      el.style.cssText = "position:fixed;opacity:0;pointer-events:none";
+      document.body.appendChild(el);
+      el.select();
+      try { document.execCommand("copy"); } catch { /* */ }
+      document.body.removeChild(el);
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).catch(fallback);
+    } else {
+      fallback();
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }, [text]);
@@ -226,7 +239,25 @@ export function Themes({ onSelectToken }: ThemesProps) {
           renderer_pack: selectedTheme.renderer_pack,
         });
         const updated = await reload();
-        if (updated) setSelected(theme.theme_id);
+        if (updated) {
+          setSelected(theme.theme_id);
+          // Explicitly sync the JSON editor to the new theme's name to avoid
+          // any timing gap between setSelected and the useEffect that rebuilds it.
+          const obj: Record<string, unknown> = {
+            name: theme.name,
+            author: theme.author,
+            version: theme.version,
+            harvest_version: theme.harvest_version,
+            variables: theme.variables,
+          };
+          if (Object.keys(theme.dark_variables ?? {}).length > 0) obj.dark_variables = theme.dark_variables;
+          if (theme.renderer_pack) obj.renderer_pack = theme.renderer_pack;
+          setEditedJson(JSON.stringify(obj, null, 2));
+          setDirty(false);
+          setJsonError(null);
+          setParsedVars(null);
+          setParsedDarkVars(null);
+        }
       } catch (e) { setError(String(e)); }
     };
     if (selectedTheme.renderer_pack) { requireConsent(doDuplicate); }
@@ -289,7 +320,11 @@ export function Themes({ onSelectToken }: ThemesProps) {
     setReloading(true);
     const t0 = Date.now();
     try {
-      await api.themes.reload();
+      const result = await api.themes.reload();
+      if (result?.errors && Object.keys(result.errors).length > 0) {
+        const msgs = Object.entries(result.errors).map(([id, err]) => `${id}: ${err}`).join("; ");
+        setError(`Theme reload failed for: ${msgs}`);
+      }
       if (selectedTheme?.renderer_pack) clearPackCache(selectedTheme.renderer_pack);
       await reload();
       setPreviewKey(k => k + 1);

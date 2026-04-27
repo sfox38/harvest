@@ -60,6 +60,7 @@ export class HrvCard extends HTMLElement {
   /** @type {Map<string, {state:string, attributes:object}>} */ #lastCompanionStates = new Map();
   /** @type {Map<string, object>} */ #lastCompanionDefs   = new Map();
   /** @type {{points:object[], hours:number}|null} */ #lastHistoryData = null;
+  /** @type {object|null} */ #lastTheme = null;
 
   // -------------------------------------------------------------------------
   // Observed attributes
@@ -78,6 +79,16 @@ export class HrvCard extends HTMLElement {
     this.#i18n = new I18n(this.#config.lang ?? "auto");
 
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+
+    // Stamp data-color-scheme so the base-card CSS fallback can force light/dark.
+    // Read directly from _pageConfig too in case HArvest.config() was called
+    // before this element connected (common script loading order).
+    const cs = this.#config.colorScheme || _pageConfig.colorScheme || "";
+    if (cs === "light" || cs === "dark") {
+      this.setAttribute("data-color-scheme", cs);
+    } else {
+      this.removeAttribute("data-color-scheme");
+    }
 
     // Preview mode: attach shadow DOM but skip WebSocket connection.
     // State is injected via setPreview() after mount.
@@ -296,8 +307,10 @@ export class HrvCard extends HTMLElement {
    * @param {object} theme - { variables, dark_variables }
    */
   receiveTheme(theme) {
+    this.#lastTheme = theme || null;
     if (theme && this.shadowRoot) {
-      ThemeLoader.apply(theme, this.shadowRoot);
+      const cs = this.#config.colorScheme || _pageConfig.colorScheme || "auto";
+      ThemeLoader.apply(theme, this.shadowRoot, cs);
     }
   }
 
@@ -312,6 +325,22 @@ export class HrvCard extends HTMLElement {
     this.#config.onError = config.onError ?? "message";
     this.#config.offlineText = config.offlineText ?? "";
     this.#config.errorText = config.errorText ?? "";
+    const newScheme = config.colorScheme ?? "auto";
+    const schemeChanged = newScheme !== this.#config.colorScheme;
+    this.#config.colorScheme = newScheme;
+    if (schemeChanged) {
+      // Update the data attribute so CSS @media overrides work correctly.
+      const cs = this.#config.colorScheme || _pageConfig.colorScheme || "";
+      if (cs === "light" || cs === "dark") {
+        this.setAttribute("data-color-scheme", cs);
+      } else {
+        this.removeAttribute("data-color-scheme");
+      }
+      // Re-apply theme with the new scheme.
+      if (this.#lastTheme && this.shadowRoot) {
+        ThemeLoader.apply(this.#lastTheme, this.shadowRoot, newScheme === "auto" ? (_pageConfig.colorScheme || "auto") : newScheme);
+      }
+    }
     if (this.#i18n) {
       this.#i18n = new I18n(this.#config.lang);
     }
@@ -423,11 +452,16 @@ export class HrvCard extends HTMLElement {
    * @param {object}   attributes - Entity attributes ({brightness: 180, ...})
    * @param {object}   [themeVars] - CSS custom properties to apply
    */
-  setPreview(entityDef, state, attributes, themeVars, packId) {
+  setPreview(entityDef, state, attributes, themeVars, packId, graphType = null, animate = false) {
     if (!this.shadowRoot) return;
 
     // Force read-write unless entityDef says otherwise.
     if (!entityDef.capabilities) entityDef.capabilities = "read-write";
+
+    // Apply display config before render() so the history zone is included in the DOM
+    // and animate is available to applyState().
+    if (graphType) this.#config.graph = graphType;
+    this.#config.animate = animate;
 
     // Check pack renderer first, then fall back to global registry.
     let RendererClass = null;
@@ -659,6 +693,7 @@ export class HrvCard extends HTMLElement {
     if (!this.#config.tokenId    && _pageConfig.token)       this.#config.tokenId    = _pageConfig.token;
     if (!this.#config.haUrl      && _pageConfig.haUrl)       this.#config.haUrl      = _pageConfig.haUrl;
     if (!this.#config.tokenSecret && _pageConfig.tokenSecret) this.#config.tokenSecret = _pageConfig.tokenSecret;
+    if (!this.#config.colorScheme && _pageConfig.colorScheme) this.#config.colorScheme = _pageConfig.colorScheme;
   }
 
 }

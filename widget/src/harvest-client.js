@@ -120,6 +120,8 @@ export class HarvestClient {
   /** @type {boolean} */ #permanentFailure = false;
 
   /** @type {string|null} */ #activePack = null;
+  // Resolves when the in-flight pack script finishes loading. null when idle.
+  /** @type {Promise<void>|null} */ #packLoadPromise = null;
 
   // Buffered messages for entities not yet registered (companion race condition).
   /** @type {Map<string, object>} */ #pendingDefinitions = new Map();
@@ -558,6 +560,12 @@ export class HarvestClient {
   }
 
   #handleEntityDefinition(msg) {
+    // Defer until in-flight pack script finishes so the first render uses the
+    // pack renderer directly (no flash of built-in renderer).
+    if (this.#packLoadPromise) {
+      this.#packLoadPromise.then(() => this.#handleEntityDefinition(msg));
+      return;
+    }
     const entityId = msg.entity_id;
     const card = this.#cards.get(entityId);
     if (card) {
@@ -689,6 +697,7 @@ export class HarvestClient {
     const config = {
       lang: msg.lang ?? "auto",
       a11y: msg.a11y ?? "standard",
+      colorScheme: msg.color_scheme ?? "auto",
       onOffline: msg.on_offline ?? "last-state",
       onError: msg.on_error ?? "message",
       offlineText: msg.offline_text ?? "",
@@ -707,7 +716,9 @@ export class HarvestClient {
       }
       return;
     }
-    const match = msg.url.match(/\/([^/]+)\.js$/);
+    // Strip query string before extracting pack ID so ?v=timestamp never breaks the match.
+    const urlPath = msg.url.split("?")[0];
+    const match = urlPath.match(/\/([^/]+)\.js$/);
     const packId = match ? match[1] : null;
     if (window.HArvest?._packs?.[packId]) {
       this.#activePack = packId;
@@ -716,6 +727,9 @@ export class HarvestClient {
       }
       return;
     }
+    // Pack not yet loaded - set a promise so entity_definition messages wait.
+    let resolve;
+    this.#packLoadPromise = new Promise(r => { resolve = r; });
     const script = document.createElement("script");
     script.src = this.#haUrl + msg.url + "?_=" + Date.now();
     window.__HARVEST_PACK_ID__ = packId;
@@ -723,6 +737,8 @@ export class HarvestClient {
       window.__HARVEST_PACK_ID__ = null;
       document.head.removeChild(script);
       this.#activePack = packId;
+      this.#packLoadPromise = null;
+      resolve();
       for (const card of this.#cards.values()) {
         card._reRender?.();
       }
@@ -731,6 +747,8 @@ export class HarvestClient {
       window.__HARVEST_PACK_ID__ = null;
       console.warn("[HArvest] Failed to load renderer pack:", msg.url);
       document.head.removeChild(script);
+      this.#packLoadPromise = null;
+      resolve();
     };
     document.head.appendChild(script);
   }
