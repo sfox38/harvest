@@ -16,6 +16,7 @@ from typing import Any
 from homeassistant.components.button import ButtonEntity
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 
 from .const import CONF_KILL_SWITCH, DEFAULTS
@@ -133,6 +134,7 @@ class HarvestKillSwitch(SwitchEntity):
     _attr_name = "HArvest Kill Switch"
     _attr_icon = "mdi:toggle-switch-off"
     _attr_should_poll = False
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
         self,
@@ -184,6 +186,7 @@ class HarvestCloseAllSessionsButton(ButtonEntity):
     _attr_name = "HArvest Close All Sessions"
     _attr_icon = "mdi:logout"
     _attr_should_poll = False
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(self, session_manager: SessionManager) -> None:
         self.entity_id = "button.harvest_close_all_sessions"
@@ -210,6 +213,7 @@ class HarvestTokenPausedSwitch(SwitchEntity):
     _attr_has_entity_name = False
     _attr_should_poll = False
     _attr_available = True
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
         self,
