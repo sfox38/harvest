@@ -71,7 +71,7 @@ function NumberField({ label, value: initial, suffix, min, max, onChange, hint }
     <div className="kv" style={{ paddingBottom: 8 }}>
       <dt>
         {label}
-        {hint && <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{hint}</div>}
+        {hint && <div className="settings-field-hint">{hint}</div>}
       </dt>
       <dd>
         <div className="row" style={{ gap: 8 }}>
@@ -147,7 +147,7 @@ function TextField({ label, value: initial, placeholder, hint, validate, onChang
     <div className="kv" style={{ paddingBottom: 8 }}>
       <dt>
         {label}
-        {hint && <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{hint}</div>}
+        {hint && <div className="settings-field-hint">{hint}</div>}
       </dt>
       <dd>
         <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
@@ -223,7 +223,7 @@ function ToggleField({ label, value, onChange, hint }: ToggleFieldProps) {
     <div className="row" style={{ justifyContent: "space-between", paddingBottom: 8, gap: 12 }}>
       <div>
         <div style={{ fontSize: 14 }}>{label}</div>
-        {hint && <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{hint}</div>}
+        {hint && <div className="settings-field-hint">{hint}</div>}
       </div>
       <div className="row" style={{ gap: 8, flexShrink: 0 }}>
         <Toggle checked={value} onChange={toggle} disabled={saving} />
@@ -262,7 +262,7 @@ function SelectField({ label, value, options, onChange, hint }: SelectFieldProps
     <div className="kv" style={{ paddingBottom: 8 }}>
       <dt>
         {label}
-        {hint && <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{hint}</div>}
+        {hint && <div className="settings-field-hint">{hint}</div>}
       </dt>
       <dd>
         <select
@@ -319,7 +319,7 @@ function TrustedProxiesField({ value, onChange }: TrustedProxiesFieldProps) {
     <div className="kv" style={{ paddingBottom: 8 }}>
       <dt style={{ alignSelf: "start", paddingTop: 6 }}>
         Trusted proxies
-        <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+        <div className="settings-field-hint">
           CIDR ranges of reverse proxies (one per line). When a connection arrives from a trusted proxy, the real client IP is read from X-Forwarded-For.
         </div>
       </dt>

@@ -527,7 +527,7 @@ function ActionEditor({ existing, onSaved, onCancel, onDeleted }: ActionEditorPr
                 onChange={e => setIcon(e.target.value)}
                 style={{ width: "100%" }}
               />
-              <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>MDI icon name shown on the widget button.</div>
+              <div className="settings-field-hint">MDI icon name shown on the widget button.</div>
             </dd>
           </div>
         </div>

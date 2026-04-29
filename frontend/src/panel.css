@@ -1995,9 +1995,20 @@
 }
 
 .settings-field-hint {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--ink-3);
-  margin-top: 3px;
+  margin-top: 2px;
+  opacity: 0.9;
+}
+
+@media (hover: hover) {
+  .settings-field-hint {
+    opacity: 0.3;
+    transition: opacity 0.2s ease;
+  }
+  .settings-field-hint:hover {
+    opacity: 1;
+  }
 }
 
 /* Confirm dialog */

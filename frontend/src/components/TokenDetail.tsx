@@ -556,7 +556,7 @@ function DisplaySettings({ token, readonly, saving, setSaving, setToken, setErro
         <div className="display-settings-row">
           <div>
             <div className="display-settings-label">Theme mode</div>
-            <div className="muted" style={{ fontSize: 11 }}>Force light or dark theme regardless of the visitor's OS setting.</div>
+            <div className="settings-field-hint">Force light or dark theme regardless of the visitor's OS setting.</div>
           </div>
           <div className="segmented" role="group" aria-label="Theme mode" style={{ flexShrink: 0 }}>
             {(["auto", "light", "dark"] as const).map(v => (
@@ -578,7 +578,7 @@ function DisplaySettings({ token, readonly, saving, setSaving, setToken, setErro
         <div className="display-settings-row">
           <div>
             <div className="display-settings-label">Accessibility</div>
-            <div className="muted" style={{ fontSize: 11 }}>Enhanced mode adds aria-live announcements for state changes.</div>
+            <div className="settings-field-hint">Enhanced mode adds aria-live announcements for state changes.</div>
           </div>
           <select
             value={token.a11y}
@@ -597,7 +597,7 @@ function DisplaySettings({ token, readonly, saving, setSaving, setToken, setErro
         <div className="display-settings-row">
           <div>
             <div className="display-settings-label">Language</div>
-            <div className="muted" style={{ fontSize: 11 }}>Widget UI language for all cards using this token.</div>
+            <div className="settings-field-hint">Widget UI language for all cards using this token.</div>
           </div>
           <select
             value={token.lang}
@@ -615,7 +615,7 @@ function DisplaySettings({ token, readonly, saving, setSaving, setToken, setErro
         <div className="display-settings-row" style={{ cursor: canEdit ? "pointer" : "default" }}>
           <div>
             <div className="display-settings-label">Custom error messages</div>
-            <div className="muted" style={{ fontSize: 11 }}>Override the default offline and error behavior for this token.</div>
+            <div className="settings-field-hint">Override the default offline and error behavior for this token.</div>
           </div>
           <Toggle checked={token.custom_messages} onChange={toggleMessages} disabled={!canEdit} />
         </div>

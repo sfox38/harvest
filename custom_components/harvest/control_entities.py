@@ -18,6 +18,7 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
 from .const import CONF_KILL_SWITCH, DEFAULTS
 from .session_manager import SessionManager
@@ -101,13 +102,16 @@ class ControlEntities:
             self._switch_add_fn(entities)  # AddEntitiesCallback is sync
 
     def remove_token_controls(self, token_id: str) -> None:
-        """Mark the token's paused switch unavailable when the token is deleted."""
+        """Remove the token's paused switch from HA when the token is deleted."""
         sw = self._token_switches.pop(token_id, None)
         if sw is None:
             return
-        sw._attr_available = False
-        if sw.hass is not None:
-            sw.async_write_ha_state()
+        registry = er.async_get(self._hass)
+        if sw.entity_id:
+            self._hass.states.async_remove(sw.entity_id)
+            entry = registry.async_get(sw.entity_id)
+            if entry is not None:
+                registry.async_remove(sw.entity_id)
         if sw in self._entities:
             self._entities.remove(sw)
 

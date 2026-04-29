@@ -15,6 +15,7 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_time_interval
 
 from .activity_store import ActivityStore
@@ -107,18 +108,15 @@ class DiagnosticSensors:
             await self._sensor_add_fn(entities)
 
     def remove_token_sensors(self, token_id: str) -> None:
-        """Unregister and remove per-token sensor entities when a token is deleted.
-
-        Marks per-token sensors as unavailable and removes them from the
-        internal registry. Full entity registry removal requires the entity
-        platform to call async_remove(); this marks them unavailable so HA
-        hides them from the UI until the next restart clears them.
-        """
+        """Remove per-token sensor entities from HA when a token is deleted."""
         sensors = self._token_entities.pop(token_id, [])
+        registry = er.async_get(self._hass)
         for sensor in sensors:
-            sensor._attr_available = False
-            if sensor.hass is not None:
-                sensor.async_write_ha_state()
+            if sensor.entity_id:
+                self._hass.states.async_remove(sensor.entity_id)
+                entry = registry.async_get(sensor.entity_id)
+                if entry is not None:
+                    registry.async_remove(sensor.entity_id)
             if sensor in self._entities:
                 self._entities.remove(sensor)
 
