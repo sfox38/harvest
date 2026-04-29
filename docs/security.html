@@ -80,7 +80,7 @@
         <section>
         <h2 id="model">Security model</h2>
 
-        <p>HArvest's security boundary is the <em>token</em>. A token grants access to a specific, server-defined list of entities with a specific capability (read or read-write). The HA long-lived access token (your HA credentials) never leaves the server. Visitors interact only with the HArvest WebSocket proxy, which forwards only the exact service calls the integration permits.</p>
+        <p>HArvest's security boundary is the <em>token</em>. A token grants access to a specific, server-defined list of entities with a specific capability (view only or control). The HA long-lived access token (your HA credentials) never leaves the server. Visitors interact only with the HArvest WebSocket proxy, which forwards only the exact service calls the integration permits.</p>
 
         <p>Tokens are independent - compromising one doesn't affect others. They can be revoked instantly from the panel, dropping all active sessions for that token within seconds.</p>
 
@@ -103,7 +103,7 @@
 
         <ul>
           <li><strong>Token ID in page source</strong> - the token ID is visible in your page HTML. Anyone who copies it can use it from a non-browser tool (curl, etc.) as long as the origin check passes or isn't set. Use HMAC signing and strict origin restrictions for write-access tokens.</li>
-          <li><strong>Browser developer tools</strong> - visitors with DevTools open can inspect the WebSocket traffic, see entity IDs and states, and manually send valid commands for entities in the token scope. You cannot prevent this for in-scope entities on a read-write token.</li>
+          <li><strong>Browser developer tools</strong> - visitors with DevTools open can inspect the WebSocket traffic, see entity IDs and states, and manually send valid commands for entities in the token scope. You cannot prevent this for in-scope entities on a control-enabled token.</li>
           <li><strong>Origin header</strong> - the origin check runs on the HTTP <code>Origin</code> header, which browsers send reliably but non-browser tools can forge. Origin restriction is effective for browser-based attacks, not for determined attackers with script access to your token ID.</li>
           <li><strong>Network-level attacks</strong> - DDoS, infrastructure flooding, and similar attacks are outside HArvest's scope. Use Cloudflare, fail2ban, or similar tools at the infrastructure level.</li>
           <li><strong>Your HA instance security</strong> - HArvest doesn't protect a weak HA installation. Keep HA updated, use a strong password, enable MFA, and don't use a weak long-lived access token.</li>
@@ -116,7 +116,7 @@
         <p>All security options are configured per-token in the widget detail screen or wizard.</p>
 
         <h3>Capability</h3>
-        <p>Set per entity in the token. <strong>Read</strong> - state updates only, no service calls. <strong>Read-write</strong> - state updates plus allowed service calls for that domain.</p>
+        <p>Set per entity in the token. <strong>View only</strong> - state updates only, no service calls. <strong>Control</strong> - state updates plus allowed service calls for that domain.</p>
 
         <h3>Excluded attributes</h3>
         <p>Per entity. Prevents specific HA state attributes from being sent to the widget. Useful for hiding location coordinates, internal IDs, or other attributes you don't want visible in network traffic.</p>

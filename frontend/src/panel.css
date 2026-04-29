@@ -2151,6 +2151,7 @@
 .detail-header-nav    { grid-column: 1; grid-row: 1; display: flex; align-items: center; gap: 8px; }
 .detail-header-name   { grid-column: 2; grid-row: 1; min-width: 0; }
 .detail-header-actions { grid-column: 3; grid-row: 1; display: flex; gap: 8px; flex-shrink: 0; }
+.detail-header-saved { grid-column: 3; grid-row: 2; justify-self: end; }
 .detail-header-meta   { grid-column: 1 / -1; grid-row: 2; }
 
 /* ============================================================

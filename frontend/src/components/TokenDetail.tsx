@@ -335,7 +335,7 @@ function themeUrlToId(url: string): string {
 }
 
 // ---------------------------------------------------------------------------
-function ThemeEditor({ token, setToken, setError, bare }: { token: Token; setToken: (t: Token) => void; setError: (e: string | null) => void; bare?: boolean }) {
+function ThemeEditor({ token, setToken, setError, bare, onSelectedTheme, saving, setSaving }: { token: Token; setToken: (t: Token) => void; setError: (e: string | null) => void; bare?: boolean; onSelectedTheme?: (theme: ThemeDefinition | null) => void; saving?: boolean; setSaving?: (v: boolean) => void }) {
   const [themes, setThemes] = useState<ThemeDefinition[]>([]);
   const [packsAgreed, setPacksAgreed] = useState<boolean | null>(null);
   const [showAgree, setShowAgree] = useState(false);
@@ -349,11 +349,15 @@ function ThemeEditor({ token, setToken, setError, bare }: { token: Token; setTok
   const currentId = themeUrlToId(token.theme_url ?? "");
   const selectedTheme = themes.find(t => t.theme_id === currentId) ?? null;
 
+  useEffect(() => { onSelectedTheme?.(selectedTheme); }, [selectedTheme, onSelectedTheme]);
+
   const applyTheme = async (themeId: string) => {
+    setSaving?.(true);
     try {
       const updated = await api.tokens.update(token.token_id, { theme_url: themeIdToUrl(themeId) });
       setToken(updated);
     } catch (e) { setError(String(e)); }
+    finally { setSaving?.(false); }
   };
 
   const change = (themeId: string) => {
@@ -402,13 +406,6 @@ function ThemeEditor({ token, setToken, setError, bare }: { token: Token; setTok
               </button>
             ))}
           </div>
-          {selectedTheme && (
-            <WidgetPreview
-              variables={selectedTheme.variables}
-              darkVariables={selectedTheme.dark_variables}
-              packId={selectedTheme.renderer_pack || undefined}
-            />
-          )}
         </div>
   );
 
@@ -938,7 +935,7 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
                 }}
               >
                 <option value="read">Read only</option>
-                <option value="read-write">Read + control</option>
+                <option value="read-write">Control</option>
               </select>
               <button
                 className="btn-link entity-row-2-btn"
@@ -1996,9 +1993,10 @@ interface ConfigTabCardProps {
   setError: (e: string | null) => void;
   hmacSecret: string | null;
   setHmacSecret: (s: string | null) => void;
+  onPreviewTheme?: (theme: ThemeDefinition | null) => void;
 }
 
-function ConfigTabCard({ token, readonly, saving, setSaving, setToken, setError, hmacSecret, setHmacSecret }: ConfigTabCardProps) {
+function ConfigTabCard({ token, readonly, saving, setSaving, setToken, setError, hmacSecret, setHmacSecret, onPreviewTheme }: ConfigTabCardProps) {
   const primaryCount = token.entities.filter(e => !e.companion_of).length;
   const [activeTab, setActiveTab] = useState<ConfigTab>(() => primaryCount === 0 ? "entities" : "embed");
 
@@ -2018,6 +2016,10 @@ function ConfigTabCard({ token, readonly, saving, setSaving, setToken, setError,
   const effectiveTab = visibleTabs.some(t => t.id === activeTab) ? activeTab : "entities";
   const wrap = (t: Token) => setToken({ ...t, created_by_name: token.created_by_name });
 
+  useEffect(() => {
+    if (effectiveTab !== "style") onPreviewTheme?.(null);
+  }, [effectiveTab, onPreviewTheme]);
+
   return (
     <div className="card">
       <div className="config-tabs-nav">
@@ -2034,7 +2036,7 @@ function ConfigTabCard({ token, readonly, saving, setSaving, setToken, setError,
         <EntitiesEditor bare token={token} readonly={readonly} saving={saving} setSaving={setSaving} setToken={wrap} setError={setError} />
       )}
       {effectiveTab === "style" && !readonly && (
-        <ThemeEditor bare token={token} setToken={wrap} setError={setError} />
+        <ThemeEditor bare token={token} setToken={wrap} setError={setError} onSelectedTheme={onPreviewTheme} saving={saving} setSaving={setSaving} />
       )}
       {effectiveTab === "preferences" && !readonly && (
         <DisplaySettings bare token={token} readonly={readonly} saving={saving} setSaving={setSaving} setToken={wrap} setError={setError} />
@@ -2060,15 +2062,22 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
   const [saving,        setSaving]        = useState(false);
   const [savedMsg,      setSavedMsg]      = useState("");
   const prevSaving = useRef(false);
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (prevSaving.current && !saving && !error) setSavedMsg("Changes saved");
-    if (saving) setSavedMsg("");
+    if (prevSaving.current && !saving && !error) {
+      setSavedMsg("Changes saved");
+      if (savedTimer.current) clearTimeout(savedTimer.current);
+      savedTimer.current = setTimeout(() => setSavedMsg(""), 2200);
+    }
+    if (saving) { setSavedMsg(""); setError(null); }
     prevSaving.current = saving;
   }, [saving, error]);
+  useEffect(() => () => { if (savedTimer.current) clearTimeout(savedTimer.current); }, []);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmPause,  setConfirmPause]  = useState(false);
   const [hmacSecret,    setHmacSecret]    = useState<string | null>(null);
+  const [previewTheme,  setPreviewTheme]  = useState<ThemeDefinition | null>(null);
 
   const load = useCallback(() => {
     api.tokens.get(tokenId)
@@ -2156,7 +2165,6 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
   return (
     <div className="content-narrow col" style={{ gap: 18 }}>
       <span aria-live="polite" className="sr-only">{savedMsg}</span>
-      {savedMsg && <span className={`save-indicator ${savedMsg ? "visible" : ""}`} key={savedMsg + Date.now()}>&#10003; Saved</span>}
       {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
       <div className="card card-pad">
@@ -2218,6 +2226,7 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
             Created {fmtDateLong(token.created_at)} by {token.created_by_name ?? token.created_by}
             {" - "}{token.entities.length} {token.entities.length === 1 ? "entity" : "entities"}
           </div>
+          {savedMsg && <span className={`detail-header-saved save-indicator ${savedMsg ? "visible" : ""}`} key={savedMsg + Date.now()}>&#10003; Saved</span>}
         </div>
       </div>
 
@@ -2233,7 +2242,17 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
             setError={setError}
             hmacSecret={hmacSecret}
             setHmacSecret={setHmacSecret}
+            onPreviewTheme={setPreviewTheme}
           />
+          {previewTheme && (
+            <Card title="Preview">
+              <WidgetPreview
+                variables={previewTheme.variables}
+                darkVariables={previewTheme.dark_variables}
+                packId={previewTheme.renderer_pack || undefined}
+              />
+            </Card>
+          )}
         </div>
 
         {/* Right column */}

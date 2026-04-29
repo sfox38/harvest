@@ -582,7 +582,7 @@ export function WidgetPreview({ variables, darkVariables, packId }: WidgetPrevie
         </select>
         <div className="segmented" role="group" aria-label="Capability">
           <button aria-pressed={capability === "read"} onClick={() => { setCapability("read"); _ls.set("hrv_preview_capability", "read"); }}>Read</button>
-          <button aria-pressed={capability === "read-write"} onClick={() => { setCapability("read-write"); _ls.set("hrv_preview_capability", "read-write"); }}>Read-Write</button>
+          <button aria-pressed={capability === "read-write"} onClick={() => { setCapability("read-write"); _ls.set("hrv_preview_capability", "read-write"); }}>Control</button>
         </div>
         <div className="segmented" role="group" aria-label="Color mode">
           <button aria-pressed={colorMode === "light"} onClick={() => { setColorMode("light"); _ls.set("hrv_preview_color_mode", "light"); }}>Light</button>

@@ -438,8 +438,8 @@ function Step2({ state, onChange }: { state: WizardState; onChange: (u: Partial<
     <div className="col" style={{ gap: 14 }}>
       <p style={{ fontSize: 14, fontWeight: 600 }}>What can visitors do with this widget?</p>
       {([
-        { value: "read"       as const, label: "View only",        desc: "Visitors can see the current state but cannot control devices." },
-        { value: "read-write" as const, label: "View and control",  desc: "Visitors can see the state and send commands, such as toggling a light." },
+        { value: "read"       as const, label: "View only", desc: "Visitors can see the current state but cannot control devices." },
+        { value: "read-write" as const, label: "Control",    desc: "Visitors can see the state and send commands, such as toggling a light." },
       ]).map(({ value, label, desc }) => (
         <label
           key={value}
