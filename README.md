@@ -2,7 +2,7 @@
 
 Securely share and control your Home Assistant smart home devices on any HTML or WordPress page.
 
-![HArvest widget cards embedded on a webpage](documentation/hero.jpg)
+![HArvest widget cards embedded on a webpage](docs/hero.jpg)
 
 ## What it does
 
