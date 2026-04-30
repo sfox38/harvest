@@ -684,8 +684,8 @@ export function Settings({ theme, onThemeChange, onKillSwitchChange }: SettingsP
             <tr>
               <td className="info-label">Documentation</td>
               <td>
-                <a href="https://github.com/sfox38/harvest/" target="_blank" rel="noopener noreferrer" className="info-link">
-                  https://github.com/sfox38/harvest/ <Icon name="external" size={12} />
+                <a href="https://sfox38.github.io/harvest/" target="_blank" rel="noopener noreferrer" className="info-link">
+                  https://sfox38.github.io/harvest/ <Icon name="external" size={12} />
                 </a>
               </td>
             </tr>
