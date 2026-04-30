@@ -65,6 +65,7 @@
           <ol>
             <li><a href="#requirements">Requirements</a></li>
             <li><a href="#hacs">Install via HACS</a></li>
+            <li><a href="#widget-script">Widget script</a></li>
             <li><a href="#network">Network requirements</a></li>
           </ol>
         </div>
@@ -133,6 +134,27 @@
         <div class="callout callout-tip">
           <span class="callout-label">Next step</span>
           <p>Once HArvest is installed, head to <a href="quickstart.html">Quick setup</a> to create your first widget and get it onto a page.</p>
+        </div>
+        </section>
+
+        <section>
+        <h2 id="widget-script">Widget script</h2>
+
+        <p>HACS installs the Home Assistant integration (the panel and WebSocket proxy) but not the widget script. The widget script is a separate JavaScript file called <code>harvest.min.js</code> that runs on your website, the site where visitors see and interact with your widgets.</p>
+
+        <p>You need to place this file on your web server. There are two ways to get it:</p>
+
+        <h3>From the GitHub release</h3>
+        <p>Download the latest release zip from <a href="https://github.com/sfox38/harvest/releases" target="_blank">GitHub Releases</a>. Inside the zip, find <code>widget/dist/harvest.min.js</code> and upload it to your web server.</p>
+
+        <h3>From the repository</h3>
+        <p>If you cloned the repository, the file is at <code>widget/dist/harvest.min.js</code> in the project root.</p>
+
+        <p>Place the file wherever works best for your setup. The <code>&lt;script src="..."&gt;</code> path in your embed snippets must point to it. For example, if you upload it to your site root, use <code>src="/harvest.min.js"</code>. If you place it in an assets folder, use <code>src="/assets/harvest.min.js"</code>.</p>
+
+        <div class="callout callout-tip">
+          <span class="callout-label">WordPress users</span>
+          <p>If you use the <a href="wordpress.html">HArvest WordPress plugin</a>, you do not need to place the script manually. The plugin handles loading the widget script for you.</p>
         </div>
         </section>
 
