@@ -186,7 +186,7 @@
         <p>When using <code>[harvest_group]</code>, child <code>[harvest]</code> shortcodes do not need <code>token</code> - they inherit it from the group.</p>
 
         <h3>Using aliases</h3>
-        <p>To avoid putting real entity IDs in your page source, use the alias format. Aliases are generated in the HArvest panel and stored with the token. The panel's Code section shows both formats.</p>
+        <p>For security by obscurity, use the alias format. Aliases are generated in the HArvest panel and stored with the token. The panel's Code section shows both formats.</p>
 
         <pre><code class="language-text">[harvest token="hwt_..." alias="dJ5x3Apd"]</code></pre>
 
@@ -215,7 +215,7 @@
         <section>
         <h2 id="script-loading">Script loading</h2>
 
-        <p>The widget script (<code>harvest.min.js</code>) is loaded in the page footer via WordPress's <code>wp_footer</code> action. It's only enqueued once per page even when multiple shortcodes are present - the plugin uses an idempotency guard to prevent duplicate script tags.</p>
+        <p>The widget script (<code>harvest.min.js</code>) is loaded in the page footer via WordPress's <code>wp_footer</code> action. It's only enqueued once per page even if multiple shortcodes are present.</p>
 
         <p>The script handle is <code>harvest-widget</code>. If you need to reference it from another plugin or theme (e.g. to add a dependency), use this handle.</p>
         </section>
