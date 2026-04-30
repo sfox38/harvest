@@ -3273,6 +3273,8 @@
     /** @type {boolean}                 */ #isMuted      = false;
     /** @type {number}                  */ #volume       = 0;
     /** @type {boolean}                 */ #dragging     = false;
+    /** @type {string}                  */ #lastState    = "idle";
+    /** @type {object}                  */ #lastAttrs    = {};
     /** @type {Function}                */ #sendDebounce;
 
     constructor(def, root, config, i18n) {
@@ -3425,6 +3427,8 @@
     }
 
     applyState(state, attributes) {
+      this.#lastState = state;
+      this.#lastAttrs = attributes;
       const isPlaying = state === "playing";
       const isPaused  = state === "paused";
 
@@ -3467,6 +3471,19 @@
       this.announceState(
         `${this.def.friendly_name}, ${state}${title ? ` - ${title}` : ""}`,
       );
+    }
+
+    predictState(action, data) {
+      if (action === "media_play_pause") {
+        return { state: this.#lastState === "playing" ? "paused" : "playing", attributes: this.#lastAttrs };
+      }
+      if (action === "volume_mute") {
+        return { state: this.#lastState, attributes: { ...this.#lastAttrs, is_volume_muted: !!data.is_volume_muted } };
+      }
+      if (action === "volume_set") {
+        return { state: this.#lastState, attributes: { ...this.#lastAttrs, volume_level: data.volume_level } };
+      }
+      return null;
     }
   }
 
