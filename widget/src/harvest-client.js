@@ -256,15 +256,19 @@ export class HarvestClient {
    * Request history data for an entity from the server.
    *
    * @param {string} entityId
+   * @param {{ hours?: number, period?: number }} [options]
    */
-  requestHistory(entityId) {
+  requestHistory(entityId, { hours, period } = {}) {
     if (!this.#sessionId || !this.#ws || this.#ws.readyState !== WebSocket.OPEN) return;
-    this.#sendJson({
+    const msg = {
       type: "history_request",
       session_id: this.#sessionId,
       entity_id: entityId,
       msg_id: this.#nextMsgId(),
-    });
+    };
+    if (hours != null) msg.hours = hours;
+    if (period != null) msg.period = period;
+    this.#sendJson(msg);
   }
 
   /**
@@ -693,8 +697,9 @@ export class HarvestClient {
   }
 
   #handleTheme(msg) {
-    if (!msg.variables) return;
-    const theme = { variables: msg.variables, dark_variables: msg.dark_variables ?? {} };
+    if (!("variables" in msg)) return;
+    const isEmpty = !msg.variables || Object.keys(msg.variables).length === 0;
+    const theme = isEmpty ? null : { variables: msg.variables, dark_variables: msg.dark_variables ?? {} };
     for (const card of this.#cards.values()) {
       card.receiveTheme?.(theme);
     }

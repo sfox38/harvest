@@ -184,7 +184,8 @@ export interface ThemeDefinition {
   harvest_version: number;
   variables: Record<string, string>;
   dark_variables: Record<string, string>;
-  renderer_pack: string;
+  renderer_pack: boolean;
+  has_pack: boolean;
   is_bundled: boolean;
   has_thumbnail: boolean;
   usage_count: number;

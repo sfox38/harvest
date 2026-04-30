@@ -171,9 +171,6 @@ export class HrvCard extends HTMLElement {
    * @param {object} def - EntityDefinition from server
    */
   receiveDefinition(def) {
-    console.warn(
-      `[HArvest] receiveDefinition: ${def.entity_id} domain=${def.domain} capabilities=${def.capabilities}`,
-    );
     this.#entityDef = def;
 
     // Apply server-side config from entity_definition.
@@ -253,7 +250,6 @@ export class HrvCard extends HTMLElement {
    * @param {string} _lastUpdated - ISO 8601 timestamp (used by client for ordering)
    */
   receiveStateUpdate(state, attributes, _lastUpdated) {
-    console.warn(`[HArvest] stateUpdate: ${this.#entityId || this.#alias} state="${state}"`, attributes);
     this.#lastState = state;
     this.#lastAttributes = attributes;
     // Cancel any pending optimistic revert.
@@ -308,9 +304,13 @@ export class HrvCard extends HTMLElement {
    */
   receiveTheme(theme) {
     this.#lastTheme = theme || null;
-    if (theme && this.shadowRoot) {
+    if (!this.shadowRoot) return;
+    if (theme) {
       const cs = this.#config.colorScheme || _pageConfig.colorScheme || "auto";
       ThemeLoader.apply(theme, this.shadowRoot, cs);
+    } else {
+      ThemeLoader.detach(this.shadowRoot);
+      /** @type {HTMLElement} */ (this.shadowRoot.host).style.cssText = "";
     }
   }
 
@@ -587,11 +587,7 @@ export class HrvCard extends HTMLElement {
       return;
     }
 
-    console.warn(`[HArvest] sendCommand: ${this.#entityId || this.#alias} ${action}`, data);
-    if (!this.#client) {
-      console.warn("[HArvest] sendCommand: no client");
-      return;
-    }
+    if (!this.#client) return;
     const msgId = this.#client.nextMsgId();
 
     // Optimistic UI.

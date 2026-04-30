@@ -3,7 +3,7 @@
   "author": "sfox38",
   "version": "1.0",
   "harvest_version": 1,
-  "renderer_pack": "minimus",
+  "renderer_pack": true,
   "variables": {
     "--hrv-color-primary":         "#3E3F29",
     "--hrv-color-primary-dim":     "#C8C8B8",

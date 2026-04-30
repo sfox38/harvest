@@ -1,8 +1,9 @@
 """Theme management for the HArvest integration.
 
 Manages bundled and user-created widget themes. Bundled themes are loaded
-from JSON files in the themes/ subdirectory. Custom themes are persisted
-via HA's Store helper in a separate storage key (harvest_themes).
+from JSON files in the themes/ subdirectory. User themes are stored as
+individual JSON files in themes/user/, making them easy to browse, back up,
+and share between installations.
 """
 from __future__ import annotations
 
@@ -14,17 +15,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.storage import Store
 
 from .const import BASE62_ALPHABET, THEME_ID_LENGTH, THEME_PREFIX
 
 _LOGGER = logging.getLogger(__name__)
 
-THEMES_STORAGE_KEY = "harvest_themes"
-THEMES_STORAGE_VERSION = 1
-
 _THEMES_DIR = Path(__file__).parent / "themes"
-_CUSTOM_THUMBNAILS_DIR = _THEMES_DIR / "custom"
+_USER_THEMES_DIR = _THEMES_DIR / "user"
 
 _BUNDLED_IDS = {"default", "glass", "access", "minimus"}
 
@@ -43,7 +40,7 @@ class ThemeDefinition:
     variables: dict[str, str]
     dark_variables: dict[str, str]
     created_at: str
-    renderer_pack: str = ""
+    has_renderer_pack: bool = False
     created_by: str = ""
     is_bundled: bool = False
 
@@ -53,12 +50,11 @@ class ThemeManager:
 
     def __init__(self, hass: HomeAssistant) -> None:
         self._hass = hass
-        self._store: Store = Store(hass, THEMES_STORAGE_VERSION, THEMES_STORAGE_KEY)
         self._bundled: dict[str, ThemeDefinition] = {}
-        self._custom: dict[str, ThemeDefinition] = {}
+        self._user: dict[str, ThemeDefinition] = {}
 
     async def load(self) -> dict[str, str | None]:
-        """Load bundled themes from disk and custom themes from HA storage.
+        """Load bundled themes and user themes from disk.
 
         Returns a dict mapping theme_id to an error string (or None on success)
         for each bundled theme file attempted.
@@ -81,7 +77,7 @@ class ThemeManager:
                     harvest_version=raw.get("harvest_version", 1),
                     variables=raw.get("variables", {}),
                     dark_variables=raw.get("dark_variables", {}),
-                    renderer_pack=raw.get("renderer_pack", ""),
+                    has_renderer_pack=bool(raw.get("renderer_pack", False)),
                     created_by="system",
                     created_at="",
                     is_bundled=True,
@@ -91,24 +87,35 @@ class ThemeManager:
                 _LOGGER.warning("HArvest: failed to load bundled theme %s: %s", filename, exc)
                 results[theme_id] = str(exc)
 
-        self._custom = {}
-        raw = await self._store.async_load()
-        if not raw:
-            return results
-        for item in raw.get("themes", []):
-            try:
-                theme = _theme_from_dict(item)
-            except (KeyError, TypeError):
-                _LOGGER.warning("HArvest: skipping malformed theme: %s", item)
-                continue
-            self._custom[theme.theme_id] = theme
+        self._user = {}
+        await self._hass.async_add_executor_job(self._load_user_themes)
         return results
 
-    async def _save(self) -> None:
-        """Persist custom themes to HA storage."""
-        await self._store.async_save(
-            {"themes": [_theme_to_dict(t) for t in self._custom.values()]}
+    def _load_user_themes(self) -> None:
+        """Load user themes from JSON files in themes/user/ (runs in executor)."""
+        if not _USER_THEMES_DIR.is_dir():
+            return
+        for path in sorted(_USER_THEMES_DIR.glob("*.json")):
+            try:
+                raw = json.loads(path.read_text("utf-8"))
+                theme = _theme_from_dict(raw)
+                self._user[theme.theme_id] = theme
+            except Exception as exc:
+                _LOGGER.warning("HArvest: skipping malformed user theme %s: %s", path.name, exc)
+
+    async def _save_theme(self, theme: ThemeDefinition) -> None:
+        """Write a single user theme to its JSON file."""
+        await self._hass.async_add_executor_job(
+            self._write_theme_file, theme,
         )
+
+    @staticmethod
+    def _write_theme_file(theme: ThemeDefinition) -> None:
+        """Write theme JSON to disk (runs in executor)."""
+        _USER_THEMES_DIR.mkdir(parents=True, exist_ok=True)
+        path = _USER_THEMES_DIR / f"{theme.theme_id}.json"
+        data = _theme_to_dict(theme)
+        path.write_text(json.dumps(data, indent=2), "utf-8")
 
     def _generate_id(self) -> str:
         """Generate a unique theme ID with hth_ prefix."""
@@ -116,17 +123,17 @@ class ThemeManager:
             candidate = THEME_PREFIX + "".join(
                 secrets.choice(BASE62_ALPHABET) for _ in range(THEME_ID_LENGTH)
             )
-            if candidate not in self._custom:
+            if candidate not in self._user:
                 return candidate
 
     def get(self, theme_id: str) -> ThemeDefinition | None:
-        """Return a theme by ID, checking both bundled and custom."""
-        return self._bundled.get(theme_id) or self._custom.get(theme_id)
+        """Return a theme by ID, checking both bundled and user."""
+        return self._bundled.get(theme_id) or self._user.get(theme_id)
 
     def name_exists(self, name: str, exclude_id: str | None = None) -> bool:
         """Return True if any theme already uses this name (case-insensitive)."""
         lower = name.lower()
-        for theme in list(self._bundled.values()) + list(self._custom.values()):
+        for theme in list(self._bundled.values()) + list(self._user.values()):
             if theme.theme_id == exclude_id:
                 continue
             if theme.name.lower() == lower:
@@ -134,8 +141,8 @@ class ThemeManager:
         return False
 
     def get_all(self) -> list[ThemeDefinition]:
-        """Return all themes, bundled first then custom."""
-        return list(self._bundled.values()) + list(self._custom.values())
+        """Return all themes, bundled first then user."""
+        return list(self._bundled.values()) + list(self._user.values())
 
     async def create(
         self,
@@ -145,9 +152,9 @@ class ThemeManager:
         created_by: str,
         author: str = "",
         version: str = "1.0",
-        renderer_pack: str = "",
+        has_renderer_pack: bool = False,
     ) -> ThemeDefinition:
-        """Create and persist a new custom theme."""
+        """Create and persist a new user theme."""
         theme = ThemeDefinition(
             theme_id=self._generate_id(),
             name=name,
@@ -156,40 +163,47 @@ class ThemeManager:
             harvest_version=1,
             variables=variables,
             dark_variables=dark_variables or {},
-            renderer_pack=renderer_pack,
+            has_renderer_pack=has_renderer_pack,
             created_by=created_by,
             created_at=datetime.now(tz=timezone.utc).isoformat(),
             is_bundled=False,
         )
-        self._custom[theme.theme_id] = theme
-        await self._save()
+        self._user[theme.theme_id] = theme
+        await self._save_theme(theme)
         return theme
 
     async def update(self, theme_id: str, updates: dict) -> ThemeDefinition:
-        """Update a custom theme. Raises ValueError for bundled, KeyError if not found."""
+        """Update a user theme. Raises ValueError for bundled, KeyError if not found."""
         if theme_id in self._bundled:
             raise ValueError("Cannot modify a bundled theme.")
-        theme = self._custom.get(theme_id)
+        theme = self._user.get(theme_id)
         if theme is None:
             raise KeyError(f"Theme not found: {theme_id}")
 
-        _UPDATABLE = {"name", "author", "version", "variables", "dark_variables", "renderer_pack"}
+        _UPDATABLE = {"name", "author", "version", "variables", "dark_variables", "has_renderer_pack"}
         for field, value in updates.items():
             if field in _UPDATABLE:
                 setattr(theme, field, value)
 
-        await self._save()
+        await self._save_theme(theme)
         return theme
 
     async def delete(self, theme_id: str) -> None:
-        """Delete a custom theme. Raises ValueError for bundled, KeyError if not found."""
+        """Delete a user theme. Raises ValueError for bundled, KeyError if not found."""
         if theme_id in self._bundled:
             raise ValueError("Cannot delete a bundled theme.")
-        if theme_id not in self._custom:
+        if theme_id not in self._user:
             raise KeyError(f"Theme not found: {theme_id}")
-        del self._custom[theme_id]
+        del self._user[theme_id]
         self.delete_thumbnail(theme_id)
-        await self._save()
+        await self._hass.async_add_executor_job(self._delete_theme_file, theme_id)
+
+    @staticmethod
+    def _delete_theme_file(theme_id: str) -> None:
+        """Remove a user theme's JSON file from disk (runs in executor)."""
+        path = _USER_THEMES_DIR / f"{theme_id}.json"
+        if path.is_file():
+            path.unlink()
 
     # -- Thumbnail helpers ---------------------------------------------------
 
@@ -202,7 +216,7 @@ class ThemeManager:
                     return path
         else:
             for ext in (".png", ".jpg", ".jpeg"):
-                path = _CUSTOM_THUMBNAILS_DIR / f"{theme_id}{ext}"
+                path = _USER_THEMES_DIR / f"{theme_id}{ext}"
                 if path.is_file():
                     return path
         return None
@@ -216,29 +230,29 @@ class ThemeManager:
         return self.get_thumbnail_path(theme_id) is not None
 
     def save_thumbnail(self, theme_id: str, data: bytes, extension: str) -> Path:
-        """Save a thumbnail image for a custom theme. Returns the saved path."""
+        """Save a thumbnail image for a user theme. Returns the saved path."""
         if theme_id in self._bundled:
             raise ValueError("Cannot modify bundled theme thumbnails.")
-        if theme_id not in self._custom:
+        if theme_id not in self._user:
             raise KeyError(f"Theme not found: {theme_id}")
         ext = extension.lower()
         if ext not in _ALLOWED_THUMBNAIL_TYPES:
             raise ValueError(f"Unsupported image type: {ext}")
         if len(data) > _MAX_THUMBNAIL_BYTES:
             raise ValueError(f"Image too large (max {_MAX_THUMBNAIL_BYTES // 1024} KB).")
-        _CUSTOM_THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
+        _USER_THEMES_DIR.mkdir(parents=True, exist_ok=True)
         for old_ext in (".png", ".jpg", ".jpeg"):
-            old = _CUSTOM_THUMBNAILS_DIR / f"{theme_id}{old_ext}"
+            old = _USER_THEMES_DIR / f"{theme_id}{old_ext}"
             if old.is_file():
                 old.unlink()
-        path = _CUSTOM_THUMBNAILS_DIR / f"{theme_id}{ext}"
+        path = _USER_THEMES_DIR / f"{theme_id}{ext}"
         path.write_bytes(data)
         return path
 
     def delete_thumbnail(self, theme_id: str) -> bool:
-        """Delete a custom theme's thumbnail. Returns True if a file was removed."""
+        """Delete a user theme's thumbnail. Returns True if a file was removed."""
         for ext in (".png", ".jpg", ".jpeg"):
-            path = _CUSTOM_THUMBNAILS_DIR / f"{theme_id}{ext}"
+            path = _USER_THEMES_DIR / f"{theme_id}{ext}"
             if path.is_file():
                 path.unlink()
                 return True
@@ -255,7 +269,7 @@ def _theme_to_dict(theme: ThemeDefinition) -> dict:
         "harvest_version": theme.harvest_version,
         "variables": theme.variables,
         "dark_variables": theme.dark_variables,
-        "renderer_pack": theme.renderer_pack,
+        "renderer_pack": theme.has_renderer_pack,
         "created_by": theme.created_by,
         "created_at": theme.created_at,
     }
@@ -271,7 +285,7 @@ def _theme_from_dict(d: dict) -> ThemeDefinition:
         harvest_version=d.get("harvest_version", 1),
         variables=d.get("variables", {}),
         dark_variables=d.get("dark_variables", {}),
-        renderer_pack=d.get("renderer_pack", ""),
+        has_renderer_pack=bool(d.get("renderer_pack", False)),
         created_by=d.get("created_by", ""),
         created_at=d.get("created_at", ""),
         is_bundled=False,
@@ -289,12 +303,12 @@ def theme_to_api_dict(theme: ThemeDefinition, has_thumbnail: bool = False) -> di
 def theme_url_to_id(theme_url: str) -> str:
     """Map a token's theme_url value to a theme_id.
 
-    "" -> "default", "bundled:X" -> "X", "custom:hth_xxx" -> "hth_xxx".
+    "" -> "default", "bundled:X" -> "X", "user:hth_xxx" -> "hth_xxx".
     """
     if not theme_url:
         return "default"
     if theme_url.startswith("bundled:"):
         return theme_url.removeprefix("bundled:")
-    if theme_url.startswith("custom:"):
-        return theme_url.removeprefix("custom:")
+    if theme_url.startswith("user:"):
+        return theme_url.removeprefix("user:")
     return theme_url

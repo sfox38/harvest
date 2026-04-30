@@ -323,14 +323,14 @@ function CodeSection({ token, setToken, setError, hmacSecret, bare }: { token: T
 
 function themeIdToUrl(id: string): string {
   if (id === "default") return "";
-  if (id.startsWith("hth_")) return `custom:${id}`;
+  if (id.startsWith("hth_")) return `user:${id}`;
   return `bundled:${id}`;
 }
 
 function themeUrlToId(url: string): string {
   if (!url) return "default";
   if (url.startsWith("bundled:")) return url.slice(8);
-  if (url.startsWith("custom:")) return url.slice(7);
+  if (url.startsWith("user:")) return url.slice(5);
   return url;
 }
 
@@ -701,7 +701,6 @@ interface EntitiesEditorProps {
   setError: (e: string) => void;
 }
 
-const MAX_COMPANIONS = 4;
 const COMPANION_ALLOWED_DOMAINS = new Set(["light", "switch", "binary_sensor", "input_boolean", "cover", "remote", "lock"]);
 const HISTORY_DOMAINS = new Set(["sensor", "input_number", "binary_sensor"]);
 const HOURS_OPTIONS = [1, 6, 12, 24, 48, 72, 168];
@@ -716,6 +715,7 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
   const [attrCache, setAttrCache] = useState<Record<string, string[]>>({});
   const [attrLoading, setAttrLoading] = useState<Set<string>>(new Set());
   const [haActionEntities, setHaActionEntities] = useState<import("../types").HAEntity[]>([]);
+  const [localEntities, setLocalEntities] = useState<Token["entities"] | null>(null);
 
   useEffect(() => {
     if (getEntityCache().length === 0) loadEntityCache();
@@ -727,22 +727,28 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
       .catch(() => {});
   }, []);
 
-  const canEdit = !readonly && !saving;
-  const existingIds = token.entities.map(e => e.entity_id);
-  const grouped = groupEntities(token.entities);
+  const canEdit = !readonly;
+  const entities = localEntities ?? token.entities;
+  const existingIds = entities.map(e => e.entity_id);
+  const grouped = groupEntities(entities);
 
   const patchEntities = async (updated: Token["entities"]) => {
+    setLocalEntities(updated);
     setSaving(true);
     try {
       const t = await api.tokens.update(token.token_id, { entities: updated });
       setToken(t);
-    } catch (err) { setError(String(err)); }
-    finally { setSaving(false); }
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLocalEntities(null);
+      setSaving(false);
+    }
   };
 
   const toggleCap = (entityId: string, newCap: "read" | "read-write") => {
     if (!canEdit) return;
-    patchEntities(token.entities.map(en =>
+    patchEntities(entities.map(en =>
       en.entity_id === entityId ? { ...en, capabilities: newCap } : en
     ));
   };
@@ -756,8 +762,8 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
       alias = result.alias;
     } catch { /* alias stays null */ }
 
-    const defaultCap = token.entities[0]?.capabilities ?? "read";
-    const updated = [...token.entities, {
+    const defaultCap = entities[0]?.capabilities ?? "read";
+    const updated = [...entities, {
       entity_id: entityId,
       alias,
       capabilities: defaultCap,
@@ -783,8 +789,8 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
       alias = result.alias;
     } catch { /* alias stays null */ }
 
-    const defaultCap = token.entities[0]?.capabilities ?? "read";
-    const updated = [...token.entities, {
+    const defaultCap = entities[0]?.capabilities ?? "read";
+    const updated = [...entities, {
       entity_id: companionEntityId,
       alias,
       capabilities: defaultCap,
@@ -803,13 +809,13 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
 
   const removeEntity = (entityId: string) => {
     if (!canEdit) return;
-    patchEntities(token.entities.filter(e => e.entity_id !== entityId && e.companion_of !== entityId));
+    patchEntities(entities.filter(e => e.entity_id !== entityId && e.companion_of !== entityId));
     setConfirmRemove(null);
   };
 
   const removeCompanion = (entityId: string) => {
     if (!canEdit) return;
-    patchEntities(token.entities.filter(e => e.entity_id !== entityId));
+    patchEntities(entities.filter(e => e.entity_id !== entityId));
   };
 
   const toggleCompanionExpand = (entityId: string) => {
@@ -843,14 +849,14 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
 
   const updateGraphSetting = (entityId: string, field: "graph" | "hours" | "period", value: string | number | null) => {
     if (!canEdit) return;
-    patchEntities(token.entities.map(en =>
+    patchEntities(entities.map(en =>
       en.entity_id === entityId ? { ...en, [field]: value } : en
     ));
   };
 
   const updateGestureSetting = (entityId: string, gesture: "tap" | "hold" | "double_tap", action: string, targetEntityId?: string) => {
     if (!canEdit) return;
-    patchEntities(token.entities.map(en => {
+    patchEntities(entities.map(en => {
       if (en.entity_id !== entityId) return en;
       const gc = { ...(en.gesture_config ?? {}) };
       if (action) {
@@ -866,11 +872,11 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
 
   const toggleExcludeAttr = (entityId: string, attrKey: string) => {
     if (!canEdit) return;
-    const entity = token.entities.find(e => e.entity_id === entityId);
+    const entity = entities.find(e => e.entity_id === entityId);
     if (!entity) return;
     const excluded = new Set(entity.exclude_attributes);
     if (excluded.has(attrKey)) excluded.delete(attrKey); else excluded.add(attrKey);
-    patchEntities(token.entities.map(e =>
+    patchEntities(entities.map(e =>
       e.entity_id === entityId ? { ...e, exclude_attributes: [...excluded] } : e
     ));
   };
@@ -957,7 +963,7 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
             {isCompanionExpanded && (
               <div className="entity-expand-panel">
                 <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
-                  Companions ({companionCount}/{MAX_COMPANIONS})
+                  Companions ({companionCount})
                 </div>
                 {g.companions.map(c => (
                   <div key={c.entity_id} className="chip" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
@@ -973,7 +979,7 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
                     )}
                   </div>
                 ))}
-                {canEdit && companionCount < MAX_COMPANIONS && (
+                {canEdit && (
                   <EntityAutocomplete
                     value={companionInputs[e.entity_id] ?? ""}
                     onChange={v => setCompanionInputs(prev => ({ ...prev, [e.entity_id]: v }))}
@@ -998,7 +1004,7 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
                       <>{" "}<button
                         className="btn-link"
                         style={{ fontSize: 11 }}
-                        onClick={() => patchEntities(token.entities.map(en =>
+                        onClick={() => patchEntities(entities.map(en =>
                           en.entity_id === e.entity_id ? { ...en, exclude_attributes: [] } : en
                         ))}
                       >Clear all</button></>
@@ -1080,7 +1086,7 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
                         checked={e.animate ?? false}
                         onChange={v => {
                           if (!canEdit) return;
-                          patchEntities(token.entities.map(en =>
+                          patchEntities(entities.map(en =>
                             en.entity_id === e.entity_id ? { ...en, animate: v } : en
                           ));
                         }}
@@ -2249,7 +2255,7 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
               <WidgetPreview
                 variables={previewTheme.variables}
                 darkVariables={previewTheme.dark_variables}
-                packId={previewTheme.renderer_pack || undefined}
+                packId={previewTheme.renderer_pack ? previewTheme.theme_id : undefined}
               />
             </Card>
           )}

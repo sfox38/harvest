@@ -38,7 +38,7 @@ from .const import (
     WS_PATH,
 )
 from .entity_compatibility import validate_action
-from .entity_definition import build_entity_definition, get_blocked_data_keys, split_attributes
+from .entity_definition import build_entity_definition, filter_attributes, get_blocked_data_keys
 from .event_bus import EventBus
 from .harvest_action import HarvestActionManager
 from .rate_limiter import RateLimiter
@@ -348,6 +348,7 @@ class HarvestWsView(HomeAssistantView):
                 source_ip=source_ip,
                 ws=ws,
                 entity_ids=real_entity_ids,
+                outgoing_ids=outgoing_ids,
             )
         except ValueError:
             # max_sessions reached.
@@ -444,7 +445,7 @@ class HarvestWsView(HomeAssistantView):
         # --- Step 4a.2: Send renderer pack URL if token has one ---
         if token.renderer_pack:
             pack_mgr = self._resolve_pack_manager()
-            if pack_mgr and pack_mgr.agreed and pack_mgr.get(token.renderer_pack):
+            if pack_mgr and pack_mgr.agreed and pack_mgr.get_pack_path(token.renderer_pack):
                 await ws.send_json({
                     "type": "renderer_pack",
                     "url": f"/api/harvest/packs/{token.renderer_pack}.js",
@@ -927,9 +928,9 @@ class HarvestWsView(HomeAssistantView):
         outgoing_id = outgoing_ids.get(real_id, real_id)
 
         ea = _find_entity_access(real_id, token)
-        hours = ea.hours if ea else 24
+        hours = msg.get("hours", ea.hours if ea else 24)
         hours = max(1, min(hours, 168))
-        period = ea.period if ea else 10
+        period = msg.get("period", ea.period if ea else 10)
         period = max(1, period)
         hours_in_minutes = hours * 60
         if period >= hours_in_minutes:
@@ -1116,16 +1117,14 @@ class HarvestWsView(HomeAssistantView):
         Applies token_manager.filter_attributes() before building.
         Updates session.last_sent_attributes after building.
         """
-        domain = real_id.split(".")[0]
         raw_attrs = dict(state.attributes)
 
         # Filter via token denylist and per-entity exclusions.
         filtered_attrs = self._token_manager.filter_attributes(real_id, token, raw_attrs)
 
-        # Split into standard and extended, then sanitize for JSON.
-        standard, extended = split_attributes(domain, filtered_attrs)
-        standard = _safe_json_value(standard)
-        extended = _safe_json_value(extended)
+        # Apply global blocklist + size cap, then sanitize for JSON.
+        attrs = filter_attributes(filtered_attrs)
+        attrs = _safe_json_value(attrs)
 
         last_changed = state.last_changed.isoformat() if hasattr(state, "last_changed") else None
         last_updated = state.last_updated.isoformat() if hasattr(state, "last_updated") else None
@@ -1135,25 +1134,24 @@ class HarvestWsView(HomeAssistantView):
                 "type": "state_update",
                 "entity_id": outgoing_id,
                 "state": state.state,
-                "attributes": standard,
-                "extended_attributes": extended,
+                "attributes": attrs,
                 "last_changed": last_changed,
                 "last_updated": last_updated,
                 "initial": True,
                 "msg_id": None,
             }
             if session is not None:
-                session.last_sent_attributes[real_id] = standard
+                session.last_sent_attributes[real_id] = attrs
             return msg
 
         # Delta mode.
         prev = session.last_sent_attributes.get(real_id, {}) if session is not None else {}
 
-        changed = {k: v for k, v in standard.items() if prev.get(k) != v}
-        removed = [k for k in prev if k not in standard]
+        changed = {k: v for k, v in attrs.items() if prev.get(k) != v}
+        removed = [k for k in prev if k not in attrs]
 
         if session is not None:
-            session.last_sent_attributes[real_id] = standard
+            session.last_sent_attributes[real_id] = attrs
 
         msg = {
             "type": "state_update",

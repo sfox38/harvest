@@ -244,10 +244,10 @@ export const api = {
     get: (themeId: string): Promise<ThemeDefinition> =>
       _get<ThemeDefinition>(`/themes/${themeId}`),
 
-    create: (data: { name: string; variables: Record<string, string>; dark_variables?: Record<string, string>; author?: string; version?: string; renderer_pack?: string }): Promise<ThemeDefinition> =>
+    create: (data: { name: string; variables: Record<string, string>; dark_variables?: Record<string, string>; author?: string; version?: string; renderer_pack?: boolean }): Promise<ThemeDefinition> =>
       _post<ThemeDefinition>("/themes", data),
 
-    update: (themeId: string, data: Partial<{ name: string; author: string; version: string; variables: Record<string, string>; dark_variables: Record<string, string>; renderer_pack: string }>): Promise<ThemeDefinition> =>
+    update: (themeId: string, data: Partial<{ name: string; author: string; version: string; variables: Record<string, string>; dark_variables: Record<string, string>; renderer_pack: boolean }>): Promise<ThemeDefinition> =>
       _patch<ThemeDefinition>(`/themes/${themeId}`, data),
 
     delete: (themeId: string): Promise<void> =>
@@ -297,15 +297,6 @@ export const api = {
 
     agree: (agreed: boolean): Promise<{ agreed: boolean }> =>
       _post<{ agreed: boolean }>("/packs/agree", { agreed }),
-
-    create: (data: { name: string; description?: string; version?: string; author?: string; code?: string; pack_id?: string }): Promise<RendererPack> =>
-      _post<RendererPack>("/packs", data),
-
-    update: (packId: string, data: Partial<{ name: string; description: string; version: string; author: string }>): Promise<RendererPack> =>
-      _patch<RendererPack>(`/packs/${packId}`, data),
-
-    delete: (packId: string): Promise<void> =>
-      _delete(`/packs/${packId}`),
 
     getCode: (packId: string): Promise<{ pack_id: string; code: string }> =>
       _get<{ pack_id: string; code: string }>(`/packs/${packId}/code`),

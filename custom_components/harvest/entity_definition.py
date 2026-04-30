@@ -131,42 +131,21 @@ FEATURE_FLAGS: dict[str, dict[int, str]] = {
     "remote": {1: "learn_command", 2: "delete_command"},
 }
 
-# Standard (card-level) attributes per domain. All other non-denied attributes
-# go to extended_attributes in state_update messages.
-STANDARD_ATTRIBUTES: dict[str, frozenset[str]] = {
-    "light": frozenset({
-        "brightness", "color_temp", "color_temp_kelvin", "color_mode",
-        "supported_color_modes",
-        "min_mireds", "max_mireds",
-        "min_color_temp_kelvin", "max_color_temp_kelvin",
-        "effect_list", "effect",
-        "rgb_color", "hs_color",
-    }),
-    "fan": frozenset({
-        "percentage", "percentage_step", "oscillating",
-        "direction", "preset_mode", "preset_modes",
-    }),
-    "cover": frozenset({"current_position", "current_tilt_position"}),
-    "climate": frozenset({
-        "current_temperature", "target_temp_high", "target_temp_low",
-        "temperature", "hvac_modes", "hvac_action", "fan_modes", "fan_mode",
-        "preset_modes", "preset_mode", "swing_modes", "swing_mode",
-        "min_temp", "max_temp", "target_temp_step",
-    }),
-    "sensor": frozenset({
-        "unit_of_measurement", "device_class", "state_class", "last_reset",
-    }),
-    "binary_sensor": frozenset({"device_class"}),
-    "media_player": frozenset({
-        "media_title", "media_artist", "media_album_name",
-        "media_duration", "media_position", "media_content_type",
-        "source", "source_list", "volume_level", "is_volume_muted",
-    }),
-    "remote": frozenset({"current_activity", "activity_list"}),
-    "input_number": frozenset({"min", "max", "step", "mode", "unit_of_measurement"}),
-    "input_select": frozenset({"options"}),
-    "timer": frozenset({"duration", "remaining", "finishes_at"}),
-}
+# Attributes blocked from state_update messages. All other attributes are
+# forwarded to the widget. Individual values exceeding MAX_ATTRIBUTE_VALUE_BYTES
+# are silently dropped as a safety net against oversized payloads.
+BLOCKED_ATTRIBUTES: frozenset[str] = frozenset({
+    "supported_features",
+    "supported_color_modes",
+    "friendly_name",
+    "attribution",
+    "assumed_state",
+    "editable",
+    "id",
+    "forecast",
+})
+
+MAX_ATTRIBUTE_VALUE_BYTES = 8192
 
 # Default icon per state for each domain. Used when the entity registry has no
 # custom icon set. State key "*" applies to all unlisted states.
@@ -372,19 +351,25 @@ def decode_supported_features(domain: str, bitmask: int) -> list[str]:
     return [name for bit, name in flags.items() if bitmask & bit]
 
 
-def split_attributes(domain: str, attributes: dict) -> tuple[dict, dict]:
-    """Split entity attributes into standard and extended dicts.
+def filter_attributes(attributes: dict) -> dict:
+    """Filter entity attributes using a blocklist and per-value size cap.
 
-    Standard attributes are those in STANDARD_ATTRIBUTES for the domain.
-    All others go to extended_attributes.
-    friendly_name is excluded from both (delivered in entity_definition separately).
+    Removes globally blocked attributes and any individual value whose JSON
+    serialization exceeds MAX_ATTRIBUTE_VALUE_BYTES.
     """
-    standard_keys = STANDARD_ATTRIBUTES.get(domain, frozenset())
-    standard = {k: v for k, v in attributes.items()
-                if k in standard_keys and k != "friendly_name"}
-    extended = {k: v for k, v in attributes.items()
-                if k not in standard_keys and k != "friendly_name"}
-    return standard, extended
+    import json
+
+    filtered = {}
+    for k, v in attributes.items():
+        if k in BLOCKED_ATTRIBUTES:
+            continue
+        try:
+            if len(json.dumps(v, default=str)) > MAX_ATTRIBUTE_VALUE_BYTES:
+                continue
+        except (TypeError, ValueError):
+            continue
+        filtered[k] = v
+    return filtered
 
 
 def build_icon_state_map(

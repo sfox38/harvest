@@ -570,8 +570,12 @@
       this.#modeSwitch = this.root.querySelector(".hrv-mode-switch");
 
       if (this.#toggleBtn) {
-        this.#toggleBtn.addEventListener("click", () => {
-          this.config.card?.sendCommand("toggle", {});
+        this._attachGestureHandlers(this.#toggleBtn, {
+          onTap: () => {
+            const tap = this.config.gestureConfig?.tap;
+            if (tap) { this._runAction(tap); return; }
+            this.config.card?.sendCommand("toggle", {});
+          },
         });
       }
 
@@ -1217,8 +1221,12 @@
         this.renderIcon(this.def.icon ?? "mdi:fan", "fan-onoff-icon");
         this.#toggleBtn.setAttribute("data-animate", String(!!this.config.animate));
       }
-      this.#toggleBtn?.addEventListener("click", () => {
-        this.config.card?.sendCommand("toggle", {});
+      this._attachGestureHandlers(this.#toggleBtn, {
+        onTap: () => {
+          const tap = this.config.gestureConfig?.tap;
+          if (tap) { this._runAction(tap); return; }
+          this.config.card?.sendCommand("toggle", {});
+        },
       });
       if (this.#dialSvg) {
         this.#dialSvg.addEventListener("pointerdown",   this.#onPointerDown.bind(this));
@@ -1905,6 +1913,7 @@
 
       this.renderCompanions();
       _applyCompanionTooltips(this.root);
+      this._attachGestureHandlers(this.root.querySelector("[part=card]"));
     }
 
     #toggleDropdown(feat) {
@@ -2177,14 +2186,14 @@
       );
 
       if (this.#triggerBtn && isWritable) {
-        this.#triggerBtn.addEventListener("click", () => {
-          this.#triggerBtn.disabled = true;
-          this.config.card?.sendCommand("trigger", {});
+        this._attachGestureHandlers(this.#triggerBtn, {
+          onTap: () => {
+            const tap = this.config.gestureConfig?.tap;
+            if (tap) { this._runAction(tap); return; }
+            this.#triggerBtn.disabled = true;
+            this.config.card?.sendCommand("trigger", {});
+          },
         });
-        this.#triggerBtn.addEventListener("pointerdown",   () => this.#triggerBtn.setAttribute("data-pressing", "true"));
-        this.#triggerBtn.addEventListener("pointerup",     () => this.#triggerBtn.removeAttribute("data-pressing"));
-        this.#triggerBtn.addEventListener("pointerleave",  () => this.#triggerBtn.removeAttribute("data-pressing"));
-        this.#triggerBtn.addEventListener("pointercancel", () => this.#triggerBtn.removeAttribute("data-pressing"));
       }
 
       this.renderCompanions();
@@ -2291,6 +2300,7 @@
 
       this.renderCompanions();
       _applyCompanionTooltips(this.root);
+      this._attachGestureHandlers(this.root.querySelector("[part=card]"));
     }
 
     applyState(state, _attributes) {
@@ -2525,6 +2535,7 @@
 
       this.renderCompanions();
       _applyCompanionTooltips(this.root);
+      this._attachGestureHandlers(this.root.querySelector("[part=card]"));
     }
 
     #updateSliderFromPointer(e) {
@@ -2871,6 +2882,7 @@
 
       this.renderCompanions();
       _applyCompanionTooltips(this.root);
+      this._attachGestureHandlers(this.root.querySelector("[part=card]"));
     }
 
     #valToPct(v) {
@@ -3057,6 +3069,7 @@
 
       this.renderCompanions();
       _applyCompanionTooltips(this.root);
+      this._attachGestureHandlers(this.root.querySelector("[part=card]"));
     }
 
     #openDropdown() {
@@ -3396,6 +3409,7 @@
 
       this.renderCompanions();
       _applyCompanionTooltips(this.root);
+      this._attachGestureHandlers(this.root.querySelector("[part=card]"));
     }
 
     #updateSliderFromPointer(e) {
@@ -3539,16 +3553,16 @@
       this.renderIcon(icon, "remote-icon");
 
       if (this.#btn && isWritable) {
-        this.#btn.addEventListener("click", () => {
-          const cmd    = this.config.tapAction?.data?.command ?? "power";
-          const device = this.config.tapAction?.data?.device ?? undefined;
-          const data   = device ? { command: cmd, device } : { command: cmd };
-          this.config.card?.sendCommand("send_command", data);
+        this._attachGestureHandlers(this.#btn, {
+          onTap: () => {
+            const tap = this.config.gestureConfig?.tap;
+            if (tap) { this._runAction(tap); return; }
+            const cmd    = this.config.tapAction?.data?.command ?? "power";
+            const device = this.config.tapAction?.data?.device ?? undefined;
+            const data   = device ? { command: cmd, device } : { command: cmd };
+            this.config.card?.sendCommand("send_command", data);
+          },
         });
-        this.#btn.addEventListener("pointerdown",   () => this.#btn.setAttribute("data-pressing", "true"));
-        this.#btn.addEventListener("pointerup",     () => this.#btn.removeAttribute("data-pressing"));
-        this.#btn.addEventListener("pointerleave",  () => this.#btn.removeAttribute("data-pressing"));
-        this.#btn.addEventListener("pointercancel", () => this.#btn.removeAttribute("data-pressing"));
       }
 
       this.renderCompanions();
@@ -3632,6 +3646,7 @@
 
       this.renderCompanions();
       _applyCompanionTooltips(this.root);
+      this._attachGestureHandlers(this.root.querySelector("[part=card]"));
     }
 
     applyState(state, attributes) {
@@ -3762,8 +3777,12 @@
       this.#roLabel = this.root.querySelector(".hrv-switch-ro");
 
       if (this.#track && isWritable) {
-        this.#track.addEventListener("click", () => {
-          this.config.card?.sendCommand("toggle", {});
+        this._attachGestureHandlers(this.#track, {
+          onTap: () => {
+            const tap = this.config.gestureConfig?.tap;
+            if (tap) { this._runAction(tap); return; }
+            this.config.card?.sendCommand("toggle", {});
+          },
         });
       }
 
@@ -3958,6 +3977,7 @@
 
       this.renderCompanions();
       _applyCompanionTooltips(this.root);
+      this._attachGestureHandlers(this.root.querySelector("[part=card]"));
     }
 
     applyState(state, attributes) {
@@ -4165,8 +4185,12 @@
       this.#toggle  = this.root.querySelector(".hrv-generic-toggle");
 
       if (this.#toggle && isWritable) {
-        this.#toggle.addEventListener("click", () => {
-          this.config.card?.sendCommand("toggle", {});
+        this._attachGestureHandlers(this.#toggle, {
+          onTap: () => {
+            const tap = this.config.gestureConfig?.tap;
+            if (tap) { this._runAction(tap); return; }
+            this.config.card?.sendCommand("toggle", {});
+          },
         });
       }
 

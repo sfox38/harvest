@@ -2302,6 +2302,15 @@
   pointer-events: none;
   user-select: none;
 }
+.theme-pack-star.pack-missing {
+  color: #f59e0b;
+  font-size: 15px;
+  background: rgba(0, 0, 0, 0.75);
+  border-radius: 4px;
+  padding: 2px 5px;
+  line-height: 1.2;
+  filter: none;
+}
 
 .theme-strip-meta {
   display: flex;

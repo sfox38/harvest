@@ -670,11 +670,7 @@ export function EntityAutocomplete({ value, onChange, onSelect, disabled, filter
     loadEntityCache().then(() => setCacheLen(getEntityCache().length));
   }, []);
 
-  // Re-focus the input when it transitions from disabled back to enabled (alias loading complete).
   useEffect(() => {
-    if (prevDisabled.current && !disabled) {
-      inputRef.current?.focus();
-    }
     prevDisabled.current = !!disabled;
   }, [disabled]);
 

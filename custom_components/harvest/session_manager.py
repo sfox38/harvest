@@ -40,6 +40,7 @@ class Session:
     ws: "WebSocketResponse"
     subscribed_entity_ids: set[str]
     last_message_at: datetime
+    outgoing_ids: dict[str, str] = field(default_factory=dict)
     last_sent_attributes: dict[str, dict] = field(default_factory=dict)
 
 
@@ -66,6 +67,7 @@ class SessionManager:
         source_ip: str | None,
         ws: "WebSocketResponse",
         entity_ids: list[str],
+        outgoing_ids: dict[str, str] | None = None,
     ) -> Session:
         """Create and register a new session.
 
@@ -110,6 +112,7 @@ class SessionManager:
             ws=ws,
             subscribed_entity_ids=set(entity_ids),
             last_message_at=now,
+            outgoing_ids=outgoing_ids if outgoing_ids is not None else {},
         )
 
         self._sessions[session_id] = session

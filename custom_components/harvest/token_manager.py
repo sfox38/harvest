@@ -141,7 +141,7 @@ class Token:
     paused: bool = False
     embed_mode: str = "single"             # "single", "group", or "page"
     theme_url: str = ""                    # bundled theme URL or custom theme URL; empty means default
-    renderer_pack: str = ""                # "" = none, "minimus" = bundled pack ID
+    renderer_pack: str = ""                # "" = none; derived from theme_id when theme has a pack
     lang: str = "auto"                     # BCP 47 language tag or "auto"
     a11y: str = "standard"                 # "standard" or "enhanced"
     color_scheme: str = "auto"             # "auto" | "light" | "dark"

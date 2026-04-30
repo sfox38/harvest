@@ -75,7 +75,6 @@ interface WizardProps {
 
 const TOTAL_STEPS = 6;
 const STEP_LABELS = ["Entities", "Permissions", "Origin", "Expiry", "Appearance", "Done"];
-const MAX_COMPANIONS = 4;
 const COMPANION_ALLOWED_DOMAINS = new Set(["light", "switch", "binary_sensor", "input_boolean", "cover", "remote", "lock"]);
 
 // ---------------------------------------------------------------------------
@@ -193,7 +192,7 @@ interface CompanionPickerProps {
 function CompanionPicker({ companions, excludeIds, onChange }: CompanionPickerProps) {
   const [input, setInput] = useState("");
   const [loadingAlias, setLoadingAlias] = useState<string | null>(null);
-  const canAdd = companions.length < MAX_COMPANIONS;
+  const canAdd = true;
 
   const addCompanion = async (entityId: string) => {
     if (companions.some(c => c.entity_id === entityId)) return;
@@ -216,7 +215,7 @@ function CompanionPicker({ companions, excludeIds, onChange }: CompanionPickerPr
   return (
     <div className="col" style={{ gap: 6, paddingLeft: 12, borderLeft: "2px solid var(--divider)", marginTop: 2 }}>
       <div className="muted" style={{ fontSize: 11 }}>
-        Companions ({companions.length}/{MAX_COMPANIONS}) - secondary entities shown alongside this card.
+        Companions ({companions.length}) - secondary entities shown alongside this card.
         Allowed domains: light, switch, lock, cover, binary sensor, input boolean, remote.
       </div>
       {canAdd && (
@@ -707,14 +706,14 @@ function Step4({ state, onChange }: { state: WizardState; onChange: (u: Partial<
 
 function themeIdToUrl(id: string): string {
   if (id === "default") return "";
-  if (id.startsWith("hth_")) return `custom:${id}`;
+  if (id.startsWith("hth_")) return `user:${id}`;
   return `bundled:${id}`;
 }
 
 function themeUrlToId(url: string): string {
   if (!url) return "default";
   if (url.startsWith("bundled:")) return url.slice(8);
-  if (url.startsWith("custom:")) return url.slice(7);
+  if (url.startsWith("user:")) return url.slice(5);
   return url;
 }
 
@@ -761,7 +760,7 @@ function Step5({ state, onChange }: { state: WizardState; onChange: (u: Partial<
         <WidgetPreview
           variables={selectedTheme.variables}
           darkVariables={selectedTheme.dark_variables}
-          packId={selectedTheme.renderer_pack || undefined}
+          packId={selectedTheme.renderer_pack ? selectedTheme.theme_id : undefined}
         />
       )}
 
