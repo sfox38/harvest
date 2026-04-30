@@ -140,6 +140,11 @@
 
         <p>The setup block only needs to appear once, no matter how many cards you add. Place <code>&lt;hrv-card&gt;</code> tags anywhere in the page body where you want a widget to appear.</p>
 
+        <div class="callout callout-warn">
+          <span class="callout-label">Where is harvest.min.js?</span>
+          <p>The widget script is not installed automatically by HACS. You need to download it and place it on your web server. See <a href="installation.html#widget-script">Widget script</a> on the installation page for details.</p>
+        </div>
+
         <div class="callout callout-tip">
           <span class="callout-label">Multiple tokens on one page</span>
           <p>The <code>HArvest.config()</code> call sets a page-level default. If you need cards from different tokens on the same page, you can set <code>token</code> and <code>ha-url</code> directly on individual cards or card groups instead. See <a href="widgets.html#config-levels">token configuration levels</a> in the widget reference.</p>
@@ -155,7 +160,7 @@
 
         <p>Paste it into any post or page using the Classic Editor or any editor that allows shortcodes. The HArvest WordPress plugin takes care of the rest: loading the widget script, setting up browser security headers, and matching your site's light or dark mode.</p>
 
-        <p>The plugin needs to be installed and configured with your HA URL before shortcodes will work. See the <a href="wordpress.html">WordPress setup page</a> for the full process.</p>
+        <p>The plugin needs to be installed and configured with your HA URL before shortcodes will work. Download the latest release zip from <a href="https://github.com/sfox38/harvest/releases" target="_blank">GitHub Releases</a> and find <code>harvest.zip</code> in the <code>wordpress/</code> folder. See the <a href="wordpress.html">WordPress setup page</a> for the full install process.</p>
 
         <div class="callout callout-tip">
           <span class="callout-label">Where to go next</span>
