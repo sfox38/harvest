@@ -10,13 +10,14 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import re
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 
 from homeassistant.core import HomeAssistant
 
-from .const import BASE62_ALPHABET, THEME_ID_LENGTH, THEME_PREFIX
+from .const import BASE62_ALPHABET
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -117,14 +118,21 @@ class ThemeManager:
         data = _theme_to_dict(theme)
         path.write_text(json.dumps(data, indent=2), "utf-8")
 
-    def _generate_id(self) -> str:
-        """Generate a unique theme ID with hth_ prefix."""
-        while True:
-            candidate = THEME_PREFIX + "".join(
-                secrets.choice(BASE62_ALPHABET) for _ in range(THEME_ID_LENGTH)
-            )
-            if candidate not in self._user:
-                return candidate
+    def _id_from_name(self, name: str) -> str:
+        """Derive a theme ID by slugifying the name.
+
+        Lowercases, replaces non-alphanumeric runs with hyphens, strips
+        leading/trailing hyphens, and appends a short random suffix if the
+        slug already exists.
+        """
+        slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+        if not slug:
+            slug = "theme"
+        candidate = slug
+        while candidate in self._bundled or candidate in self._user:
+            suffix = "".join(secrets.choice(BASE62_ALPHABET) for _ in range(4))
+            candidate = f"{slug}-{suffix}"
+        return candidate
 
     def get(self, theme_id: str) -> ThemeDefinition | None:
         """Return a theme by ID, checking both bundled and user."""
@@ -156,7 +164,7 @@ class ThemeManager:
     ) -> ThemeDefinition:
         """Create and persist a new user theme."""
         theme = ThemeDefinition(
-            theme_id=self._generate_id(),
+            theme_id=self._id_from_name(name),
             name=name,
             author=author,
             version=version,
@@ -303,7 +311,7 @@ def theme_to_api_dict(theme: ThemeDefinition, has_thumbnail: bool = False) -> di
 def theme_url_to_id(theme_url: str) -> str:
     """Map a token's theme_url value to a theme_id.
 
-    "" -> "default", "bundled:X" -> "X", "user:hth_xxx" -> "hth_xxx".
+    "" -> "default", "bundled:X" -> "X", "user:my-theme" -> "my-theme".
     """
     if not theme_url:
         return "default"

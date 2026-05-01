@@ -1498,16 +1498,12 @@ class HarvestThemeDetailView(HomeAssistantView):
         if user is None or not user.is_admin:
             raise web.HTTPForbidden()
 
-        theme = self._theme_manager.get(theme_id)
-        if theme is None:
-            raise web.HTTPNotFound(reason=f"Theme not found: {theme_id}")
-
         try:
             await self._theme_manager.delete(theme_id)
         except ValueError as exc:
             raise web.HTTPForbidden(reason=str(exc))
         except KeyError:
-            raise web.HTTPNotFound(reason=f"Theme not found: {theme_id}")
+            pass
 
         affected_token_ids: list[str] = []
         for token in self._token_manager.get_all():
@@ -1526,7 +1522,7 @@ class HarvestThemeDetailView(HomeAssistantView):
                     except Exception:
                         pass
 
-        if theme.has_renderer_pack and self._pack_manager:
+        if self._pack_manager:
             try:
                 await self._pack_manager.delete_user_pack(theme_id)
             except Exception:
