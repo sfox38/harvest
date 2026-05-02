@@ -2,7 +2,7 @@
 
 Securely share and control your Home Assistant smart home devices on any HTML or WordPress page.
 
-![HArvest widget cards embedded on a webpage](https://raw.githubusercontent.com/sfox38/harvest/main/docs/hero.jpg)
+![HArvest widget cards embedded on a webpage](https://raw.githubusercontent.com/sfox38/HArvest/main/docs/hero.jpg)
 ## What it does
 
 HArvest creates a secure bridge between your Home Assistant instance and any webpage. You create a widget token in the HArvest panel, pick the entities you want to expose, paste a snippet into your page, and visitors see live entity states updated in real time. Where you allow it, they can control things too - toggle lights, adjust temperature, play media, and more. Each token has its own access rules, origin restrictions, expiry, and activity log.
@@ -24,7 +24,7 @@ HArvest creates a secure bridge between your Home Assistant instance and any web
 
 ## Installation
 
-HArvest installs as a custom HACS repository. Open HACS, add `https://github.com/sfox38/harvest` as a custom repository (category: Integration), then download and restart HA. Full steps in the [installation guide](https://sfox38.github.io/harvest/installation.html).
+HArvest installs as a custom HACS repository. Open HACS, add `https://github.com/sfox38/harvest` as a custom repository (category: Integration), then download and restart HA. Full steps in the [installation guide](https://sfox38.github.io/HArvest/installation.html).
 
 After restarting, go to **Settings > Devices and Services > Add Integration**, search for **HArvest**, and select it. The HArvest panel appears in your sidebar.
 
@@ -38,7 +38,7 @@ Embedding a light card on an HTML page:
 <hrv-card entity="light.bedroom_main"></hrv-card>
 ```
 
-For WordPress, install the [HArvest WordPress plugin](https://sfox38.github.io/harvest/wordpress.html) and use a shortcode:
+For WordPress, install the [HArvest WordPress plugin](https://sfox38.github.io/HArvest/wordpress.html) and use a shortcode:
 
 ```
 [harvest token="hwt_..." entity="light.bedroom_main"]
