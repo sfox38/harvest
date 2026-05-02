@@ -777,7 +777,7 @@ export class HarvestClient {
    * Payload format: "{token_id}:{timestamp}:{nonce}"
    *
    * @param {number} timestamp - Unix seconds
-   * @param {string} nonce     - Random hex nonce
+   * @param {string} nonce     - Random base62 nonce
    * @returns {Promise<string>} - Lowercase hex string
    */
   async #buildHmacSignature(timestamp, nonce) {

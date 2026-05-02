@@ -643,6 +643,14 @@ class HarvestWsView(HomeAssistantView):
 
                 msg_type = msg.get("type")
 
+                client_sid = msg.get("session_id")
+                if client_sid is not None and client_sid != session.session_id:
+                    _LOGGER.warning(
+                        "HArvest: session_id mismatch from session %s (got %s). Dropping message.",
+                        session.session_id, client_sid,
+                    )
+                    continue
+
                 if msg_type == "command":
                     await self._handle_command(ws, msg, session, token)
                 elif msg_type == "subscribe":
@@ -671,7 +679,7 @@ class HarvestWsView(HomeAssistantView):
     ) -> None:
         """Process a command message.
 
-        Validates session_id, entity_id scope, capability (read-write required),
+        Validates entity_id scope, capability (read-write required),
         action against ALLOWED_SERVICES, and command rate limit.
         Strips unknown keys from data payload before forwarding.
         Calls hass.services.async_call() or action_manager.trigger().
