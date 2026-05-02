@@ -38,7 +38,7 @@ from .const import (
     WS_PATH,
 )
 from .entity_compatibility import validate_action
-from .entity_definition import build_entity_definition, get_blocked_data_keys, split_attributes
+from .entity_definition import build_entity_definition, filter_attributes, get_blocked_data_keys
 from .event_bus import EventBus
 from .harvest_action import HarvestActionManager
 from .rate_limiter import RateLimiter
@@ -55,6 +55,26 @@ _LOGGER = logging.getLogger(__name__)
 # Flood protection: close connection after this many malformed messages in the window.
 FLOOD_LIMIT = 10
 FLOOD_WINDOW_SECONDS = 5
+
+
+def _normalize_forecast(entries: list | None) -> list | None:
+    """Ensure forecast entries have temperature/templow keys.
+
+    Some HA integrations return native_temperature/native_templow without
+    the converted temperature/templow keys. This adds the fallback so the
+    widget always finds the expected keys.
+    """
+    if not entries:
+        return entries
+    out = []
+    for entry in entries:
+        e = dict(entry)
+        if "temperature" not in e and "native_temperature" in e:
+            e["temperature"] = e["native_temperature"]
+        if "templow" not in e and "native_templow" in e:
+            e["templow"] = e["native_templow"]
+        out.append(e)
+    return out
 
 
 def _safe_json_value(val: object) -> object:
@@ -348,6 +368,7 @@ class HarvestWsView(HomeAssistantView):
                 source_ip=source_ip,
                 ws=ws,
                 entity_ids=real_entity_ids,
+                outgoing_ids=outgoing_ids,
             )
         except ValueError:
             # max_sessions reached.
@@ -396,11 +417,16 @@ class HarvestWsView(HomeAssistantView):
 
         # Register HA state listeners. listener_unsubs maps real_entity_id -> unsub callable.
         listener_unsubs: dict[str, Callable] = {}
+        # Weather forecast subscription state (per-connection).
+        # forecast_cache[entity_id] = {"daily": [...], "hourly": [...]}
+        forecast_cache: dict[str, dict[str, list | None]] = {}
+        forecast_unsubs: dict[str, list[Callable]] = {}
 
-        # Schedule session_expiring warning.
-        expiry_warning_task = asyncio.create_task(
-            self._send_session_expiring(ws, session)
-        )
+        # Schedule session_expiring warning. Wrapped in a dict so _handle_renew
+        # can cancel and restart it after the session expiry is extended.
+        expiry_warning_holder: dict[str, asyncio.Task] = {
+            "task": asyncio.create_task(self._send_session_expiring(ws, session)),
+        }
 
         # Send application-level keepalive messages so the JS client's
         # heartbeat watchdog stays satisfied (WS ping/pong frames do not
@@ -444,7 +470,7 @@ class HarvestWsView(HomeAssistantView):
         # --- Step 4a.2: Send renderer pack URL if token has one ---
         if token.renderer_pack:
             pack_mgr = self._resolve_pack_manager()
-            if pack_mgr and pack_mgr.agreed and pack_mgr.get(token.renderer_pack):
+            if pack_mgr and pack_mgr.agreed and pack_mgr.get_pack_path(token.renderer_pack):
                 await ws.send_json({
                     "type": "renderer_pack",
                     "url": f"/api/harvest/packs/{token.renderer_pack}.js",
@@ -454,15 +480,18 @@ class HarvestWsView(HomeAssistantView):
         # _send_initial_state and _register_listeners are inside the try block so
         # that a dropped connection during initial state push still triggers cleanup.
         try:
-            await self._send_initial_state(ws, session, real_entity_ids, token, outgoing_ids)
-            self._register_listeners(ws, session, token, outgoing_ids, listener_unsubs, real_entity_ids)
-            await self._message_loop(ws, session, token, outgoing_ids, listener_unsubs)
+            await self._send_initial_state(ws, session, real_entity_ids, token, outgoing_ids, forecast_cache)
+            self._register_listeners(ws, session, token, outgoing_ids, listener_unsubs, real_entity_ids, forecast_cache, forecast_unsubs)
+            await self._message_loop(ws, session, token, outgoing_ids, listener_unsubs, expiry_warning_holder, forecast_cache, forecast_unsubs)
         finally:
             # --- Step 7: Cleanup ---
-            expiry_warning_task.cancel()
+            expiry_warning_holder["task"].cancel()
             keepalive_task.cancel()
             for unsub in listener_unsubs.values():
                 unsub()
+            for unsub_list in forecast_unsubs.values():
+                for unsub in unsub_list:
+                    unsub()
             self._session_manager.terminate(session.session_id)
             self._rate_limiter.cleanup_session(session.session_id)
             self._activity_store.record_session(SessionEvent(
@@ -484,13 +513,15 @@ class HarvestWsView(HomeAssistantView):
         entity_ids: list[str],
         token: Token,
         outgoing_ids: dict[str, str],
+        forecast_cache: dict[str, list | None] | None = None,
     ) -> None:
         """Send interleaved entity_definition and state_update for each entity.
 
         For each entity_id:
         1. Build and send entity_definition
         2. Fetch current state from hass.states.get()
-        3. Build and send state_update (full attributes, initial=True)
+        3. For weather entities, fetch forecast via async_forecast_daily()
+        4. Build and send state_update (full attributes, initial=True)
         If entity does not exist, send entity_removed instead.
         """
         for real_id in entity_ids:
@@ -501,6 +532,15 @@ class HarvestWsView(HomeAssistantView):
             if state is None:
                 await ws.send_json({"type": "entity_removed", "entity_id": outgoing_id, "msg_id": None})
                 continue
+
+            # Fetch initial forecast only when show_forecast is explicitly enabled.
+            if (
+                forecast_cache is not None
+                and real_id.startswith("weather.")
+                and ea is not None
+                and ea.display_hints.get("show_forecast") is True
+            ):
+                await self._fetch_initial_forecast(real_id, forecast_cache)
 
             # Companion outgoing refs for this entity's definition.
             companion_refs = [
@@ -527,6 +567,7 @@ class HarvestWsView(HomeAssistantView):
                 token=token,
                 is_initial=True,
                 session=session,
+                forecast_cache=forecast_cache,
             )
             await ws.send_json(update)
 
@@ -537,6 +578,9 @@ class HarvestWsView(HomeAssistantView):
         token: Token,
         outgoing_ids: dict[str, str],
         listener_unsubs: dict[str, Callable],
+        expiry_warning_holder: dict[str, asyncio.Task] | None = None,
+        forecast_cache: dict[str, list | None] | None = None,
+        forecast_unsubs: dict[str, Callable] | None = None,
     ) -> None:
         """Process incoming messages until the connection closes.
 
@@ -554,7 +598,7 @@ class HarvestWsView(HomeAssistantView):
         async for raw in ws:
             if raw.type == aiohttp.WSMsgType.TEXT:
                 # Size check before parsing.
-                if len(raw.data) > max_bytes:
+                if len(raw.data.encode('utf-8')) > max_bytes:
                     _LOGGER.warning(
                         "HArvest: inbound message from session %s exceeds %d bytes. Closing.",
                         session.session_id, max_bytes,
@@ -599,14 +643,22 @@ class HarvestWsView(HomeAssistantView):
 
                 msg_type = msg.get("type")
 
+                client_sid = msg.get("session_id")
+                if client_sid is not None and client_sid != session.session_id:
+                    _LOGGER.warning(
+                        "HArvest: session_id mismatch from session %s (got %s). Dropping message.",
+                        session.session_id, client_sid,
+                    )
+                    continue
+
                 if msg_type == "command":
                     await self._handle_command(ws, msg, session, token)
                 elif msg_type == "subscribe":
-                    await self._handle_subscribe(ws, msg, session, token, outgoing_ids, listener_unsubs)
+                    await self._handle_subscribe(ws, msg, session, token, outgoing_ids, listener_unsubs, forecast_cache, forecast_unsubs)
                 elif msg_type == "unsubscribe":
-                    await self._handle_unsubscribe(ws, msg, session, token, listener_unsubs)
+                    await self._handle_unsubscribe(ws, msg, session, token, listener_unsubs, forecast_cache, forecast_unsubs)
                 elif msg_type == "renew":
-                    await self._handle_renew(ws, msg, session, token, outgoing_ids, listener_unsubs)
+                    await self._handle_renew(ws, msg, session, token, outgoing_ids, listener_unsubs, expiry_warning_holder, forecast_cache, forecast_unsubs)
                 elif msg_type == "history_request":
                     await self._handle_history_request(ws, msg, session, token, outgoing_ids)
                 elif msg_type is None:
@@ -627,7 +679,7 @@ class HarvestWsView(HomeAssistantView):
     ) -> None:
         """Process a command message.
 
-        Validates session_id, entity_id scope, capability (read-write required),
+        Validates entity_id scope, capability (read-write required),
         action against ALLOWED_SERVICES, and command rate limit.
         Strips unknown keys from data payload before forwarding.
         Calls hass.services.async_call() or action_manager.trigger().
@@ -746,6 +798,8 @@ class HarvestWsView(HomeAssistantView):
         token: Token,
         outgoing_ids: dict[str, str],
         listener_unsubs: dict[str, Callable],
+        forecast_cache: dict[str, list | None] | None = None,
+        forecast_unsubs: dict[str, Callable] | None = None,
     ) -> None:
         """Process a subscribe message.
 
@@ -784,10 +838,10 @@ class HarvestWsView(HomeAssistantView):
         await ws.send_json({"type": "subscribe_ok", "entity_ids": accepted_refs, "msg_id": msg_id})
 
         # Send interleaved entity_definition + state_update for each new entity.
-        await self._send_initial_state(ws, session, new_real_ids, token, outgoing_ids)
+        await self._send_initial_state(ws, session, new_real_ids, token, outgoing_ids, forecast_cache)
 
         # Register new listeners.
-        self._register_listeners(ws, session, token, outgoing_ids, listener_unsubs, new_real_ids)
+        self._register_listeners(ws, session, token, outgoing_ids, listener_unsubs, new_real_ids, forecast_cache, forecast_unsubs)
 
     async def _handle_unsubscribe(
         self,
@@ -796,6 +850,8 @@ class HarvestWsView(HomeAssistantView):
         session: Session,
         token: Token,
         listener_unsubs: dict[str, Callable],
+        forecast_cache: dict[str, list | None] | None = None,
+        forecast_unsubs: dict[str, Callable] | None = None,
     ) -> None:
         """Process an unsubscribe message.
 
@@ -831,6 +887,11 @@ class HarvestWsView(HomeAssistantView):
             unsub = listener_unsubs.pop(real_id, None)
             if unsub is not None:
                 unsub()
+            if forecast_unsubs is not None:
+                for fc_unsub in forecast_unsubs.pop(real_id, []):
+                    fc_unsub()
+            if forecast_cache is not None:
+                forecast_cache.pop(real_id, None)
 
     async def _handle_renew(
         self,
@@ -840,6 +901,9 @@ class HarvestWsView(HomeAssistantView):
         token: Token,
         outgoing_ids: dict[str, str],
         listener_unsubs: dict[str, Callable],
+        expiry_warning_holder: dict[str, asyncio.Task] | None = None,
+        forecast_cache: dict[str, list | None] | None = None,
+        forecast_unsubs: dict[str, Callable] | None = None,
     ) -> None:
         """Process a renew message.
 
@@ -891,8 +955,15 @@ class HarvestWsView(HomeAssistantView):
 
         # Resend interleaved entity_definition + state_update for all subscribed entities.
         await self._send_initial_state(
-            ws, session, list(session.subscribed_entity_ids), token, outgoing_ids
+            ws, session, list(session.subscribed_entity_ids), token, outgoing_ids, forecast_cache
         )
+
+        # Cancel and restart the expiry warning task with the new session expiry.
+        if expiry_warning_holder is not None:
+            expiry_warning_holder["task"].cancel()
+            expiry_warning_holder["task"] = asyncio.create_task(
+                self._send_session_expiring(ws, session)
+            )
 
     # ------------------------------------------------------------------
     # History
@@ -927,9 +998,10 @@ class HarvestWsView(HomeAssistantView):
         outgoing_id = outgoing_ids.get(real_id, real_id)
 
         ea = _find_entity_access(real_id, token)
-        hours = ea.hours if ea else 24
+        ea_hints = ea.display_hints if ea else {}
+        hours = msg.get("hours", ea_hints.get("hours", 24))
         hours = max(1, min(hours, 168))
-        period = ea.period if ea else 10
+        period = msg.get("period", ea_hints.get("period", 10))
         period = max(1, period)
         hours_in_minutes = hours * 60
         if period >= hours_in_minutes:
@@ -992,10 +1064,13 @@ class HarvestWsView(HomeAssistantView):
         outgoing_ids: dict[str, str],
         listener_unsubs: dict[str, Callable],
         entity_ids: list[str],
+        forecast_cache: dict[str, list | None] | None = None,
+        forecast_unsubs: dict[str, Callable] | None = None,
     ) -> None:
         """Register HA state_changed listeners for a set of entity IDs.
 
         One listener per entity per session. Stored in listener_unsubs for cleanup.
+        Also subscribes to weather forecast updates for weather entities.
         """
         for real_id in entity_ids:
             if real_id in listener_unsubs:
@@ -1005,13 +1080,22 @@ class HarvestWsView(HomeAssistantView):
             def _make_callback(eid: str) -> Callable:
                 @callback
                 def on_state_changed(event) -> None:
-                    self._on_state_changed(event, eid, ws, session, token, outgoing_ids)
+                    self._on_state_changed(event, eid, ws, session, token, outgoing_ids, forecast_cache)
                 return on_state_changed
 
             unsub = async_track_state_change_event(
                 self._hass, [real_id], _make_callback(real_id)
             )
             listener_unsubs[real_id] = unsub
+
+            ea = _find_entity_access(real_id, token)
+            if (
+                forecast_cache is not None
+                and forecast_unsubs is not None
+                and ea is not None
+                and ea.display_hints.get("show_forecast") is True
+            ):
+                self._subscribe_forecast(real_id, ws, session, token, outgoing_ids, forecast_cache, forecast_unsubs)
 
     @callback
     def _on_state_changed(
@@ -1022,6 +1106,7 @@ class HarvestWsView(HomeAssistantView):
         session: Session,
         token: Token,
         outgoing_ids: dict[str, str],
+        forecast_cache: dict[str, list | None] | None = None,
     ) -> None:
         """HA event callback for state_changed events.
 
@@ -1045,7 +1130,7 @@ class HarvestWsView(HomeAssistantView):
         if not self._rate_limiter.check_push(session.session_id, entity_id, push_rate):
             outgoing_id = outgoing_ids.get(entity_id, entity_id)
             self._hass.async_create_task(
-                self._deferred_state_push(ws, entity_id, outgoing_id, token, session)
+                self._deferred_state_push(ws, entity_id, outgoing_id, token, session, forecast_cache)
             )
             return
 
@@ -1057,6 +1142,7 @@ class HarvestWsView(HomeAssistantView):
             token=token,
             is_initial=False,
             session=session,
+            forecast_cache=forecast_cache,
         )
         _fire(ws.send_json(update))
 
@@ -1067,6 +1153,7 @@ class HarvestWsView(HomeAssistantView):
         outgoing_id: str,
         token: Token,
         session: Session,
+        forecast_cache: dict[str, list | None] | None = None,
     ) -> None:
         """Push the current HA state for entity_id after a 1-second delay.
 
@@ -1088,6 +1175,7 @@ class HarvestWsView(HomeAssistantView):
             token=token,
             is_initial=False,
             session=session,
+            forecast_cache=forecast_cache,
         )
         try:
             await ws.send_json(update)
@@ -1106,6 +1194,7 @@ class HarvestWsView(HomeAssistantView):
         token: Token,
         is_initial: bool,
         session: Session | None = None,
+        forecast_cache: dict[str, dict[str, list | None]] | None = None,
     ) -> dict:
         """Build a state_update message dict.
 
@@ -1114,18 +1203,27 @@ class HarvestWsView(HomeAssistantView):
         session.last_sent_attributes[entity_id]. Omits attributes_delta
         if only state changed and no attributes changed.
         Applies token_manager.filter_attributes() before building.
+        Injects cached forecast data for weather entities after filtering.
         Updates session.last_sent_attributes after building.
         """
-        domain = real_id.split(".")[0]
         raw_attrs = dict(state.attributes)
 
         # Filter via token denylist and per-entity exclusions.
         filtered_attrs = self._token_manager.filter_attributes(real_id, token, raw_attrs)
 
-        # Split into standard and extended, then sanitize for JSON.
-        standard, extended = split_attributes(domain, filtered_attrs)
-        standard = _safe_json_value(standard)
-        extended = _safe_json_value(extended)
+        # Apply global blocklist + size cap, then sanitize for JSON.
+        attrs = filter_attributes(filtered_attrs)
+        attrs = _safe_json_value(attrs)
+
+        # Inject forecast data for weather entities (bypasses size cap).
+        if forecast_cache is not None and real_id in forecast_cache:
+            fc = forecast_cache[real_id]
+            daily = fc.get("daily")
+            hourly = fc.get("hourly")
+            if daily is not None:
+                attrs["forecast_daily"] = _safe_json_value(daily)
+            if hourly is not None:
+                attrs["forecast_hourly"] = _safe_json_value(hourly)
 
         last_changed = state.last_changed.isoformat() if hasattr(state, "last_changed") else None
         last_updated = state.last_updated.isoformat() if hasattr(state, "last_updated") else None
@@ -1135,25 +1233,24 @@ class HarvestWsView(HomeAssistantView):
                 "type": "state_update",
                 "entity_id": outgoing_id,
                 "state": state.state,
-                "attributes": standard,
-                "extended_attributes": extended,
+                "attributes": attrs,
                 "last_changed": last_changed,
                 "last_updated": last_updated,
                 "initial": True,
                 "msg_id": None,
             }
             if session is not None:
-                session.last_sent_attributes[real_id] = standard
+                session.last_sent_attributes[real_id] = attrs
             return msg
 
         # Delta mode.
         prev = session.last_sent_attributes.get(real_id, {}) if session is not None else {}
 
-        changed = {k: v for k, v in standard.items() if prev.get(k) != v}
-        removed = [k for k in prev if k not in standard]
+        changed = {k: v for k, v in attrs.items() if prev.get(k) != v}
+        removed = [k for k in prev if k not in attrs]
 
         if session is not None:
-            session.last_sent_attributes[real_id] = standard
+            session.last_sent_attributes[real_id] = attrs
 
         msg = {
             "type": "state_update",
@@ -1170,6 +1267,107 @@ class HarvestWsView(HomeAssistantView):
         # If neither changed nor removed, attributes_delta is omitted entirely per spec.
 
         return msg
+
+    # ------------------------------------------------------------------
+    # Weather forecast
+    # ------------------------------------------------------------------
+
+    async def _fetch_initial_forecast(
+        self,
+        entity_id: str,
+        forecast_cache: dict[str, dict[str, list | None]],
+    ) -> None:
+        """Fetch daily and hourly forecasts for a weather entity and populate the cache."""
+        try:
+            component = self._hass.data.get("weather")
+            if component is None:
+                return
+            entity = component.get_entity(entity_id)
+            if entity is None:
+                return
+            from homeassistant.components.weather import WeatherEntityFeature
+            features = entity.supported_features or 0
+            entry: dict[str, list | None] = {}
+            if features & WeatherEntityFeature.FORECAST_DAILY:
+                raw = await entity.async_forecast_daily()
+                entry["daily"] = _normalize_forecast(raw)
+            if features & WeatherEntityFeature.FORECAST_HOURLY:
+                raw = await entity.async_forecast_hourly()
+                entry["hourly"] = _normalize_forecast(raw)
+            if entry:
+                forecast_cache[entity_id] = entry
+        except Exception:
+            _LOGGER.debug("HArvest: could not fetch initial forecast for %s", entity_id)
+
+    def _subscribe_forecast(
+        self,
+        entity_id: str,
+        ws: WebSocketResponse,
+        session: Session,
+        token: Token,
+        outgoing_ids: dict[str, str],
+        forecast_cache: dict[str, dict[str, list | None]],
+        forecast_unsubs: dict[str, list[Callable]],
+    ) -> None:
+        """Subscribe to ongoing forecast updates (daily + hourly) for a weather entity."""
+        if not entity_id.startswith("weather."):
+            return
+        if entity_id in forecast_unsubs:
+            return
+
+        component = self._hass.data.get("weather")
+        if component is None:
+            return
+        entity = component.get_entity(entity_id)
+        if entity is None:
+            return
+
+        try:
+            from homeassistant.components.weather import WeatherEntityFeature
+            features = entity.supported_features or 0
+        except (ImportError, AttributeError):
+            return
+
+        def _make_callback(fc_type: str):
+            @callback
+            def on_forecast(forecast: list | None) -> None:
+                if entity_id not in forecast_cache:
+                    forecast_cache[entity_id] = {}
+                forecast_cache[entity_id][fc_type] = _normalize_forecast(forecast)
+                if entity_id not in session.subscribed_entity_ids:
+                    return
+                if ws.closed:
+                    return
+                state = self._hass.states.get(entity_id)
+                if state is None:
+                    return
+                outgoing_id = outgoing_ids.get(entity_id, entity_id)
+                update = self._build_state_update_message(
+                    real_id=entity_id,
+                    outgoing_id=outgoing_id,
+                    state=state,
+                    token=token,
+                    is_initial=False,
+                    session=session,
+                    forecast_cache=forecast_cache,
+                )
+                _fire(ws.send_json(update))
+            return on_forecast
+
+        unsubs: list[Callable] = []
+        for fc_type, feature_flag, method_name in (
+            ("daily", WeatherEntityFeature.FORECAST_DAILY, "daily"),
+            ("hourly", WeatherEntityFeature.FORECAST_HOURLY, "hourly"),
+        ):
+            if not features & feature_flag:
+                continue
+            try:
+                unsub = entity.async_subscribe_forecast(method_name, _make_callback(fc_type))
+                unsubs.append(unsub)
+            except Exception:
+                _LOGGER.debug("HArvest: could not subscribe to %s forecast for %s", fc_type, entity_id)
+        if unsubs:
+            forecast_unsubs[entity_id] = unsubs
 
     # ------------------------------------------------------------------
     # Helpers

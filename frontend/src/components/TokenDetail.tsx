@@ -5,16 +5,18 @@
  * + activity (right). Code blocks use step-pill labels.
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import type { Token, TokenUpdate, Session, ActivityPage, ThemeDefinition } from "../types";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import type { Token, TokenUpdate, Session, ActivityPage, ThemeDefinition, ThemeCapabilities, HAEntityDetail } from "../types";
 import { validateLabel, DEFAULT_WIDGET_SCRIPT_URL } from "../types";
-import { api } from "../api";
+import { api, getHaDarkMode } from "../api";
 import { StatusBadge, ConfirmDialog, Spinner, ErrorBanner, Card, Hint, EventRow, fmtRel, EntityAutocomplete, useThemeThumbs } from "./Shared";
 import { Icon } from "./Icon";
 import { Toggle } from "./Toggle";
-import { WidgetPreview } from "./WidgetPreview";
+import { loadWidgetScript, loadPackScript, generateMockHistory } from "./WidgetPreview";
+
 import { loadKnownOrigins, addKnownOrigin, removeKnownOrigin, validateOriginUrl, displayOriginLabel } from "./originMemory";
 import { loadEntityCache, getEntityCache } from "../entityCache";
+import { WIDGET_ICONS, WIDGET_ICON_NAMES } from "../widgetIcons";
 
 // ---------------------------------------------------------------------------
 // Clipboard hook (works in non-secure contexts)
@@ -323,140 +325,15 @@ function CodeSection({ token, setToken, setError, hmacSecret, bare }: { token: T
 
 function themeIdToUrl(id: string): string {
   if (id === "default") return "";
-  if (id.startsWith("hth_")) return `custom:${id}`;
+  if (id.startsWith("hth_")) return `user:${id}`;
   return `bundled:${id}`;
 }
 
 function themeUrlToId(url: string): string {
   if (!url) return "default";
   if (url.startsWith("bundled:")) return url.slice(8);
-  if (url.startsWith("custom:")) return url.slice(7);
+  if (url.startsWith("user:")) return url.slice(5);
   return url;
-}
-
-// ---------------------------------------------------------------------------
-function ThemeEditor({ token, setToken, setError, bare, onSelectedTheme, saving, setSaving }: { token: Token; setToken: (t: Token) => void; setError: (e: string | null) => void; bare?: boolean; onSelectedTheme?: (theme: ThemeDefinition | null) => void; saving?: boolean; setSaving?: (v: boolean) => void }) {
-  const [themes, setThemes] = useState<ThemeDefinition[]>([]);
-  const [packsAgreed, setPacksAgreed] = useState<boolean | null>(null);
-  const [showAgree, setShowAgree] = useState(false);
-  const [agreeText, setAgreeText] = useState("");
-  const [pendingThemeId, setPendingThemeId] = useState<string | null>(null);
-
-  useEffect(() => { api.themes.list().then(setThemes).catch(() => {}); }, []);
-  useEffect(() => { api.packs.list().then(d => setPacksAgreed(d.agreed)).catch(() => {}); }, []);
-  const thumbUrls = useThemeThumbs(themes);
-
-  const currentId = themeUrlToId(token.theme_url ?? "");
-  const selectedTheme = themes.find(t => t.theme_id === currentId) ?? null;
-
-  useEffect(() => { onSelectedTheme?.(selectedTheme); }, [selectedTheme, onSelectedTheme]);
-
-  const applyTheme = async (themeId: string) => {
-    setSaving?.(true);
-    try {
-      const updated = await api.tokens.update(token.token_id, { theme_url: themeIdToUrl(themeId) });
-      setToken(updated);
-    } catch (e) { setError(String(e)); }
-    finally { setSaving?.(false); }
-  };
-
-  const change = (themeId: string) => {
-    const target = themes.find(t => t.theme_id === themeId);
-    if (target?.renderer_pack && !packsAgreed) {
-      setPendingThemeId(themeId);
-      setShowAgree(true);
-      return;
-    }
-    applyTheme(themeId);
-  };
-
-  const confirmAgree = async () => {
-    try {
-      await api.packs.agree(true);
-      setPacksAgreed(true);
-      setShowAgree(false);
-      setAgreeText("");
-      if (pendingThemeId) {
-        await applyTheme(pendingThemeId);
-        setPendingThemeId(null);
-      }
-    } catch (e) { setError(String(e)); }
-  };
-
-  const themeContent = (
-    <div className="col" style={{ gap: 12 }}>
-      <div className="theme-strip">
-            {themes.map(t => (
-              <button
-                key={t.theme_id}
-                className={`theme-strip-item${currentId === t.theme_id ? " selected" : ""}`}
-                onClick={() => change(t.theme_id)}
-              >
-                <div className="theme-thumb-wrap">
-                  {thumbUrls[t.theme_id] ? (
-                    <img className="theme-strip-thumb" src={thumbUrls[t.theme_id]} alt={t.name} draggable={false} />
-                  ) : (
-                    <div className="theme-strip-thumb" />
-                  )}
-                  {t.renderer_pack && (
-                    <span className="theme-pack-star" title="Theme includes a custom renderer pack">&#9733;</span>
-                  )}
-                </div>
-                <span className="theme-strip-name">{t.name}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-  );
-
-  const agreeDialog = showAgree && (
-    <div className="overlay" onClick={() => { setShowAgree(false); setAgreeText(""); setPendingThemeId(null); }}>
-      <div className="dialog" onClick={e => e.stopPropagation()}>
-        <h3 className="dialog-title">Renderer Pack Warning</h3>
-        <div className="dialog-body">
-          <p>
-            This theme includes a renderer pack that executes JavaScript from your HA instance
-            inside the widget on the embedding page. Only enable themes with packs you trust.
-          </p>
-          <p style={{ marginTop: 12 }}>
-            Type <strong>AGREE</strong> below to confirm.
-          </p>
-          <input
-            type="text"
-            className="input"
-            value={agreeText}
-            onChange={e => setAgreeText(e.target.value)}
-            placeholder="Type AGREE"
-            autoFocus
-            style={{ marginTop: 8 }}
-          />
-        </div>
-        <div className="dialog-actions">
-          <button className="btn btn-ghost" onClick={() => { setShowAgree(false); setAgreeText(""); setPendingThemeId(null); }}>
-            Cancel
-          </button>
-          <button className="btn btn-primary" disabled={agreeText !== "AGREE"} onClick={confirmAgree}>
-            Confirm
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
-  if (bare) {
-    return (
-      <>
-        <div className="card-body">{themeContent}</div>
-        {agreeDialog}
-      </>
-    );
-  }
-  return (
-    <>
-      <Card title="Theme">{themeContent}</Card>
-      {agreeDialog}
-    </>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -466,14 +343,15 @@ function ThemeEditor({ token, setToken, setError, bare, onSelectedTheme, saving,
 const LANG_OPTIONS = [
   { value: "auto", label: "Auto-detect" },
   { value: "en", label: "English" },
-  { value: "de", label: "German" },
-  { value: "fr", label: "French" },
-  { value: "es", label: "Spanish" },
-  { value: "pt", label: "Portuguese" },
-  { value: "nl", label: "Dutch" },
-  { value: "ja", label: "Japanese" },
-  { value: "zh", label: "Chinese" },
-  { value: "th", label: "Thai" },
+  { value: "de", label: "Deutsch" },
+  { value: "fr", label: "Français" },
+  { value: "es", label: "Español" },
+  { value: "pt", label: "Português" },
+  { value: "nl", label: "Nederlands" },
+  { value: "ja", label: "日本語" },
+  { value: "zh-Hans", label: "简体中文" },
+  { value: "zh-Hant", label: "繁體中文" },
+  { value: "th", label: "ไทย" },
 ];
 
 const ON_OFFLINE_OPTIONS = [
@@ -701,50 +579,360 @@ interface EntitiesEditorProps {
   setError: (e: string) => void;
 }
 
-const MAX_COMPANIONS = 4;
 const COMPANION_ALLOWED_DOMAINS = new Set(["light", "switch", "binary_sensor", "input_boolean", "cover", "remote", "lock"]);
 const HISTORY_DOMAINS = new Set(["sensor", "input_number", "binary_sensor"]);
 const HOURS_OPTIONS = [1, 6, 12, 24, 48, 72, 168];
 
+const ATTR_HINT_MAP: Record<string, Record<string, string>> = {
+  light: { show_brightness: "brightness", show_color_temp: "color_temp", show_rgb: "rgb_color" },
+  climate: { show_hvac_modes: "hvac_modes", show_presets: "preset_modes", show_fan_mode: "fan_modes", show_swing_mode: "swing_modes" },
+  cover: { show_position: "current_position", show_tilt: "current_tilt_position" },
+  media_player: { show_volume: "volume_level", show_source: "source_list" },
+};
+
+function reverseAttrMap(domain: string): Record<string, string> {
+  const map = ATTR_HINT_MAP[domain];
+  if (!map) return {};
+  return Object.fromEntries(Object.entries(map).map(([k, v]) => [v, k]));
+}
+
+// ---------------------------------------------------------------------------
+// Entity settings live preview
+// ---------------------------------------------------------------------------
+
+const _PREVIEW_BLOCKED_ATTRS = new Set(["supported_features", "supported_color_modes", "friendly_name", "attribution", "assumed_state", "editable"]);
+
+const _MOCK_WEATHER_FORECAST_DAILY = [
+  { datetime: "2025-06-10T12:00:00", condition: "sunny",        temperature: 27, templow: 18 },
+  { datetime: "2025-06-11T12:00:00", condition: "partlycloudy", temperature: 24, templow: 16 },
+  { datetime: "2025-06-12T12:00:00", condition: "rainy",        temperature: 19, templow: 13 },
+  { datetime: "2025-06-13T12:00:00", condition: "cloudy",       temperature: 21, templow: 14 },
+  { datetime: "2025-06-14T12:00:00", condition: "sunny",        temperature: 26, templow: 17 },
+];
+const _MOCK_WEATHER_FORECAST_HOURLY = [
+  { datetime: "2025-06-10T08:00:00", condition: "sunny",        temperature: 20 },
+  { datetime: "2025-06-10T09:00:00", condition: "sunny",        temperature: 21 },
+  { datetime: "2025-06-10T10:00:00", condition: "partlycloudy", temperature: 23 },
+  { datetime: "2025-06-10T11:00:00", condition: "partlycloudy", temperature: 24 },
+  { datetime: "2025-06-10T12:00:00", condition: "cloudy",       temperature: 25 },
+  { datetime: "2025-06-10T13:00:00", condition: "cloudy",       temperature: 26 },
+  { datetime: "2025-06-10T14:00:00", condition: "partlycloudy", temperature: 26 },
+  { datetime: "2025-06-10T15:00:00", condition: "sunny",        temperature: 25 },
+];
+
+const _PREVIEW_ICON_MAP: Record<string, Record<string, string>> = {
+  light:          { on: "mdi:lightbulb",            "*": "mdi:lightbulb-outline" },
+  switch:         { on: "mdi:toggle-switch",         "*": "mdi:toggle-switch-off-outline" },
+  fan:            { on: "mdi:fan",                   "*": "mdi:fan-off" },
+  cover:          { open: "mdi:window-shutter-open", "*": "mdi:window-shutter" },
+  climate:        { "*": "mdi:thermostat" },
+  media_player:   { playing: "mdi:cast-connected",   "*": "mdi:cast" },
+  remote:         { "*": "mdi:remote" },
+  input_boolean:  { on: "mdi:toggle-switch",         "*": "mdi:toggle-switch-off-outline" },
+  input_number:   { "*": "mdi:numeric" },
+  input_select:   { "*": "mdi:format-list-bulleted" },
+  sensor:         { "*": "mdi:gauge" },
+  binary_sensor:  { on: "mdi:radiobox-marked",       "*": "mdi:radiobox-blank" },
+  harvest_action: { triggered: "mdi:play-circle",    "*": "mdi:play-circle-outline" },
+  timer:          { active: "mdi:timer", paused: "mdi:timer-pause", "*": "mdi:timer-outline" },
+  weather:        { sunny: "mdi:weather-sunny",       "*": "mdi:weather-cloudy" },
+};
+
+function buildEntityDefFromHADetail(entity: HAEntityDetail, ea: Token["entities"][number]): Record<string, unknown> {
+  const domain = entity.entity_id.split(".")[0];
+  const attrs = entity.attributes;
+  const friendly = ea.name_override || (attrs.friendly_name as string) || entity.entity_id;
+  const bitmask = (attrs.supported_features as number) ?? 0;
+  const supported: string[] = [];
+  const featureConfig: Record<string, unknown> = {};
+
+  if (domain === "light") {
+    const modes = new Set((attrs.supported_color_modes as string[]) ?? []);
+    const dimmable = new Set(["brightness", "color_temp", "hs", "xy", "rgb", "rgbw", "rgbww", "white"]);
+    if ([...modes].some(m => dimmable.has(m))) supported.push("brightness");
+    if (modes.has("color_temp")) supported.push("color_temp");
+    if ([...modes].some(m => new Set(["hs", "xy", "rgb", "rgbw", "rgbww"]).has(m))) supported.push("rgb_color");
+    featureConfig.min_brightness = 0; featureConfig.max_brightness = 255;
+    if (attrs.min_mireds != null) featureConfig.min_color_temp = attrs.min_mireds;
+    if (attrs.max_mireds != null) featureConfig.max_color_temp = attrs.max_mireds;
+    if (attrs.min_color_temp_kelvin != null) featureConfig.min_color_temp_kelvin = attrs.min_color_temp_kelvin;
+    if (attrs.max_color_temp_kelvin != null) featureConfig.max_color_temp_kelvin = attrs.max_color_temp_kelvin;
+  } else if (domain === "fan") {
+    if (bitmask & 1) supported.push("set_speed");
+    if (bitmask & 2) supported.push("oscillate");
+    if (bitmask & 4) supported.push("direction");
+    if (bitmask & 8) supported.push("preset_mode");
+    const step = attrs.percentage_step as number;
+    if (step > 0) { featureConfig.percentage_step = step; featureConfig.speed_count = Math.round(100 / step); }
+    if (attrs.preset_modes) featureConfig.preset_modes = attrs.preset_modes;
+  } else if (domain === "cover") {
+    if (bitmask & 4) supported.push("set_position");
+    supported.push("buttons");
+  } else if (domain === "climate") {
+    if (bitmask & 1) supported.push("target_temperature");
+    if (bitmask & 4) supported.push("fan_mode");
+    if (bitmask & 8) supported.push("preset_mode");
+    if (bitmask & 16) supported.push("swing_mode");
+    if (attrs.min_temp != null) featureConfig.min_temp = attrs.min_temp;
+    if (attrs.max_temp != null) featureConfig.max_temp = attrs.max_temp;
+    if (attrs.target_temp_step != null) featureConfig.temp_step = attrs.target_temp_step;
+    if (attrs.hvac_modes) featureConfig.hvac_modes = attrs.hvac_modes;
+    if (attrs.fan_modes) featureConfig.fan_modes = attrs.fan_modes;
+    if (attrs.preset_modes) featureConfig.preset_modes = attrs.preset_modes;
+    if (attrs.swing_modes) featureConfig.swing_modes = attrs.swing_modes;
+  } else if (domain === "media_player") {
+    if (bitmask & 1) supported.push("play_pause");
+    if (bitmask & 2) supported.push("next_track");
+    if (bitmask & 4) supported.push("previous_track");
+    if (bitmask & 8) supported.push("volume_set");
+    if (bitmask & 16) supported.push("volume_step");
+  } else if (domain === "input_number") {
+    if (attrs.min != null) featureConfig.min = attrs.min;
+    if (attrs.max != null) featureConfig.max = attrs.max;
+    if (attrs.step != null) featureConfig.step = attrs.step;
+  }
+
+  const baseIconMap = _PREVIEW_ICON_MAP[domain] ?? { "*": "mdi:help-circle" };
+  const iconMap = ea.icon_override ? { "*": ea.icon_override } : baseIconMap;
+  const icon = ea.icon_override ?? (baseIconMap[entity.state] ?? baseIconMap["*"] ?? "mdi:help-circle");
+
+  const filteredAttrs: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(attrs)) {
+    if (!_PREVIEW_BLOCKED_ATTRS.has(k)) filteredAttrs[k] = v;
+  }
+
+  return {
+    entity_id: entity.entity_id,
+    domain,
+    device_class: (attrs.device_class as string) ?? null,
+    friendly_name: friendly,
+    capabilities: ea.capabilities,
+    supported_features: supported,
+    feature_config: featureConfig,
+    icon,
+    icon_state_map: iconMap,
+    unit_of_measurement: (attrs.unit_of_measurement as string) ?? null,
+    color_scheme: ea.color_scheme,
+    display_hints: ea.display_hints ?? {},
+    gesture_config: ea.gesture_config ?? {},
+    companions: [],
+    support_tier: 1,
+  };
+}
+
+function EntityPreview({
+  entity,
+  entityAccess,
+  theme,
+  companions = [],
+}: {
+  entity: HAEntityDetail;
+  entityAccess: Token["entities"][number];
+  theme: ThemeDefinition | null;
+  companions?: Token["entities"][number][];
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLElement | null>(null);
+  const [ready, setReady] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const packId = theme?.renderer_pack ? theme.theme_id : undefined;
+
+  useEffect(() => {
+    loadWidgetScript()
+      .then(() => packId ? loadPackScript(packId) : Promise.resolve())
+      .then(() => setReady(true))
+      .catch(() => setLoadError(true));
+  }, [packId]);
+
+  const themeVars = useMemo(() => {
+    if (!theme) return {};
+    const cs = entityAccess.color_scheme === "dark" ? "dark"
+      : entityAccess.color_scheme === "light" ? "light"
+      : getHaDarkMode() ? "dark" : "light";
+    return cs === "dark" ? { ...theme.variables, ...theme.dark_variables } : { ...theme.variables };
+  }, [theme?.theme_id, entityAccess.color_scheme]);
+
+  const cardKey = `${entity.entity_id}:${entity.state}:${JSON.stringify(entityAccess)}:${theme?.theme_id ?? ""}:${companions.map(c => c.entity_id).join(",")}`;
+
+  useEffect(() => {
+    if (!ready || !containerRef.current || !window.HArvest) return;
+    const container = containerRef.current;
+    container.innerHTML = "";
+    cardRef.current = null;
+    const domain = entity.entity_id.split(".")[0];
+    const entityDef = buildEntityDefFromHADetail(entity, entityAccess);
+
+    // Include companions so the preview card renders companion pills.
+    entityDef.preview_companions = companions.map(c => ({
+      entity_id: c.entity_id,
+      capabilities: c.capabilities,
+      domain: c.entity_id.split(".")[0],
+    }));
+
+    let attrs: Record<string, unknown>;
+    let previewState = entity.state;
+
+    if (domain === "weather") {
+      previewState = "partlycloudy";
+      const showForecast = entityAccess.display_hints?.show_forecast === true;
+      attrs = {
+        temperature: 22, temperature_unit: "°C",
+        humidity: 65,
+        wind_speed: 15, wind_speed_unit: "km/h",
+        pressure: 1013, pressure_unit: "hPa",
+        ...(showForecast ? {
+          forecast_daily: _MOCK_WEATHER_FORECAST_DAILY,
+          forecast: _MOCK_WEATHER_FORECAST_DAILY,
+          forecast_hourly: _MOCK_WEATHER_FORECAST_HOURLY,
+        } : {}),
+      };
+    } else {
+      const excludedAttrs = new Set(entityAccess.exclude_attributes ?? []);
+      attrs = {};
+      for (const [k, v] of Object.entries(entity.attributes)) {
+        if (!_PREVIEW_BLOCKED_ATTRS.has(k) && !excludedAttrs.has(k)) attrs[k] = v;
+      }
+    }
+
+    // Build options - include graph + mock history when display_hints.graph is set.
+    const graphType = (entityAccess.display_hints?.graph as string) ?? null;
+    const opts: Record<string, unknown> = {};
+    if (packId) opts.packId = packId;
+    if (graphType && graphType !== "none") {
+      opts.graph = graphType;
+      opts.hours = 24;
+      opts.historyData = generateMockHistory(domain, graphType as "line" | "bar" | "step", entity.state);
+    }
+
+    const card = window.HArvest!.preview(
+      container, entityDef, previewState, attrs, themeVars,
+      Object.keys(opts).length ? opts as never : undefined,
+    );
+    cardRef.current = card;
+    return () => { container.innerHTML = ""; cardRef.current = null; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, cardKey, JSON.stringify(themeVars)]);
+
+  if (loadError) return <div className="muted" style={{ fontSize: 12, padding: "8px 0" }}>Preview unavailable.</div>;
+  if (!ready) return <div style={{ display: "flex", justifyContent: "center", padding: 12 }}><Spinner size={20} /></div>;
+  return <div ref={containerRef} className="theme-preview-widget" style={{ display: "flex", justifyContent: "center", minHeight: 100, padding: "12px 0" }} />;
+}
+
+function hasFeature(cap: ThemeCapabilities | null, domain: string, feature: string): boolean {
+  if (!cap) return true;
+  const dc = (cap as Record<string, { features?: string[]; display_modes?: string[] }>)[domain];
+  if (!dc) return true;
+  const list = dc.features ?? dc.display_modes;
+  if (!list) return true;
+  return list.includes(feature);
+}
+
 function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError, bare }: EntitiesEditorProps & { bare?: boolean }) {
-  const [addInput, setAddInput]         = useState("");
-  const [companionInputs, setCompanionInputs] = useState<Record<string, string>>({});
-  const [adding,   setAdding]           = useState(false);
+  const [addInput, setAddInput] = useState("");
+  const [adding, setAdding] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
-  const [expandedCompanions, setExpandedCompanions] = useState<Set<string>>(new Set());
-  const [expandedSettings, setExpandedSettings] = useState<Set<string>>(new Set());
+  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
+  const [themeFilter, setThemeFilter] = useState("");
+  const [themes, setThemes] = useState<ThemeDefinition[]>([]);
+  const [packsAgreed, setPacksAgreed] = useState<boolean | null>(null);
+  const [showAgree, setShowAgree] = useState(false);
+  const [agreeText, setAgreeText] = useState("");
+  const [pendingThemeId, setPendingThemeId] = useState<string | null>(null);
+  const [nameInput, setNameInput] = useState("");
+  const [iconPickerOpen, setIconPickerOpen] = useState(false);
+  const [iconFilter, setIconFilter] = useState("");
+  const [previewBgTone, setPreviewBgTone] = useState(0);
+  const [showCompanions, setShowCompanions] = useState(false);
   const [attrCache, setAttrCache] = useState<Record<string, string[]>>({});
   const [attrLoading, setAttrLoading] = useState<Set<string>>(new Set());
   const [haActionEntities, setHaActionEntities] = useState<import("../types").HAEntity[]>([]);
+  const [entityDetail, setEntityDetail] = useState<Record<string, HAEntityDetail>>({});
+  const [localEntities, setLocalEntities] = useState<Token["entities"] | null>(null);
+  const [companionInputs, setCompanionInputs] = useState<Record<string, string>>({});
 
-  useEffect(() => {
-    if (getEntityCache().length === 0) loadEntityCache();
-  }, []);
-
+  useEffect(() => { if (getEntityCache().length === 0) loadEntityCache(); }, []);
   useEffect(() => {
     api.entities.list()
       .then(list => setHaActionEntities(list.filter(e => e.domain === "harvest_action")))
       .catch(() => {});
   }, []);
+  useEffect(() => { api.themes.list().then(setThemes).catch(() => {}); }, []);
+  useEffect(() => { api.packs.list().then(d => setPacksAgreed(d.agreed)).catch(() => {}); }, []);
 
-  const canEdit = !readonly && !saving;
-  const existingIds = token.entities.map(e => e.entity_id);
-  const grouped = groupEntities(token.entities);
+  useEffect(() => {
+    if (selectedEntityId && !attrCache[selectedEntityId]) {
+      setAttrLoading(prev => new Set(prev).add(selectedEntityId));
+      api.ha.entityAttributes(selectedEntityId)
+        .then(keys => setAttrCache(prev => ({ ...prev, [selectedEntityId]: keys })))
+        .catch(() => {})
+        .finally(() => setAttrLoading(prev => {
+          const next = new Set(prev);
+          next.delete(selectedEntityId);
+          return next;
+        }));
+    }
+  }, [selectedEntityId]);
+
+  useEffect(() => {
+    if (!selectedEntityId) return;
+    api.entities.get(selectedEntityId)
+      .then(detail => setEntityDetail(prev => ({ ...prev, [selectedEntityId]: detail })))
+      .catch(() => {});
+  }, [selectedEntityId]);
+
+  const canEdit = !readonly;
+  const entities = localEntities ?? token.entities;
+  const existingIds = entities.map(e => e.entity_id);
+  const grouped = groupEntities(entities);
+  const thumbUrls = useThemeThumbs(themes);
+  const currentThemeId = themeUrlToId(token.theme_url ?? "");
+  const selectedTheme = themes.find(t => t.theme_id === currentThemeId) ?? null;
+  const packCap = selectedTheme?.capabilities ?? null;
+
+  const selectedEntity = selectedEntityId
+    ? entities.find(e => e.entity_id === selectedEntityId && !e.companion_of) ?? null
+    : null;
+  const selectedDomain = selectedEntity ? selectedEntity.entity_id.split(".")[0] : null;
+  const selectedGroup = selectedEntity
+    ? grouped.find(g => g.primary.entity_id === selectedEntityId) ?? null
+    : null;
+
+  const filteredThemes = themeFilter
+    ? themes.filter(t => {
+        const q = themeFilter.toLowerCase();
+        return t.name.toLowerCase().includes(q) || t.theme_id.toLowerCase().includes(q);
+      })
+    : themes;
+
+  useEffect(() => {
+    const haEntity = getEntityCache().find(e => e.entity_id === selectedEntity?.entity_id);
+    setNameInput(selectedEntity?.name_override ?? haEntity?.friendly_name ?? "");
+    const hasCompanions = selectedEntityId
+      ? entities.some(e => e.companion_of === selectedEntityId)
+      : false;
+    setShowCompanions(hasCompanions);
+    setIconPickerOpen(false);
+    setIconFilter("");
+  }, [selectedEntityId]);
+
+  useEffect(() => {
+    if (selectedEntityId && !entities.some(e => e.entity_id === selectedEntityId && !e.companion_of)) {
+      setSelectedEntityId(null);
+    }
+  }, [entities, selectedEntityId]);
 
   const patchEntities = async (updated: Token["entities"]) => {
+    setLocalEntities(updated);
     setSaving(true);
     try {
       const t = await api.tokens.update(token.token_id, { entities: updated });
       setToken(t);
-    } catch (err) { setError(String(err)); }
-    finally { setSaving(false); }
-  };
-
-  const toggleCap = (entityId: string, newCap: "read" | "read-write") => {
-    if (!canEdit) return;
-    patchEntities(token.entities.map(en =>
-      en.entity_id === entityId ? { ...en, capabilities: newCap } : en
-    ));
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLocalEntities(null);
+      setSaving(false);
+    }
   };
 
   const addEntity = async (entityId: string) => {
@@ -755,19 +943,18 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
       const result = await api.tokens.generateAlias(entityId);
       alias = result.alias;
     } catch { /* alias stays null */ }
-
-    const defaultCap = token.entities[0]?.capabilities ?? "read";
-    const updated = [...token.entities, {
+    const defaultCap = entities[0]?.capabilities ?? "read";
+    const updated = [...entities, {
       entity_id: entityId,
       alias,
       capabilities: defaultCap,
       exclude_attributes: [] as string[],
       companion_of: null,
-      graph: null,
-      hours: 24,
-      period: 10,
-      animate: false,
       gesture_config: {},
+      name_override: null,
+      icon_override: null,
+      color_scheme: "auto" as const,
+      display_hints: {},
     }];
     await patchEntities(updated);
     setAdding(false);
@@ -782,19 +969,18 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
       const result = await api.tokens.generateAlias(companionEntityId);
       alias = result.alias;
     } catch { /* alias stays null */ }
-
-    const defaultCap = token.entities[0]?.capabilities ?? "read";
-    const updated = [...token.entities, {
+    const defaultCap = entities[0]?.capabilities ?? "read";
+    const updated = [...entities, {
       entity_id: companionEntityId,
       alias,
       capabilities: defaultCap,
       exclude_attributes: [] as string[],
       companion_of: primaryEntityId,
-      graph: null,
-      hours: 24,
-      period: 10,
-      animate: false,
       gesture_config: {},
+      name_override: null,
+      icon_override: null,
+      color_scheme: "auto" as const,
+      display_hints: {},
     }];
     await patchEntities(updated);
     setAdding(false);
@@ -803,54 +989,132 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
 
   const removeEntity = (entityId: string) => {
     if (!canEdit) return;
-    patchEntities(token.entities.filter(e => e.entity_id !== entityId && e.companion_of !== entityId));
+    patchEntities(entities.filter(e => e.entity_id !== entityId && e.companion_of !== entityId));
     setConfirmRemove(null);
   };
 
   const removeCompanion = (entityId: string) => {
     if (!canEdit) return;
-    patchEntities(token.entities.filter(e => e.entity_id !== entityId));
+    patchEntities(entities.filter(e => e.entity_id !== entityId));
   };
 
-  const toggleCompanionExpand = (entityId: string) => {
-    setCompanionInputs(prev => { const next = { ...prev }; delete next[entityId]; return next; });
-    setExpandedCompanions(prev => {
-      const next = new Set(prev);
-      if (next.has(entityId)) next.delete(entityId); else next.add(entityId);
-      return next;
-    });
+  const toggleCap = (entityId: string, newCap: "read" | "read-write") => {
+    if (!canEdit) return;
+    patchEntities(entities.map(en =>
+      en.entity_id === entityId ? { ...en, capabilities: newCap } : en
+    ));
   };
 
-  const toggleSettingsExpand = (entityId: string) => {
-    const isOpen = expandedSettings.has(entityId);
-    setExpandedSettings(prev => {
-      const next = new Set(prev);
-      if (isOpen) next.delete(entityId); else next.add(entityId);
-      return next;
-    });
-    if (!isOpen && !attrCache[entityId]) {
-      setAttrLoading(prev => new Set(prev).add(entityId));
-      api.ha.entityAttributes(entityId)
-        .then(keys => setAttrCache(prev => ({ ...prev, [entityId]: keys })))
-        .catch(() => {})
-        .finally(() => setAttrLoading(prev => {
-          const next = new Set(prev);
-          next.delete(entityId);
-          return next;
-        }));
+  const saveNameOverride = () => {
+    if (!selectedEntity || !canEdit) return;
+    const trimmed = nameInput.trim();
+    const haEntity = getEntityCache().find(e => e.entity_id === selectedEntity.entity_id);
+    const haName = haEntity?.friendly_name ?? "";
+    const val = (trimmed && trimmed !== haName) ? trimmed : null;
+    if (val !== selectedEntity.name_override) {
+      patchEntities(entities.map(en =>
+        en.entity_id === selectedEntity.entity_id ? { ...en, name_override: val } : en
+      ));
     }
   };
 
-  const updateGraphSetting = (entityId: string, field: "graph" | "hours" | "period", value: string | number | null) => {
+  const saveIconOverride = (iconKey: string | null) => {
+    if (!selectedEntity || !canEdit) return;
+    if (iconKey !== selectedEntity.icon_override) {
+      patchEntities(entities.map(en =>
+        en.entity_id === selectedEntity.entity_id ? { ...en, icon_override: iconKey } : en
+      ));
+    }
+    setIconPickerOpen(false);
+    setIconFilter("");
+  };
+
+  const updateColorScheme = (entityId: string, value: "auto" | "light" | "dark") => {
     if (!canEdit) return;
-    patchEntities(token.entities.map(en =>
-      en.entity_id === entityId ? { ...en, [field]: value } : en
+    patchEntities(entities.map(en =>
+      en.entity_id === entityId ? { ...en, color_scheme: value } : en
+    ));
+  };
+
+  const updateDisplayHint = (entityId: string, key: string, value: unknown) => {
+    if (!canEdit) return;
+    const entity = entities.find(e => e.entity_id === entityId);
+    if (!entity) return;
+    const hints = { ...(entity.display_hints ?? {}) };
+    const domain = entityId.split(".")[0];
+    const attrMap = ATTR_HINT_MAP[domain];
+
+    if (value === null || value === undefined) {
+      delete hints[key];
+      if (attrMap?.[key]) {
+        const attrName = attrMap[key];
+        patchEntities(entities.map(en =>
+          en.entity_id === entityId ? { ...en, display_hints: hints, exclude_attributes: en.exclude_attributes.filter(a => a !== attrName) } : en
+        ));
+        return;
+      }
+    } else {
+      hints[key] = value;
+      if (value === false && attrMap?.[key]) {
+        const attrName = attrMap[key];
+        if (!entity.exclude_attributes.includes(attrName)) {
+          patchEntities(entities.map(en =>
+            en.entity_id === entityId ? { ...en, display_hints: hints, exclude_attributes: [...en.exclude_attributes, attrName] } : en
+          ));
+          return;
+        }
+      }
+      if (value === true && attrMap?.[key]) {
+        const attrName = attrMap[key];
+        patchEntities(entities.map(en =>
+          en.entity_id === entityId ? { ...en, display_hints: hints, exclude_attributes: en.exclude_attributes.filter(a => a !== attrName) } : en
+        ));
+        return;
+      }
+    }
+    patchEntities(entities.map(en =>
+      en.entity_id === entityId ? { ...en, display_hints: hints } : en
+    ));
+  };
+
+  const toggleExcludeAttr = (entityId: string, attrKey: string) => {
+    if (!canEdit) return;
+    const entity = entities.find(e => e.entity_id === entityId);
+    if (!entity) return;
+    const excluded = new Set(entity.exclude_attributes);
+    const domain = entityId.split(".")[0];
+    const rMap = reverseAttrMap(domain);
+
+    if (excluded.has(attrKey)) {
+      excluded.delete(attrKey);
+      const hintKey = rMap[attrKey];
+      if (hintKey) {
+        const hints = { ...(entity.display_hints ?? {}) };
+        delete hints[hintKey];
+        patchEntities(entities.map(e =>
+          e.entity_id === entityId ? { ...e, exclude_attributes: [...excluded], display_hints: hints } : e
+        ));
+        return;
+      }
+    } else {
+      excluded.add(attrKey);
+      const hintKey = rMap[attrKey];
+      if (hintKey) {
+        const hints = { ...(entity.display_hints ?? {}), [hintKey]: false };
+        patchEntities(entities.map(e =>
+          e.entity_id === entityId ? { ...e, exclude_attributes: [...excluded], display_hints: hints } : e
+        ));
+        return;
+      }
+    }
+    patchEntities(entities.map(e =>
+      e.entity_id === entityId ? { ...e, exclude_attributes: [...excluded] } : e
     ));
   };
 
   const updateGestureSetting = (entityId: string, gesture: "tap" | "hold" | "double_tap", action: string, targetEntityId?: string) => {
     if (!canEdit) return;
-    patchEntities(token.entities.map(en => {
+    patchEntities(entities.map(en => {
       if (en.entity_id !== entityId) return en;
       const gc = { ...(en.gesture_config ?? {}) };
       if (action) {
@@ -864,294 +1128,698 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
     }));
   };
 
-  const toggleExcludeAttr = (entityId: string, attrKey: string) => {
-    if (!canEdit) return;
-    const entity = token.entities.find(e => e.entity_id === entityId);
-    if (!entity) return;
-    const excluded = new Set(entity.exclude_attributes);
-    if (excluded.has(attrKey)) excluded.delete(attrKey); else excluded.add(attrKey);
-    patchEntities(token.entities.map(e =>
-      e.entity_id === entityId ? { ...e, exclude_attributes: [...excluded] } : e
-    ));
+  const applyTheme = async (themeId: string) => {
+    setSaving(true);
+    try {
+      const updated = await api.tokens.update(token.token_id, { theme_url: themeIdToUrl(themeId) });
+      setToken(updated);
+    } catch (e) { setError(String(e)); }
+    finally { setSaving(false); }
   };
 
-  const primaryCount = grouped.length;
+  const changeTheme = (themeId: string) => {
+    const target = themes.find(t => t.theme_id === themeId);
+    if (target?.renderer_pack && !packsAgreed) {
+      setPendingThemeId(themeId);
+      setShowAgree(true);
+      return;
+    }
+    applyTheme(themeId);
+  };
+
+  const confirmAgree = async () => {
+    try {
+      await api.packs.agree(true);
+      setPacksAgreed(true);
+      setShowAgree(false);
+      setAgreeText("");
+      if (pendingThemeId) {
+        await applyTheme(pendingThemeId);
+        setPendingThemeId(null);
+      }
+    } catch (e) { setError(String(e)); }
+  };
 
   const entitiesBody = (
-    <>
-      {!readonly && (
-        <div style={{ padding: "8px 12px" }}>
-          <EntityAutocomplete
-            value={addInput}
-            onChange={setAddInput}
-            onSelect={addEntity}
-            disabled={adding || saving}
-            excludeIds={existingIds}
-            placeholder="Add primary entity..."
-          />
+    <div className="entities-split">
+      <div className="entities-list-panel">
+        {canEdit && (
+          <div style={{ padding: "8px 10px" }}>
+            <EntityAutocomplete
+              value={addInput}
+              onChange={setAddInput}
+              onSelect={addEntity}
+              disabled={adding || saving}
+              excludeIds={existingIds}
+              placeholder="Add entity..."
+            />
+          </div>
+        )}
+        <div
+          className="entities-list-scroll"
+          role="listbox"
+          aria-label="Entity list"
+          onKeyDown={ev => {
+            if (ev.key !== "ArrowDown" && ev.key !== "ArrowUp") return;
+            ev.preventDefault();
+            const ids = grouped.map(g => g.primary.entity_id);
+            const idx = selectedEntityId ? ids.indexOf(selectedEntityId) : -1;
+            const next = ev.key === "ArrowDown"
+              ? Math.min(idx + 1, ids.length - 1)
+              : Math.max(idx - 1, 0);
+            setSelectedEntityId(ids[next]);
+            const row = ev.currentTarget.querySelector(`[data-entity-id="${ids[next]}"]`) as HTMLElement | null;
+            row?.focus();
+          }}
+        >
+          {grouped.map(g => {
+            const e = g.primary;
+            const domain = e.entity_id.split(".")[0];
+            const isSelected = selectedEntityId === e.entity_id;
+            return (
+              <button
+                key={e.entity_id}
+                className={`entity-list-row${isSelected ? " selected" : ""}`}
+                onClick={() => setSelectedEntityId(isSelected ? null : e.entity_id)}
+                aria-selected={isSelected}
+                role="option"
+                data-entity-id={e.entity_id}
+                type="button"
+              >
+                <div className="widget-thumb" style={{ width: 24, height: 24 }}>
+                  <Icon name={DOMAIN_ICON[domain] ?? "plug"} size={12} />
+                </div>
+                <span className="entity-list-id mono">{e.entity_id}</span>
+                {e.alias && <span className="entity-list-alias mono">{e.alias}</span>}
+                {canEdit && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(ev) => { ev.stopPropagation(); setConfirmRemove(e.entity_id); }}
+                    onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.stopPropagation(); setConfirmRemove(e.entity_id); } }}
+                    className="entity-list-delete"
+                    aria-label={`Remove ${e.entity_id}`}
+                  >
+                    <Icon name="close" size={10} />
+                  </span>
+                )}
+              </button>
+            );
+          })}
+          {grouped.length === 0 && (
+            <div className="muted" style={{ padding: "20px 10px", textAlign: "center", fontSize: 12 }}>
+              No entities added yet.
+            </div>
+          )}
         </div>
-      )}
-      {grouped.map(g => {
-        const e = g.primary;
-        const domain = e.entity_id.split(".")[0];
-        const isRW = e.capabilities === "read-write";
-        const companionCount = g.companions.length;
-        const isCompanionExpanded = expandedCompanions.has(e.entity_id);
-        const isSettingsOpen = expandedSettings.has(e.entity_id);
-        const showGraphOption = HISTORY_DOMAINS.has(domain);
-        const showAnimateOption = domain === "fan";
-        const hasGestures = Object.keys(e.gesture_config ?? {}).length > 0;
-        const settingsBadge = (e.exclude_attributes.length > 0 || e.graph || e.animate || hasGestures) ? "entity-settings-badge" : "";
-        return (
-          <div key={e.entity_id} className="entity-card">
-            {/* Row 1: entity name + alias + delete */}
-            <div className="entity-row-1">
-              <div className="widget-thumb" style={{ width: 28, height: 28 }}>
-                <Icon name={DOMAIN_ICON[domain] ?? "plug"} size={14} />
+      </div>
+
+      <div className="entities-config-panel">
+        <div className="entity-config-section">
+          <div className="entity-config-title">Theme</div>
+          <input
+            type="text"
+            className="input"
+            value={themeFilter}
+            onChange={e => setThemeFilter(e.target.value)}
+            placeholder="Filter themes..."
+            style={{ marginBottom: 8 }}
+          />
+          <div className="theme-strip">
+            {filteredThemes.map(t => (
+              <button
+                key={t.theme_id}
+                className={`theme-strip-item${currentThemeId === t.theme_id ? " selected" : ""}`}
+                onClick={() => changeTheme(t.theme_id)}
+                type="button"
+              >
+                <div className="theme-thumb-wrap">
+                  {thumbUrls[t.theme_id] ? (
+                    <img className="theme-strip-thumb" src={thumbUrls[t.theme_id]} alt={t.name} draggable={false} />
+                  ) : (
+                    <div className="theme-strip-thumb" />
+                  )}
+                  {t.renderer_pack && (
+                    <span className="theme-pack-star" title="Includes renderer pack">&#9733;</span>
+                  )}
+                </div>
+                <span className="theme-strip-name">{t.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {selectedEntity && selectedDomain && (
+          <div className="entity-config-section">
+            <div className="entity-config-title">{selectedEntity.entity_id}</div>
+
+            {entityDetail[selectedEntity.entity_id] && (() => {
+              const isDark = selectedEntity.color_scheme === "dark" ||
+                (selectedEntity.color_scheme === "auto" && getHaDarkMode());
+              const surfaceColor = isDark
+                ? (selectedTheme?.dark_variables?.["--hrv-color-surface"] ?? selectedTheme?.variables?.["--hrv-color-surface"] ?? "#1a1a2e")
+                : "#1a1a2e";
+              const bgColor = previewBgTone === 0
+                ? "transparent"
+                : `color-mix(in srgb, ${surfaceColor} ${previewBgTone}%, transparent)`;
+              return (
+                <div style={{ display: "flex", alignItems: "stretch", gap: 8 }}>
+                  <div style={{ flex: 1, borderRadius: 8, background: bgColor, transition: "background 0.15s" }}>
+                    <EntityPreview
+                      entity={entityDetail[selectedEntity.entity_id]}
+                      entityAccess={selectedEntity}
+                      theme={selectedTheme}
+                      companions={selectedGroup?.companions ?? []}
+                    />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", paddingBottom: 12 }}>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={previewBgTone}
+                      onChange={ev => setPreviewBgTone(Number(ev.target.value))}
+                      orient="vertical"
+                      aria-label="Preview background tone"
+                      title="Adjust preview background tone"
+                      className="preview-bg-slider"
+                    />
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div className="entity-setting-row">
+              <label className="entity-setting-label">Display name</label>
+              <div style={{ display: "flex", gap: 6, flex: 1, alignItems: "center", position: "relative" }}>
+                <div style={{ position: "relative" }}>
+                  <button
+                    className="icon-picker-btn"
+                    title={selectedEntity.icon_override ? `Icon: ${selectedEntity.icon_override}` : "Pick icon"}
+                    disabled={!canEdit}
+                    onClick={() => { setIconPickerOpen(v => !v); setIconFilter(""); }}
+                    type="button"
+                    aria-label="Pick icon"
+                    aria-expanded={iconPickerOpen}
+                  >
+                    {selectedEntity.icon_override && WIDGET_ICONS[selectedEntity.icon_override] ? (
+                      <svg viewBox="0 0 24 24" width={16} height={16} aria-hidden="true" style={{ display: "block" }}>
+                        <path d={WIDGET_ICONS[selectedEntity.icon_override]} fill="currentColor" />
+                      </svg>
+                    ) : (
+                      <Icon name="tune" size={14} />
+                    )}
+                  </button>
+                  {iconPickerOpen && (
+                    <div className="icon-picker-popover" role="dialog" aria-label="Icon picker">
+                      <input
+                        className="input icon-picker-filter"
+                        type="text"
+                        placeholder="Filter icons..."
+                        value={iconFilter}
+                        onChange={ev => setIconFilter(ev.target.value)}
+                        autoFocus
+                      />
+                      {selectedEntity.icon_override && (
+                        <button
+                          className="icon-picker-clear"
+                          type="button"
+                          onClick={() => saveIconOverride(null)}
+                        >
+                          <Icon name="close" size={11} /> Reset to default
+                        </button>
+                      )}
+                      <div className="icon-picker-grid" role="listbox" aria-label="Icons">
+                        {WIDGET_ICON_NAMES
+                          .filter(n => !iconFilter || n.replace("mdi:", "").includes(iconFilter.toLowerCase()))
+                          .map(iconKey => (
+                            <button
+                              key={iconKey}
+                              className={"icon-picker-tile" + (selectedEntity.icon_override === iconKey ? " selected" : "")}
+                              type="button"
+                              role="option"
+                              aria-selected={selectedEntity.icon_override === iconKey}
+                              title={iconKey}
+                              onClick={() => saveIconOverride(iconKey)}
+                            >
+                              <svg viewBox="0 0 24 24" width={18} height={18} aria-hidden="true">
+                                <path d={WIDGET_ICONS[iconKey]} fill="currentColor" />
+                              </svg>
+                            </button>
+                          ))
+                        }
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  className="input"
+                  value={nameInput}
+                  onChange={ev => setNameInput(ev.target.value)}
+                  onBlur={saveNameOverride}
+                  onKeyDown={ev => { if (ev.key === "Enter") saveNameOverride(); }}
+                  disabled={!canEdit}
+                  placeholder="Use HA friendly name"
+                  maxLength={100}
+                  style={{ flex: 1 }}
+                />
               </div>
-              <span className="entity-name mono">{e.entity_id}</span>
-              {e.alias && <span className="entity-alias mono">Alias: {e.alias}</span>}
-              {canEdit && (
-                <button
-                  onClick={() => setConfirmRemove(e.entity_id)}
-                  className="btn btn-sm btn-ghost entity-delete"
-                  aria-label={`Remove ${e.entity_id}`}
-                >
-                  <Icon name="close" size={12} />
-                </button>
+            </div>
+
+            <div className="entity-setting-row" style={{ justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <label className="entity-setting-label" style={{ marginBottom: 0 }}>Access</label>
+                <div className="segmented-toggle">
+                  <button
+                    className={selectedEntity.capabilities === "read" ? "active" : ""}
+                    onClick={() => toggleCap(selectedEntity.entity_id, "read")}
+                    disabled={!canEdit}
+                    type="button"
+                  >Read only</button>
+                  <button
+                    className={selectedEntity.capabilities === "read-write" ? "active" : ""}
+                    onClick={() => toggleCap(selectedEntity.entity_id, "read-write")}
+                    disabled={!canEdit}
+                    type="button"
+                  >Control</button>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <label className="entity-setting-label" style={{ marginBottom: 0, minWidth: "auto", whiteSpace: "nowrap" }}>Always use</label>
+                <div className="segmented-toggle">
+                  {(["auto", "light", "dark"] as const).map(scheme => (
+                    <button
+                      key={scheme}
+                      className={selectedEntity.color_scheme === scheme ? "active" : ""}
+                      onClick={() => updateColorScheme(selectedEntity.entity_id, scheme)}
+                      disabled={!canEdit}
+                      type="button"
+                    >
+                      {scheme.charAt(0).toUpperCase() + scheme.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="entity-setting-group">
+              <button className="entity-setting-group-title" onClick={() => setShowCompanions(!showCompanions)} type="button">
+                Companions ({selectedGroup?.companions.length ?? 0})
+                {" "}<Icon name={showCompanions ? "chevron-up" : "chevron-down"} size={10} />
+              </button>
+              {showCompanions && (
+                <div style={{ paddingTop: 4 }}>
+                  {selectedGroup?.companions.map(c => (
+                    <div key={c.entity_id} className="chip" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                      <span style={{ flex: 1, fontSize: 12 }} className="mono">{c.entity_id}</span>
+                      {c.alias && <span className="muted" style={{ fontSize: 10 }}>alias: {c.alias}</span>}
+                      {canEdit && (
+                        <button
+                          onClick={() => removeCompanion(c.entity_id)}
+                          className="btn btn-sm btn-ghost"
+                          style={{ padding: "1px 4px" }}
+                          aria-label={`Remove companion ${c.entity_id}`}
+                          type="button"
+                        ><Icon name="close" size={10} /></button>
+                      )}
+                    </div>
+                  ))}
+                  {canEdit && (
+                    <EntityAutocomplete
+                      value={companionInputs[selectedEntity.entity_id] ?? ""}
+                      onChange={v => setCompanionInputs(prev => ({ ...prev, [selectedEntity.entity_id]: v }))}
+                      onSelect={(id) => addCompanion(selectedEntity.entity_id, id)}
+                      disabled={adding || saving}
+                      excludeIds={existingIds}
+                      filterDomains={COMPANION_ALLOWED_DOMAINS}
+                      placeholder="Add companion..."
+                    />
+                  )}
+                </div>
               )}
             </div>
 
-            {/* Row 2: controls */}
-            <div className="entity-row-2">
-              <select
-                value={e.capabilities}
-                onChange={ev => toggleCap(e.entity_id, ev.target.value as "read" | "read-write")}
-                disabled={!canEdit}
-                className="entity-cap-pill"
-                style={{
-                  background: isRW ? "var(--info-weak)" : "var(--accent-weak)",
-                  color: isRW ? "var(--info)" : "var(--ok)",
-                }}
-              >
-                <option value="read">Read only</option>
-                <option value="read-write">Control</option>
-              </select>
-              <button
-                className="btn-link entity-row-2-btn"
-                onClick={() => toggleCompanionExpand(e.entity_id)}
-              >
-                {companionCount > 0 ? `${companionCount} companion${companionCount > 1 ? "s" : ""}` : "Add companion"}
-                {" "}<Icon name={isCompanionExpanded ? "chevron-up" : "chevron-down"} size={10} />
-              </button>
-              <button
-                className={`btn-link entity-row-2-btn ${settingsBadge}`}
-                onClick={() => toggleSettingsExpand(e.entity_id)}
-              >
-                Settings
-                {" "}<Icon name={isSettingsOpen ? "chevron-up" : "chevron-down"} size={10} />
-              </button>
-            </div>
-
-            {/* Expandable: Companions */}
-            {isCompanionExpanded && (
-              <div className="entity-expand-panel">
-                <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
-                  Companions ({companionCount}/{MAX_COMPANIONS})
-                </div>
-                {g.companions.map(c => (
-                  <div key={c.entity_id} className="chip" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                    <span style={{ flex: 1, fontSize: 12 }} className="mono">{c.entity_id}</span>
-                    {c.alias && <span className="muted" style={{ fontSize: 10 }}>alias: {c.alias}</span>}
-                    {canEdit && (
-                      <button
-                        onClick={() => removeCompanion(c.entity_id)}
-                        className="btn btn-sm btn-ghost"
-                        style={{ padding: "1px 4px" }}
-                        aria-label={`Remove companion ${c.entity_id}`}
-                      ><Icon name="close" size={10} /></button>
-                    )}
-                  </div>
-                ))}
-                {canEdit && companionCount < MAX_COMPANIONS && (
-                  <EntityAutocomplete
-                    value={companionInputs[e.entity_id] ?? ""}
-                    onChange={v => setCompanionInputs(prev => ({ ...prev, [e.entity_id]: v }))}
-                    onSelect={(id) => addCompanion(e.entity_id, id)}
-                    disabled={adding || saving}
-                    excludeIds={existingIds}
-                    filterDomains={COMPANION_ALLOWED_DOMAINS}
-                    placeholder="Add companion entity..."
-                  />
-                )}
-              </div>
-            )}
-
-            {/* Expandable: Settings (Exclude attributes + Graph settings) */}
-            {isSettingsOpen && (
-              <div className="entity-expand-panel">
-                {/* Exclude attributes - always visible when settings open */}
-                <div style={{ marginBottom: showGraphOption ? 10 : 0 }}>
-                  <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
-                    Exclude{e.exclude_attributes.length > 0 ? ` ${e.exclude_attributes.length}` : ""} attributes
-                    {e.exclude_attributes.length > 0 && canEdit && (
-                      <>{" "}<button
-                        className="btn-link"
-                        style={{ fontSize: 11 }}
-                        onClick={() => patchEntities(token.entities.map(en =>
-                          en.entity_id === e.entity_id ? { ...en, exclude_attributes: [] } : en
-                        ))}
-                      >Clear all</button></>
-                    )}
-                  </div>
-                  {attrLoading.has(e.entity_id) ? (
-                    <Spinner size={16} />
-                  ) : attrCache[e.entity_id] ? (
-                    <div className="attr-filter-grid">
-                      {attrCache[e.entity_id].map(attr => {
-                        const excluded = e.exclude_attributes.includes(attr);
-                        return (
-                          <div key={attr} className={`attr-filter-item${excluded ? " excluded" : ""}`}>
-                            <Toggle
-                              checked={excluded}
-                              onChange={() => toggleExcludeAttr(e.entity_id, attr)}
-                              disabled={!canEdit}
-                            />
-                            <span className="mono">{attr}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="muted" style={{ fontSize: 12 }}>Entity not found in HA.</div>
-                  )}
-                </div>
-
-                {/* Graph settings - only for applicable domains */}
-                {showGraphOption && (
-                  <div>
-                    <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>Graph settings</div>
-                    <div className="entity-graph-settings">
-                      <label className="entity-graph-field">
-                        Graph
-                        <select
-                          value={e.graph ?? ""}
-                          onChange={ev => updateGraphSetting(e.entity_id, "graph", ev.target.value || null)}
-                          disabled={!canEdit}
-                          className="input entity-graph-select"
-                        >
-                          <option value="">None</option>
-                          <option value="line">Line</option>
-                          <option value="bar">Bar</option>
-                        </select>
-                      </label>
-                      <label className="entity-graph-field">
-                        Hours
-                        <select
-                          value={e.hours ?? 24}
-                          onChange={ev => updateGraphSetting(e.entity_id, "hours", Number(ev.target.value))}
-                          disabled={!canEdit || !e.graph}
-                          className="input entity-graph-select"
-                        >
-                          {HOURS_OPTIONS.map(h => <option key={h} value={h}>{h}</option>)}
-                        </select>
-                      </label>
-                      <label className="entity-graph-field">
-                        Period
-                        <select
-                          value={e.period ?? 10}
-                          onChange={ev => updateGraphSetting(e.entity_id, "period", Number(ev.target.value))}
-                          disabled={!canEdit || !e.graph}
-                          className="input entity-graph-select"
-                        >
-                          {PERIOD_OPTIONS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-                        </select>
-                      </label>
-                    </div>
-                  </div>
-                )}
-
-                {/* Fan animation - only for fan domain */}
-                {showAnimateOption && (
-                  <div>
-                    <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>Fan settings</div>
-                    <div className="entity-graph-field" style={{ gap: 6 }}>
+            {selectedDomain === "light" && (hasFeature(packCap, "light", "brightness") || hasFeature(packCap, "light", "color_temp") || hasFeature(packCap, "light", "rgb")) && (
+              <div className="entity-setting-group">
+                <div className="entity-setting-group-title">Light settings</div>
+                <div className="settings-toggle-grid">
+                  {hasFeature(packCap, "light", "brightness") && (
+                    <label className="settings-toggle-item">
                       <Toggle
-                        checked={e.animate ?? false}
-                        onChange={v => {
-                          if (!canEdit) return;
-                          patchEntities(token.entities.map(en =>
-                            en.entity_id === e.entity_id ? { ...en, animate: v } : en
-                          ));
-                        }}
+                        checked={selectedEntity.display_hints?.show_brightness !== false}
+                        onChange={v => updateDisplayHint(selectedEntity.entity_id, "show_brightness", v ? null : false)}
                         disabled={!canEdit}
                       />
-                      <span>Animated</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Gesture settings - available for all entities */}
-                {(() => {
-                  const haActions = haActionEntities;
-                  return (
-                    <div style={{ marginTop: showGraphOption || showAnimateOption ? 10 : 0 }}>
-                      <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>Gestures</div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                        {(["tap", "hold", "double_tap"] as const).map(gesture => {
-                          const label = gesture === "double_tap" ? "Double-tap" : gesture.charAt(0).toUpperCase() + gesture.slice(1);
-                          const gc = e.gesture_config ?? {};
-                          const currentAction = gc[gesture]?.action ?? "";
-                          const currentTarget = gc[gesture]?.entity_id ?? "";
-                          return (
-                            <div key={gesture} style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
-                              <span style={{ fontSize: 12, color: "var(--ink-3)", minWidth: 68 }}>{label}</span>
-                              <select
-                                value={currentAction}
-                                onChange={ev => {
-                                  const action = ev.target.value;
-                                  if (action === "trigger-action" && haActions.length) {
-                                    updateGestureSetting(e.entity_id, gesture, action, haActions[0].entity_id);
-                                  } else {
-                                    updateGestureSetting(e.entity_id, gesture, action);
-                                  }
-                                }}
-                                disabled={!canEdit}
-                                className="input entity-graph-select"
-                              >
-                                <option value="">Default</option>
-                                <option value="toggle">Toggle</option>
-                                <option value="none">None (disable)</option>
-                                {haActions.length > 0 && <option value="trigger-action">Trigger action...</option>}
-                              </select>
-                              {currentAction === "trigger-action" && haActions.length > 0 && (
-                                <select
-                                  value={currentTarget}
-                                  onChange={ev => updateGestureSetting(e.entity_id, gesture, "trigger-action", ev.target.value)}
-                                  disabled={!canEdit}
-                                  className="input entity-graph-select"
-                                  style={{ minWidth: 120 }}
-                                >
-                                  {haActions.map(ha => (
-                                    <option key={ha.entity_id} value={ha.entity_id}>
-                                      {ha.friendly_name || ha.entity_id.replace("harvest_action.", "")}
-                                    </option>
-                                  ))}
-                                </select>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })()}
-
+                      <span>Brightness</span>
+                    </label>
+                  )}
+                  {hasFeature(packCap, "light", "color_temp") && (
+                    <label className="settings-toggle-item">
+                      <Toggle
+                        checked={selectedEntity.display_hints?.show_color_temp !== false}
+                        onChange={v => updateDisplayHint(selectedEntity.entity_id, "show_color_temp", v ? null : false)}
+                        disabled={!canEdit}
+                      />
+                      <span>Color temp</span>
+                    </label>
+                  )}
+                  {hasFeature(packCap, "light", "rgb") && (
+                    <label className="settings-toggle-item">
+                      <Toggle
+                        checked={selectedEntity.display_hints?.show_rgb !== false}
+                        onChange={v => updateDisplayHint(selectedEntity.entity_id, "show_rgb", v ? null : false)}
+                        disabled={!canEdit}
+                      />
+                      <span>RGB color</span>
+                    </label>
+                  )}
+                </div>
               </div>
             )}
+
+            {selectedDomain === "fan" && (
+              <div className="entity-setting-group">
+                <div className="entity-setting-group-title">Fan settings</div>
+                <div className="settings-toggle-grid">
+                  <label className="settings-toggle-item">
+                    <Toggle
+                      checked={!!selectedEntity.display_hints?.animate}
+                      onChange={v => updateDisplayHint(selectedEntity.entity_id, "animate", v || null)}
+                      disabled={!canEdit}
+                    />
+                    <span>Animated</span>
+                  </label>
+                </div>
+                <div className="entity-setting-row" style={{ paddingTop: 4 }}>
+                  <label className="entity-setting-label">Display mode</label>
+                  <select
+                    value={(selectedEntity.display_hints?.display_mode as string) ?? "auto"}
+                    onChange={ev => updateDisplayHint(selectedEntity.entity_id, "display_mode", ev.target.value === "auto" ? null : ev.target.value)}
+                    disabled={!canEdit}
+                    className="input"
+                  >
+                    <option value="auto">Auto</option>
+                    <option value="on-off">On/Off only</option>
+                    {hasFeature(packCap, "fan", "continuous") && <option value="continuous">Continuous</option>}
+                    {hasFeature(packCap, "fan", "stepped") && <option value="stepped">Stepped</option>}
+                    {hasFeature(packCap, "fan", "cycle") && <option value="cycle">Cycle</option>}
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {selectedDomain === "climate" && (hasFeature(packCap, "climate", "hvac_modes") || hasFeature(packCap, "climate", "presets") || hasFeature(packCap, "climate", "fan_mode") || hasFeature(packCap, "climate", "swing_mode")) && (
+              <div className="entity-setting-group">
+                <div className="entity-setting-group-title">Climate settings</div>
+                <div className="settings-toggle-grid">
+                  {hasFeature(packCap, "climate", "hvac_modes") && (
+                    <label className="settings-toggle-item">
+                      <Toggle
+                        checked={selectedEntity.display_hints?.show_hvac_modes !== false}
+                        onChange={v => updateDisplayHint(selectedEntity.entity_id, "show_hvac_modes", v ? null : false)}
+                        disabled={!canEdit}
+                      />
+                      <span>HVAC modes</span>
+                    </label>
+                  )}
+                  {hasFeature(packCap, "climate", "presets") && (
+                    <label className="settings-toggle-item">
+                      <Toggle
+                        checked={selectedEntity.display_hints?.show_presets !== false}
+                        onChange={v => updateDisplayHint(selectedEntity.entity_id, "show_presets", v ? null : false)}
+                        disabled={!canEdit}
+                      />
+                      <span>Presets</span>
+                    </label>
+                  )}
+                  {hasFeature(packCap, "climate", "fan_mode") && (
+                    <label className="settings-toggle-item">
+                      <Toggle
+                        checked={selectedEntity.display_hints?.show_fan_mode !== false}
+                        onChange={v => updateDisplayHint(selectedEntity.entity_id, "show_fan_mode", v ? null : false)}
+                        disabled={!canEdit}
+                      />
+                      <span>Fan mode</span>
+                    </label>
+                  )}
+                  {hasFeature(packCap, "climate", "swing_mode") && (
+                    <label className="settings-toggle-item">
+                      <Toggle
+                        checked={selectedEntity.display_hints?.show_swing_mode !== false}
+                        onChange={v => updateDisplayHint(selectedEntity.entity_id, "show_swing_mode", v ? null : false)}
+                        disabled={!canEdit}
+                      />
+                      <span>Swing mode</span>
+                    </label>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {selectedDomain === "cover" && (hasFeature(packCap, "cover", "position") || hasFeature(packCap, "cover", "tilt")) && (
+              <div className="entity-setting-group">
+                <div className="entity-setting-group-title">Cover settings</div>
+                <div className="settings-toggle-grid">
+                  {hasFeature(packCap, "cover", "position") && (
+                    <label className="settings-toggle-item">
+                      <Toggle
+                        checked={selectedEntity.display_hints?.show_position !== false}
+                        onChange={v => updateDisplayHint(selectedEntity.entity_id, "show_position", v ? null : false)}
+                        disabled={!canEdit}
+                      />
+                      <span>Position slider</span>
+                    </label>
+                  )}
+                  {hasFeature(packCap, "cover", "tilt") && (
+                    <label className="settings-toggle-item">
+                      <Toggle
+                        checked={selectedEntity.display_hints?.show_tilt !== false}
+                        onChange={v => updateDisplayHint(selectedEntity.entity_id, "show_tilt", v ? null : false)}
+                        disabled={!canEdit}
+                      />
+                      <span>Tilt control</span>
+                    </label>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {selectedDomain === "media_player" && (hasFeature(packCap, "media_player", "transport") || hasFeature(packCap, "media_player", "volume") || hasFeature(packCap, "media_player", "source")) && (
+              <div className="entity-setting-group">
+                <div className="entity-setting-group-title">Media player settings</div>
+                <div className="settings-toggle-grid">
+                  {hasFeature(packCap, "media_player", "transport") && (
+                    <label className="settings-toggle-item">
+                      <Toggle
+                        checked={selectedEntity.display_hints?.show_transport !== false}
+                        onChange={v => updateDisplayHint(selectedEntity.entity_id, "show_transport", v ? null : false)}
+                        disabled={!canEdit}
+                      />
+                      <span>Transport</span>
+                    </label>
+                  )}
+                  {hasFeature(packCap, "media_player", "volume") && (
+                    <label className="settings-toggle-item">
+                      <Toggle
+                        checked={selectedEntity.display_hints?.show_volume !== false}
+                        onChange={v => updateDisplayHint(selectedEntity.entity_id, "show_volume", v ? null : false)}
+                        disabled={!canEdit}
+                      />
+                      <span>Volume</span>
+                    </label>
+                  )}
+                  {hasFeature(packCap, "media_player", "source") && (
+                    <label className="settings-toggle-item">
+                      <Toggle
+                        checked={selectedEntity.display_hints?.show_source !== false}
+                        onChange={v => updateDisplayHint(selectedEntity.entity_id, "show_source", v ? null : false)}
+                        disabled={!canEdit}
+                      />
+                      <span>Source</span>
+                    </label>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {selectedDomain === "weather" && (
+              <div className="entity-setting-group">
+                <div className="entity-setting-group-title">Weather settings</div>
+                <div className="settings-toggle-grid">
+                  <label className="settings-toggle-item">
+                    <Toggle
+                      checked={selectedEntity.display_hints?.show_forecast === true}
+                      onChange={v => updateDisplayHint(selectedEntity.entity_id, "show_forecast", v ? true : null)}
+                      disabled={!canEdit}
+                    />
+                    <span>Show forecast</span>
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {HISTORY_DOMAINS.has(selectedDomain) && (
+              <div className="entity-setting-group">
+                <div className="entity-setting-group-title">Graph settings</div>
+                <div className="entity-graph-settings">
+                  <label className="entity-graph-field">
+                    Graph
+                    <select
+                      value={(selectedEntity.display_hints?.graph as string) ?? ""}
+                      onChange={ev => updateDisplayHint(selectedEntity.entity_id, "graph", ev.target.value || null)}
+                      disabled={!canEdit}
+                      className="input entity-graph-select"
+                    >
+                      <option value="">None</option>
+                      <option value="line">Line</option>
+                      <option value="bar">Bar</option>
+                    </select>
+                  </label>
+                  <label className="entity-graph-field">
+                    Hours
+                    <select
+                      value={(selectedEntity.display_hints?.hours as number) ?? 24}
+                      onChange={ev => updateDisplayHint(selectedEntity.entity_id, "hours", Number(ev.target.value))}
+                      disabled={!canEdit || !selectedEntity.display_hints?.graph}
+                      className="input entity-graph-select"
+                    >
+                      {HOURS_OPTIONS.map(h => <option key={h} value={h}>{h}</option>)}
+                    </select>
+                  </label>
+                  <label className="entity-graph-field">
+                    Period
+                    <select
+                      value={(selectedEntity.display_hints?.period as number) ?? 10}
+                      onChange={ev => updateDisplayHint(selectedEntity.entity_id, "period", Number(ev.target.value))}
+                      disabled={!canEdit || !selectedEntity.display_hints?.graph}
+                      className="input entity-graph-select"
+                    >
+                      {PERIOD_OPTIONS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                    </select>
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {selectedDomain === "input_number" && hasFeature(packCap, "input_number", "buttons") && (
+              <div className="entity-setting-group">
+                <div className="entity-setting-group-title">Display mode</div>
+                <div className="segmented-toggle">
+                  <button
+                    className={(selectedEntity.display_hints?.display_mode ?? "slider") === "slider" ? "active" : ""}
+                    onClick={() => updateDisplayHint(selectedEntity.entity_id, "display_mode", null)}
+                    disabled={!canEdit}
+                    type="button"
+                  >Slider</button>
+                  <button
+                    className={selectedEntity.display_hints?.display_mode === "buttons" ? "active" : ""}
+                    onClick={() => updateDisplayHint(selectedEntity.entity_id, "display_mode", "buttons")}
+                    disabled={!canEdit}
+                    type="button"
+                  >Buttons</button>
+                </div>
+              </div>
+            )}
+
+            <div className="entity-setting-group">
+              <div className="entity-setting-group-title">
+                Exclude attributes
+                {selectedEntity.exclude_attributes.length > 0 && (
+                  <span className="muted" style={{ fontWeight: 400 }}> ({selectedEntity.exclude_attributes.length})</span>
+                )}
+                {selectedEntity.exclude_attributes.length > 0 && canEdit && (
+                  <button
+                    className="btn-link"
+                    style={{ fontSize: 11, marginLeft: 8 }}
+                    onClick={() => patchEntities(entities.map(en =>
+                      en.entity_id === selectedEntity.entity_id ? { ...en, exclude_attributes: [] } : en
+                    ))}
+                    type="button"
+                  >Clear all</button>
+                )}
+              </div>
+              {attrLoading.has(selectedEntity.entity_id) ? (
+                <Spinner size={16} />
+              ) : attrCache[selectedEntity.entity_id] ? (
+                <div className="attr-filter-grid">
+                  {attrCache[selectedEntity.entity_id].map(attr => {
+                    const excluded = selectedEntity.exclude_attributes.includes(attr);
+                    return (
+                      <label key={attr} className={`attr-filter-item${excluded ? " excluded" : ""}`}>
+                        <Toggle
+                          checked={excluded}
+                          onChange={() => toggleExcludeAttr(selectedEntity.entity_id, attr)}
+                          disabled={!canEdit}
+                        />
+                        <span className="mono">{attr}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="muted" style={{ fontSize: 12 }}>Entity not found in HA.</div>
+              )}
+            </div>
+
+            <div className="entity-setting-group">
+              <div className="entity-setting-group-title">Gestures</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                {(["tap", "hold", "double_tap"] as const).map(gesture => {
+                  const label = gesture === "double_tap" ? "Double-tap" : gesture.charAt(0).toUpperCase() + gesture.slice(1);
+                  const gc = selectedEntity.gesture_config ?? {};
+                  const currentAction = gc[gesture]?.action ?? "";
+                  const currentTarget = gc[gesture]?.entity_id ?? "";
+                  return (
+                    <div key={gesture} style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 12, color: "var(--ink-3)", minWidth: 68 }}>{label}</span>
+                      <select
+                        value={currentAction}
+                        onChange={ev => {
+                          const action = ev.target.value;
+                          if (action === "trigger-action" && haActionEntities.length) {
+                            updateGestureSetting(selectedEntity.entity_id, gesture, action, haActionEntities[0].entity_id);
+                          } else {
+                            updateGestureSetting(selectedEntity.entity_id, gesture, action);
+                          }
+                        }}
+                        disabled={!canEdit}
+                        className="input entity-graph-select"
+                      >
+                        <option value="">Default</option>
+                        <option value="toggle">Toggle</option>
+                        <option value="none">None (disable)</option>
+                        {haActionEntities.length > 0 && <option value="trigger-action">Trigger action...</option>}
+                      </select>
+                      {currentAction === "trigger-action" && haActionEntities.length > 0 && (
+                        <select
+                          value={currentTarget}
+                          onChange={ev => updateGestureSetting(selectedEntity.entity_id, gesture, "trigger-action", ev.target.value)}
+                          disabled={!canEdit}
+                          className="input entity-graph-select"
+                          style={{ minWidth: 120 }}
+                        >
+                          {haActionEntities.map(ha => (
+                            <option key={ha.entity_id} value={ha.entity_id}>
+                              {ha.friendly_name || ha.entity_id.replace("harvest_action.", "")}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
-        );
-      })}
+        )}
+
+        {!selectedEntity && grouped.length > 0 && (
+          <div className="entity-config-section" style={{ textAlign: "center", color: "var(--ink-4)" }}>
+            <p style={{ fontSize: 13, margin: "20px 0" }}>Select an entity to configure its display settings.</p>
+          </div>
+        )}
+      </div>
 
       {confirmRemove && (
         <ConfirmDialog
@@ -1163,7 +1831,41 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
           onCancel={() => setConfirmRemove(null)}
         />
       )}
-    </>
+
+      {showAgree && (
+        <div className="overlay" onClick={() => { setShowAgree(false); setAgreeText(""); setPendingThemeId(null); }}>
+          <div className="dialog" onClick={e => e.stopPropagation()}>
+            <h3 className="dialog-title">Renderer Pack Warning</h3>
+            <div className="dialog-body">
+              <p>
+                This theme includes a renderer pack that executes JavaScript from your HA instance
+                inside the widget on the embedding page. Only enable themes with packs you trust.
+              </p>
+              <p style={{ marginTop: 12 }}>
+                Type <strong>AGREE</strong> below to confirm.
+              </p>
+              <input
+                type="text"
+                className="input"
+                value={agreeText}
+                onChange={e => setAgreeText(e.target.value)}
+                placeholder="Type AGREE"
+                autoFocus
+                style={{ marginTop: 8 }}
+              />
+            </div>
+            <div className="dialog-actions">
+              <button className="btn btn-ghost" onClick={() => { setShowAgree(false); setAgreeText(""); setPendingThemeId(null); }} type="button">
+                Cancel
+              </button>
+              <button className="btn btn-primary" disabled={agreeText !== "AGREE"} onClick={confirmAgree} type="button">
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 
   if (bare) return entitiesBody;
@@ -1982,10 +2684,11 @@ function SecurityEditor({ token, readonly, saving, setSaving, setToken, setError
 // Config tab card
 // ---------------------------------------------------------------------------
 
-type ConfigTab = "embed" | "entities" | "style" | "preferences" | "security";
+type ConfigTab = "entities" | "embed" | "preferences" | "security" | "widget-info";
 
 interface ConfigTabCardProps {
   token: Token & { created_by_name?: string | null };
+  tokenId: string;
   readonly: boolean;
   saving: boolean;
   setSaving: (v: boolean) => void;
@@ -1993,32 +2696,28 @@ interface ConfigTabCardProps {
   setError: (e: string | null) => void;
   hmacSecret: string | null;
   setHmacSecret: (s: string | null) => void;
-  onPreviewTheme?: (theme: ThemeDefinition | null) => void;
 }
 
-function ConfigTabCard({ token, readonly, saving, setSaving, setToken, setError, hmacSecret, setHmacSecret, onPreviewTheme }: ConfigTabCardProps) {
+function ConfigTabCard({ token, tokenId, readonly, saving, setSaving, setToken, setError, hmacSecret, setHmacSecret }: ConfigTabCardProps) {
   const primaryCount = token.entities.filter(e => !e.companion_of).length;
-  const [activeTab, setActiveTab] = useState<ConfigTab>(() => primaryCount === 0 ? "entities" : "embed");
+  const [activeTab, setActiveTab] = useState<ConfigTab>(() => primaryCount === 0 ? "entities" : "entities");
 
   const visibleTabs: { id: ConfigTab; label: string }[] = readonly
     ? [
-        { id: "entities", label: "Entities" },
-        { id: "security", label: "Security" },
+        { id: "entities",    label: "Entities" },
+        { id: "security",    label: "Security" },
+        { id: "widget-info", label: "Widget Info" },
       ]
     : [
-        { id: "embed",       label: "Embed" },
         { id: "entities",    label: "Entities" },
-        { id: "style",       label: "Style" },
+        { id: "embed",       label: "Embed" },
         { id: "preferences", label: "Preferences" },
         { id: "security",    label: "Security" },
+        { id: "widget-info", label: "Widget Info" },
       ];
 
   const effectiveTab = visibleTabs.some(t => t.id === activeTab) ? activeTab : "entities";
   const wrap = (t: Token) => setToken({ ...t, created_by_name: token.created_by_name });
-
-  useEffect(() => {
-    if (effectiveTab !== "style") onPreviewTheme?.(null);
-  }, [effectiveTab, onPreviewTheme]);
 
   return (
     <div className="card">
@@ -2029,20 +2728,35 @@ function ConfigTabCard({ token, readonly, saving, setSaving, setToken, setError,
           </button>
         ))}
       </div>
-      {effectiveTab === "embed" && !readonly && (
-        <CodeSection bare token={token} setToken={wrap} setError={setError} hmacSecret={hmacSecret} />
-      )}
       {effectiveTab === "entities" && (
         <EntitiesEditor bare token={token} readonly={readonly} saving={saving} setSaving={setSaving} setToken={wrap} setError={setError} />
       )}
-      {effectiveTab === "style" && !readonly && (
-        <ThemeEditor bare token={token} setToken={wrap} setError={setError} onSelectedTheme={onPreviewTheme} saving={saving} setSaving={setSaving} />
+      {effectiveTab === "embed" && !readonly && (
+        <CodeSection bare token={token} setToken={wrap} setError={setError} hmacSecret={hmacSecret} />
       )}
       {effectiveTab === "preferences" && !readonly && (
         <DisplaySettings bare token={token} readonly={readonly} saving={saving} setSaving={setSaving} setToken={wrap} setError={setError} />
       )}
       {effectiveTab === "security" && (
         <SecurityEditor bare token={token} readonly={readonly} saving={saving} setSaving={setSaving} setToken={wrap} setError={setError} generatedSecret={hmacSecret} setGeneratedSecret={setHmacSecret} />
+      )}
+      {effectiveTab === "widget-info" && (
+        <div className="card-body col" style={{ gap: 18 }}>
+          <Card title="Usage" className="card-info">
+            <dl className="kv">
+              <dt>Live sessions</dt><dd>{token.active_sessions}</dd>
+              {(() => {
+                const p = token.entities.filter(e => !e.companion_of).length;
+                const c = token.entities.length - p;
+                return <><dt>Entities</dt><dd>{p} primary{c > 0 ? `, ${c} companion` : ""}</dd></>;
+              })()}
+              <dt>Token ID</dt><dd className="mono" style={{ fontSize: 11 }}>{token.token_id}</dd>
+              <dt>Version</dt><dd>{token.token_version}</dd>
+            </dl>
+          </Card>
+          <SessionsPanel tokenId={tokenId} />
+          <ActivityPanel tokenId={tokenId} />
+        </div>
       )}
     </div>
   );
@@ -2077,7 +2791,6 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmPause,  setConfirmPause]  = useState(false);
   const [hmacSecret,    setHmacSecret]    = useState<string | null>(null);
-  const [previewTheme,  setPreviewTheme]  = useState<ThemeDefinition | null>(null);
 
   const load = useCallback(() => {
     api.tokens.get(tokenId)
@@ -2230,50 +2943,17 @@ export function TokenDetail({ tokenId, onBack, onDeleted }: TokenDetailProps) {
         </div>
       </div>
 
-      {/* detail-grid: left (tabbed config card), right (usage + sessions + activity) */}
-      <div className="detail-grid">
-        <div className="col" style={{ gap: 18 }}>
-          <ConfigTabCard
-            token={token}
-            readonly={readonly}
-            saving={saving}
-            setSaving={setSaving}
-            setToken={t => setToken({ ...t, created_by_name: token.created_by_name })}
-            setError={setError}
-            hmacSecret={hmacSecret}
-            setHmacSecret={setHmacSecret}
-            onPreviewTheme={setPreviewTheme}
-          />
-          {previewTheme && (
-            <Card title="Preview">
-              <WidgetPreview
-                variables={previewTheme.variables}
-                darkVariables={previewTheme.dark_variables}
-                packId={previewTheme.renderer_pack || undefined}
-              />
-            </Card>
-          )}
-        </div>
-
-        {/* Right column */}
-        <div className="col" style={{ gap: 18 }}>
-          <Card title="Usage" className="card-info">
-            <dl className="kv">
-              <dt>Live sessions</dt><dd>{token.active_sessions}</dd>
-              {(() => {
-                const p = token.entities.filter(e => !e.companion_of).length;
-                const c = token.entities.length - p;
-                return <><dt>Entities</dt><dd>{p} primary{c > 0 ? `, ${c} companion` : ""}</dd></>;
-              })()}
-              <dt>Token ID</dt><dd className="mono" style={{ fontSize: 11 }}>{token.token_id}</dd>
-              <dt>Version</dt><dd>{token.token_version}</dd>
-            </dl>
-          </Card>
-
-          <SessionsPanel tokenId={tokenId} />
-          <ActivityPanel tokenId={tokenId} />
-        </div>
-      </div>
+      <ConfigTabCard
+        token={token}
+        tokenId={tokenId}
+        readonly={readonly}
+        saving={saving}
+        setSaving={setSaving}
+        setToken={t => setToken({ ...t, created_by_name: token.created_by_name })}
+        setError={setError}
+        hmacSecret={hmacSecret}
+        setHmacSecret={setHmacSecret}
+      />
 
       {confirmPause && (
         <ConfirmDialog

@@ -9,12 +9,12 @@ HArvest creates a secure bridge between your Home Assistant instance and any web
 
 ## Highlights
 
-- **14 dedicated renderers** - purpose-built cards for lights, fans, climate, media players, sensors, covers, timers, and more
+- **15 dedicated renderers** - purpose-built cards for lights, fans, climate, media players, sensors, covers, timers, and more
 - **Real-time WebSocket updates** - no polling, no refresh
 - **Scoped token access** - each widget exposes only the entities you choose, with origin restrictions, HMAC signing, and instant revocation
 - **WordPress plugin** - shortcode-based embedding, no HTML required
 - **Custom themes and renderer packs** - full CSS variable control, or replace the default card UI entirely
-- **~43 KB gzipped** - zero dependencies, native Web Components
+- **Minimal resources required** - compact, zero dependencies, native Web Components
 
 ## Requirements
 

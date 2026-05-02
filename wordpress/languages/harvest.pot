@@ -4,7 +4,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: HArvest 1.0.0\n"
 "Report-Msgid-Bugs-To: https://github.com/sfox38/harvest/issues\n"
-"POT-Creation-Date: 2024-01-01 00:00+0000\n"
+"POT-Creation-Date: 2026-05-02 00:00+0000\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -14,11 +14,11 @@ msgstr ""
 "Language: \n"
 "Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
 
-#: harvest.php
+#: includes/class-harvest-settings.php
 msgid "HArvest Settings"
 msgstr ""
 
-#: harvest.php
+#: includes/class-harvest-settings.php
 msgid "HArvest"
 msgstr ""
 
@@ -40,19 +40,11 @@ msgid "Use bundled version (harvest.js v%s)"
 msgstr ""
 
 #: includes/class-harvest-settings.php
-msgid "Use CDN version (always latest)"
+msgid "Use custom URL"
 msgstr ""
 
 #: includes/class-harvest-settings.php
-msgid "Bundled is recommended for stability. CDN always loads the latest widget version from jsDelivr."
-msgstr ""
-
-#: includes/class-harvest-settings.php
-msgid "Default theme URL"
-msgstr ""
-
-#: includes/class-harvest-settings.php
-msgid "Optional. URL to a HArvest theme JSON file. Applied to all widgets that do not specify their own theme. Leave blank to use the built-in default."
+msgid "Bundled is recommended for stability. Custom URL lets you serve the widget from your own host."
 msgstr ""
 
 #: includes/class-harvest-settings.php
@@ -80,11 +72,11 @@ msgid "Description"
 msgstr ""
 
 #: includes/class-harvest-settings.php
-msgid "Your HArvest widget token ID."
+msgid "Yes"
 msgstr ""
 
 #: includes/class-harvest-settings.php
-msgid "Yes"
+msgid "Your HArvest widget token ID."
 msgstr ""
 
 #: includes/class-harvest-settings.php
@@ -92,7 +84,19 @@ msgid "Yes*"
 msgstr ""
 
 #: includes/class-harvest-settings.php
+msgid "HA entity ID, e.g. light.bedroom_main. Required unless alias is set. If both entity and alias are provided, entity takes priority."
+msgstr ""
+
+#: includes/class-harvest-settings.php
+msgid "Entity alias (8-character random key). Use instead of entity when \"Show as aliases\" is checked in the wizard. Either entity or alias is required, not both. Companion values should match - use aliases when alias is set, real IDs when entity is set."
+msgstr ""
+
+#: includes/class-harvest-settings.php
 msgid "No"
+msgstr ""
+
+#: includes/class-harvest-settings.php
+msgid "HMAC secret for enhanced security. Set via the token editor in Home Assistant."
 msgstr ""
 
 #: includes/class-harvest-settings.php
@@ -115,46 +119,6 @@ msgstr ""
 msgid "HArvest plugin settings are stored in the WordPress database and are included in standard WordPress backups. The widget token secrets you create in Home Assistant are stored in HA, not in WordPress."
 msgstr ""
 
-#: includes/class-harvest-settings.php
-msgid "CDN note: if your site has a strict script-src Content Security Policy, you may need to add https://cdn.jsdelivr.net manually."
-msgstr ""
-
-#: includes/class-harvest-settings.php
-msgid "HA entity ID, e.g. light.bedroom_main. Required unless alias is set. If both entity and alias are provided, entity takes priority."
-msgstr ""
-
-#: includes/class-harvest-settings.php
-msgid "Entity alias (8-character random key). Use instead of entity when \"Show as aliases\" is checked in the wizard. Either entity or alias is required, not both. Companion values should match - use aliases when alias is set, real IDs when entity is set."
-msgstr ""
-
-#: includes/class-harvest-settings.php
-msgid "HMAC secret for enhanced security. Set via the token editor in Home Assistant."
-msgstr ""
-
-#: includes/class-harvest-settings.php
-msgid "Comma-separated companion entity IDs or aliases."
-msgstr ""
-
-#: includes/class-harvest-settings.php
-msgid "URL to a HArvest theme JSON file. Overrides the site default."
-msgstr ""
-
-#: includes/class-harvest-settings.php
-msgid "Language code, e.g. \"de\". Defaults to auto-detect from browser."
-msgstr ""
-
-#: includes/class-harvest-settings.php
-msgid "Graph type: \"line\" or \"bar\". Omit to show no graph."
-msgstr ""
-
-#: includes/class-harvest-settings.php
-msgid "History window in hours. Default: 24."
-msgstr ""
-
-#: includes/class-harvest-settings.php
-msgid "Aggregation period in minutes. Default: 10."
-msgstr ""
-
 #: includes/class-harvest-shortcode.php
 msgid "HArvest: missing required \"token\" attribute."
 msgstr ""
@@ -165,4 +129,8 @@ msgstr ""
 
 #: includes/class-harvest-shortcode.php
 msgid "HArvest: Home Assistant URL is not configured. Go to Settings > HArvest to set it up."
+msgstr ""
+
+#: includes/class-harvest-shortcode.php
+msgid "HArvest: [harvest_group] missing required \"token\" attribute."
 msgstr ""

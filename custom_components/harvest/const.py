@@ -5,7 +5,7 @@ All other modules import from here. No classes, no functions.
 from __future__ import annotations
 
 DOMAIN = "harvest"
-PLATFORM_VERSION = "0.9.0"              # must match SPEC.md version header
+PLATFORM_VERSION = "0.9.1"              # must match SPEC.md version header
 
 # Token and session ID format
 TOKEN_PREFIX = "hwt_"

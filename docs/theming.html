@@ -135,7 +135,7 @@ hrv-card::part(brightness-slider) {
               <tr><td><code>author</code></td><td>string</td><td>No</td><td>Theme author name</td></tr>
               <tr><td><code>version</code></td><td>string</td><td>No</td><td>Theme version string</td></tr>
               <tr><td><code>dark_variables</code></td><td>object</td><td>No</td><td>Variable overrides for dark mode. Only changed keys needed.</td></tr>
-              <tr><td><code>renderer_pack</code></td><td>string</td><td>No</td><td>Pack ID to couple with this theme. See <a href="#pack-wiring">Wiring a pack to a theme</a>.</td></tr>
+              <tr><td><code>renderer_pack</code></td><td>string | boolean</td><td>No</td><td>Pack ID to couple with this theme, or <code>true</code> for bundled packs where the pack script is included alongside the theme. See <a href="#pack-wiring">Wiring a pack to a theme</a>.</td></tr>
             </tbody>
           </table>
         </div>

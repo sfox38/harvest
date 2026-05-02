@@ -191,7 +191,7 @@
         <pre><code class="language-text">[harvest token="hwt_..." alias="dJ5x3Apd"]</code></pre>
 
         <h3>Rendered output</h3>
-        <p>The shortcodes render as a <code>&lt;hrv-card&gt;</code> custom element wrapped in a container div. The widget script is enqueued in the page footer (once per page, regardless of how many shortcodes are on the page).</p>
+        <p>The shortcodes render as a <code>&lt;div class="hrv-mount"&gt;</code> element with the appropriate <code>data-*</code> attributes. The widget script mounts an <code>&lt;hrv-card&gt;</code> custom element inside each mount div at runtime. The script is enqueued in the page footer (once per page, regardless of how many shortcodes are on the page).</p>
         </section>
 
         <section>

@@ -40,6 +40,25 @@ export function getPageConfig() {
 }
 
 // ---------------------------------------------------------------------------
+// Color scheme resolution
+// ---------------------------------------------------------------------------
+
+function _resolveColorScheme(cs) {
+  if (cs === "light" || cs === "dark") return cs;
+  const meta = document.querySelector('meta[name="color-scheme"]');
+  const metaVal = meta?.getAttribute("content")?.trim().toLowerCase() || "";
+  if (metaVal === "light" || metaVal === "only light") return "light";
+  if (metaVal === "dark" || metaVal === "only dark") return "dark";
+  const htmlCS = document.documentElement.style.colorScheme || "";
+  if (htmlCS === "light") return "light";
+  if (htmlCS === "dark") return "dark";
+  const computed = getComputedStyle(document.documentElement).colorScheme || "";
+  if (computed === "light") return "light";
+  if (computed === "dark") return "dark";
+  return "auto";
+}
+
+// ---------------------------------------------------------------------------
 // HrvCard
 // ---------------------------------------------------------------------------
 
@@ -83,7 +102,7 @@ export class HrvCard extends HTMLElement {
     // Stamp data-color-scheme so the base-card CSS fallback can force light/dark.
     // Read directly from _pageConfig too in case HArvest.config() was called
     // before this element connected (common script loading order).
-    const cs = this.#config.colorScheme || _pageConfig.colorScheme || "";
+    const cs = _resolveColorScheme(this.#config.colorScheme || _pageConfig.colorScheme || "");
     if (cs === "light" || cs === "dark") {
       this.setAttribute("data-color-scheme", cs);
     } else {
@@ -171,17 +190,28 @@ export class HrvCard extends HTMLElement {
    * @param {object} def - EntityDefinition from server
    */
   receiveDefinition(def) {
-    console.warn(
-      `[HArvest] receiveDefinition: ${def.entity_id} domain=${def.domain} capabilities=${def.capabilities}`,
-    );
     this.#entityDef = def;
 
     // Apply server-side config from entity_definition.
     this.#config.gestureConfig = def.gesture_config ?? {};
-    this.#config.graph = def.graph ?? null;
-    this.#config.hours = def.hours ?? 24;
-    this.#config.period = def.period ?? 10;
-    this.#config.animate = def.animate ?? false;
+    const hints = def.display_hints ?? {};
+    this.#config.graph = hints.graph ?? null;
+    this.#config.hours = hints.hours ?? 24;
+    this.#config.period = hints.period ?? 10;
+    this.#config.animate = !!hints.animate;
+    this.#config.colorScheme = def.color_scheme ?? "auto";
+    this.#config.displayHints = hints;
+
+    // Reflect per-entity color scheme on the host element and re-apply theme.
+    const csNow = _resolveColorScheme(this.#config.colorScheme || _pageConfig.colorScheme || "");
+    if (csNow === "light" || csNow === "dark") {
+      this.setAttribute("data-color-scheme", csNow);
+    } else {
+      this.removeAttribute("data-color-scheme");
+    }
+    if (this.#lastTheme && this.shadowRoot) {
+      ThemeLoader.apply(this.#lastTheme, this.shadowRoot, csNow);
+    }
 
     // Reconcile companion proxies from server-delivered list.
     const newCompanionRefs = def.companions ?? [];
@@ -253,7 +283,6 @@ export class HrvCard extends HTMLElement {
    * @param {string} _lastUpdated - ISO 8601 timestamp (used by client for ordering)
    */
   receiveStateUpdate(state, attributes, _lastUpdated) {
-    console.warn(`[HArvest] stateUpdate: ${this.#entityId || this.#alias} state="${state}"`, attributes);
     this.#lastState = state;
     this.#lastAttributes = attributes;
     // Cancel any pending optimistic revert.
@@ -308,9 +337,13 @@ export class HrvCard extends HTMLElement {
    */
   receiveTheme(theme) {
     this.#lastTheme = theme || null;
-    if (theme && this.shadowRoot) {
-      const cs = this.#config.colorScheme || _pageConfig.colorScheme || "auto";
+    if (!this.shadowRoot) return;
+    if (theme) {
+      const cs = _resolveColorScheme(this.#config.colorScheme || _pageConfig.colorScheme || "");
       ThemeLoader.apply(theme, this.shadowRoot, cs);
+    } else {
+      ThemeLoader.detach(this.shadowRoot);
+      /** @type {HTMLElement} */ (this.shadowRoot.host).style.cssText = "";
     }
   }
 
@@ -329,16 +362,14 @@ export class HrvCard extends HTMLElement {
     const schemeChanged = newScheme !== this.#config.colorScheme;
     this.#config.colorScheme = newScheme;
     if (schemeChanged) {
-      // Update the data attribute so CSS @media overrides work correctly.
-      const cs = this.#config.colorScheme || _pageConfig.colorScheme || "";
+      const cs = _resolveColorScheme(this.#config.colorScheme || _pageConfig.colorScheme || "");
       if (cs === "light" || cs === "dark") {
         this.setAttribute("data-color-scheme", cs);
       } else {
         this.removeAttribute("data-color-scheme");
       }
-      // Re-apply theme with the new scheme.
       if (this.#lastTheme && this.shadowRoot) {
-        ThemeLoader.apply(this.#lastTheme, this.shadowRoot, newScheme === "auto" ? (_pageConfig.colorScheme || "auto") : newScheme);
+        ThemeLoader.apply(this.#lastTheme, this.shadowRoot, cs);
       }
     }
     if (this.#i18n) {
@@ -462,8 +493,22 @@ export class HrvCard extends HTMLElement {
 
     // Apply display config before render() so the history zone is included in the DOM
     // and animate is available to applyState().
+    const hints = entityDef.display_hints ?? {};
     if (graphType) this.#config.graph = graphType;
-    this.#config.animate = animate;
+    else if (hints.graph) this.#config.graph = hints.graph;
+    this.#config.animate = animate || !!hints.animate;
+    this.#config.colorScheme = entityDef.color_scheme ?? "auto";
+    this.#config.displayHints = hints;
+
+    // Set up preview companions before render() so renderCompanionZoneHTML() creates the zone.
+    const previewComps = entityDef.preview_companions ?? [];
+    this.#companions = previewComps.map((c) => ({
+      entityId: c.entity_id,
+      proxyCard: null,
+      capabilities: c.capabilities ?? "read",
+      domain: c.domain ?? (c.entity_id ?? "").split(".")[0],
+    }));
+    this.#config.companions = this.#companions;
 
     // Check pack renderer first, then fall back to global registry.
     let RendererClass = null;
@@ -481,6 +526,15 @@ export class HrvCard extends HTMLElement {
 
     // Apply state.
     this.#renderer.applyState(state, attributes);
+
+    // In preview mode, always show controls regardless of entity state (fan off, cover closed, etc.)
+    // so the user can see the full card layout when editing settings.
+    if (this.shadowRoot) {
+      for (const shell of this.shadowRoot.querySelectorAll(".ndl-controls-shell")) {
+        shell.setAttribute("data-collapsed", "false");
+      }
+    }
+
     this.setErrorState("live");
 
     // Apply theme CSS variables to the shadow host.
@@ -587,11 +641,7 @@ export class HrvCard extends HTMLElement {
       return;
     }
 
-    console.warn(`[HArvest] sendCommand: ${this.#entityId || this.#alias} ${action}`, data);
-    if (!this.#client) {
-      console.warn("[HArvest] sendCommand: no client");
-      return;
-    }
+    if (!this.#client) return;
     const msgId = this.#client.nextMsgId();
 
     // Optimistic UI.

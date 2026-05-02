@@ -14,3 +14,4 @@ defined( 'WP_UNINSTALL_PLUGIN' ) || exit;
 
 delete_option( 'harvest_ha_url' );
 delete_option( 'harvest_widget_source' );
+delete_option( 'harvest_widget_custom_url' );

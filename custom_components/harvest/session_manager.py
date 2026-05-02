@@ -40,6 +40,7 @@ class Session:
     ws: "WebSocketResponse"
     subscribed_entity_ids: set[str]
     last_message_at: datetime
+    outgoing_ids: dict[str, str] = field(default_factory=dict)
     last_sent_attributes: dict[str, dict] = field(default_factory=dict)
 
 
@@ -66,6 +67,7 @@ class SessionManager:
         source_ip: str | None,
         ws: "WebSocketResponse",
         entity_ids: list[str],
+        outgoing_ids: dict[str, str] | None = None,
     ) -> Session:
         """Create and register a new session.
 
@@ -110,6 +112,7 @@ class SessionManager:
             ws=ws,
             subscribed_entity_ids=set(entity_ids),
             last_message_at=now,
+            outgoing_ids=outgoing_ids if outgoing_ids is not None else {},
         )
 
         self._sessions[session_id] = session
@@ -294,10 +297,14 @@ class SessionManager:
     # ------------------------------------------------------------------
 
     def is_expired(self, session: Session, now: datetime | None = None) -> bool:
-        """Return True if the session's expires_at has passed."""
+        """Return True if the session's expires_at or absolute_expires_at has passed."""
         if now is None:
             now = datetime.now(tz=timezone.utc)
-        return now >= session.expires_at
+        if now >= session.expires_at:
+            return True
+        if session.absolute_expires_at is not None and now >= session.absolute_expires_at:
+            return True
+        return False
 
     def count_active(self) -> int:
         """Return the total count of active sessions."""

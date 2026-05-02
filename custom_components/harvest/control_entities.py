@@ -163,9 +163,9 @@ class HarvestKillSwitch(SwitchEntity):
         await self._set(False)
 
     async def _set(self, value: bool) -> None:
-        current = {**DEFAULTS, **self._entry.data, **self._entry.options}
-        current[CONF_KILL_SWITCH] = value
-        self._hass.config_entries.async_update_entry(self._entry, options=current)
+        self._hass.config_entries.async_update_entry(
+            self._entry, options={**self._entry.options, CONF_KILL_SWITCH: value}
+        )
         if value:
             for session in self._session_manager.get_all():
                 if not session.ws.closed:

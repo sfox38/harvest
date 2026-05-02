@@ -75,7 +75,6 @@ interface WizardProps {
 
 const TOTAL_STEPS = 6;
 const STEP_LABELS = ["Entities", "Permissions", "Origin", "Expiry", "Appearance", "Done"];
-const MAX_COMPANIONS = 4;
 const COMPANION_ALLOWED_DOMAINS = new Set(["light", "switch", "binary_sensor", "input_boolean", "cover", "remote", "lock"]);
 
 // ---------------------------------------------------------------------------
@@ -193,7 +192,7 @@ interface CompanionPickerProps {
 function CompanionPicker({ companions, excludeIds, onChange }: CompanionPickerProps) {
   const [input, setInput] = useState("");
   const [loadingAlias, setLoadingAlias] = useState<string | null>(null);
-  const canAdd = companions.length < MAX_COMPANIONS;
+  const canAdd = true;
 
   const addCompanion = async (entityId: string) => {
     if (companions.some(c => c.entity_id === entityId)) return;
@@ -216,7 +215,7 @@ function CompanionPicker({ companions, excludeIds, onChange }: CompanionPickerPr
   return (
     <div className="col" style={{ gap: 6, paddingLeft: 12, borderLeft: "2px solid var(--divider)", marginTop: 2 }}>
       <div className="muted" style={{ fontSize: 11 }}>
-        Companions ({companions.length}/{MAX_COMPANIONS}) - secondary entities shown alongside this card.
+        Companions ({companions.length}) - secondary entities shown alongside this card.
         Allowed domains: light, switch, lock, cover, binary sensor, input boolean, remote.
       </div>
       {canAdd && (
@@ -254,7 +253,7 @@ function CompanionPicker({ companions, excludeIds, onChange }: CompanionPickerPr
 // Step 1: Pick entities
 // ---------------------------------------------------------------------------
 
-function Step1({ state, onChange, existingLabels }: { state: WizardState; onChange: (u: Partial<WizardState>) => void; existingLabels: string[] }) {
+function Step1({ state, onChange, existingLabels, maxEntities }: { state: WizardState; onChange: (u: Partial<WizardState>) => void; existingLabels: string[]; maxEntities: number }) {
   const [entityInput, setEntityInput] = useState("");
   const [loadingAlias, setLoadingAlias] = useState<string | null>(null);
   const [expandedCompanions, setExpandedCompanions] = useState<Set<string>>(new Set());
@@ -265,8 +264,11 @@ function Step1({ state, onChange, existingLabels }: { state: WizardState; onChan
     if (getEntityCache().length === 0) loadEntityCache();
   }, []);
 
+  const atEntityLimit = state.mode !== "single" && state.entities.length >= maxEntities;
+
   const selectEntity = async (entityId: string) => {
     if (state.entities.some(e => e.entity_id === entityId)) return;
+    if (state.mode !== "single" && state.entities.length >= maxEntities) return;
     setLoadingAlias(entityId);
     let alias: string | null = null;
     try {
@@ -315,7 +317,7 @@ function Step1({ state, onChange, existingLabels }: { state: WizardState; onChan
 
   const primaryIds = state.entities.map(e => e.entity_id);
   const multiMode = state.mode === "group" || state.mode === "page";
-  const showPicker = !(state.mode === "single" && state.entities.length === 1);
+  const showPicker = !(state.mode === "single" && state.entities.length === 1) && !atEntityLimit;
 
   return (
     <div className="col" style={{ gap: 16 }}>
@@ -344,6 +346,12 @@ function Step1({ state, onChange, existingLabels }: { state: WizardState; onChan
           placeholder={state.mode === "single" ? "Search entity ID or friendly name..." : multiMode ? "Add entity..." : "Add entity..."}
           excludeIds={primaryIds}
         />
+      )}
+
+      {atEntityLimit && (
+        <p className="muted" style={{ fontSize: 12, color: "var(--warning)" }}>
+          Maximum of {maxEntities} entities per token.
+        </p>
       )}
 
       {loadingAlias && (
@@ -707,14 +715,14 @@ function Step4({ state, onChange }: { state: WizardState; onChange: (u: Partial<
 
 function themeIdToUrl(id: string): string {
   if (id === "default") return "";
-  if (id.startsWith("hth_")) return `custom:${id}`;
+  if (id.startsWith("hth_")) return `user:${id}`;
   return `bundled:${id}`;
 }
 
 function themeUrlToId(url: string): string {
   if (!url) return "default";
   if (url.startsWith("bundled:")) return url.slice(8);
-  if (url.startsWith("custom:")) return url.slice(7);
+  if (url.startsWith("user:")) return url.slice(5);
   return url;
 }
 
@@ -761,7 +769,7 @@ function Step5({ state, onChange }: { state: WizardState; onChange: (u: Partial<
         <WidgetPreview
           variables={selectedTheme.variables}
           darkVariables={selectedTheme.dark_variables}
-          packId={selectedTheme.renderer_pack || undefined}
+          packId={selectedTheme.renderer_pack ? selectedTheme.theme_id : undefined}
         />
       )}
 
@@ -962,6 +970,7 @@ export function Wizard({ onClose }: WizardProps) {
   const [overrideHost,       setOverrideHost]       = useState("");
   const [widgetScriptUrl,    setWidgetScriptUrl]    = useState("");
   const [existingLabels,     setExistingLabels]     = useState<string[]>([]);
+  const [maxEntities,        setMaxEntities]        = useState(50);
   const [secretAcknowledged, setSecretAcknowledged] = useState(false);
   const previewRevoked = useRef(false);
   const wizardRef = useRef<HTMLDivElement>(null);
@@ -990,6 +999,7 @@ export function Wizard({ onClose }: WizardProps) {
     api.config.get().then(c => {
       setOverrideHost(c.override_host || "");
       setWidgetScriptUrl(c.widget_script_url || "");
+      if (c.max_entities_per_token) setMaxEntities(c.max_entities_per_token);
     }).catch(() => {});
     api.tokens.list().then(ts => {
       setExistingLabels(ts.map(t => t.label));
@@ -1161,7 +1171,7 @@ export function Wizard({ onClose }: WizardProps) {
 
         {/* Body */}
         <div className="wizard-body">
-          {step === 1 && <Step1 state={wState} onChange={patchState} existingLabels={existingLabels} />}
+          {step === 1 && <Step1 state={wState} onChange={patchState} existingLabels={existingLabels} maxEntities={maxEntities} />}
           {step === 2 && <Step2 state={wState} onChange={patchState} />}
           {step === 3 && <Step3 state={wState} onChange={patchState} />}
           {step === 4 && <Step4 state={wState} onChange={patchState} />}

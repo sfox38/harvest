@@ -136,36 +136,64 @@
           <img src="widget-detail.jpg">
         </div>
 
-        <p>The screen has two panels. The left panel (about 55% width) contains all the configuration. The right panel (45%) shows live session data and recent activity for this widget specifically.</p>
-
-        <h3>Left panel - entities</h3>
-        <p>The entity list shows every entity included in this widget. Each entity has:</p>
+        <p>The detail screen uses a single-column layout with five tabs across the top:</p>
         <ul>
-          <li>Icon, friendly name, entity ID, and alias (if set)</li>
-          <li>Capability badge: <span class="badge badge-green">Read + control</span> or <span class="badge badge-blue">Read only</span></li>
-          <li>Tier badge: <span class="badge badge-purple">Tier 1</span>, <span class="badge badge-grey">Tier 2</span></li>
-          <li>An expand button to access per-entity settings</li>
+          <li><strong>Entities</strong> - entity management, theme selection, live preview, and per-entity settings</li>
+          <li><strong>Embed</strong> - code snippets for HTML and WordPress</li>
+          <li><strong>Preferences</strong> - origins, schedule, display defaults, and rate limits</li>
+          <li><strong>Security</strong> - token secret, IP allowlists, and session lifetime limits</li>
+          <li><strong>Widget Info</strong> - usage stats, active sessions, and recent activity</li>
         </ul>
 
-        <h4>Per-entity settings</h4>
-        <p>Expanding an entity shows two sections:</p>
+        <h3>Entities tab</h3>
+        <p>The Entities tab is a split panel. The left side is an entity list; the right side shows the theme picker, a live preview, and per-entity settings for whichever entity you have selected.</p>
 
-        <p><strong>Display settings</strong> - controls how the card renders this entity:</p>
+        <h4>Entity list (left panel)</h4>
+        <p>Each row shows a domain icon, the entity ID, and an alias badge (if set). Click a row to select it. Only primary entities appear here; companion entities are managed inside the selected entity's settings card. Use the search input at the top to add new entities with fuzzy matching.</p>
+
+        <h4>Theme card</h4>
+        <p>The theme picker is always visible at the top of the right panel, even when no entity is selected. It shows a horizontal scrollable strip of theme thumbnails. A text filter below the strip narrows the list by theme name or ID. Themes that include a renderer pack are marked with a <span class="badge badge-amber">☆</span> badge. Selecting a theme applies it to the widget and updates the live preview immediately.</p>
+
+        <h4>Live preview</h4>
+        <p>When an entity is selected, a live preview card appears below the theme picker. It renders the selected entity using the current theme and all applied settings. The preview updates automatically as you change settings, switch themes, or modify display options. It also respects the entity's forced color scheme setting (Auto, Light, or Dark).</p>
+
+        <h4>Entity settings card</h4>
+        <p>Below the preview, the settings card shows all configuration for the selected entity. Settings are grouped into universal controls (available for all entity types) and domain-specific controls.</p>
+
+        <p><strong>Universal controls:</strong></p>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Setting</th><th>Options</th><th>Notes</th></tr></thead>
             <tbody>
-              <tr><td>Graph type</td><td>None, Line, Bar</td><td>Shows a history graph on supported entities (sensors)</td></tr>
-              <tr><td>Hours</td><td>1-168</td><td>Time window for the history graph</td></tr>
-              <tr><td>Period</td><td>1-60 minutes</td><td>Aggregation period per data point</td></tr>
-              <tr><td>Animate fan</td><td>On/Off</td><td>Enables spinning fan icon when entity is on</td></tr>
-              <tr><td>Companion entities</td><td>entity list</td><td>Secondary entities displayed inside this card</td></tr>
-              <tr><td>Exclude attributes</td><td>attribute names</td><td>Prevents specific HA attributes from being sent to the widget</td></tr>
+              <tr><td>Icon</td><td>icon picker</td><td>Replaces the auto-detected icon with any icon from the widget's built-in set (~113 icons). Click the icon button to the left of the Display name field to open the picker. Select an icon, or use "Reset to default" to clear the override.</td></tr>
+              <tr><td>Display name</td><td>text input</td><td>Overrides the entity's Home Assistant friendly name. Leave blank to use the HA name.</td></tr>
+              <tr><td>Force color scheme</td><td>Auto, Light, Dark</td><td>Forces the widget card to render in that color scheme regardless of the visitor's system settings. Auto follows the page's color scheme.</td></tr>
+              <tr><td>Access</td><td>Read + Control, Read only</td><td>Whether the widget can send commands (e.g. toggle a light) or only display state</td></tr>
             </tbody>
           </table>
         </div>
 
-        <p><strong>Gesture settings</strong> - maps tap, hold, and double-tap gestures on the card to actions:</p>
+        <p><strong>Domain-specific controls</strong> appear based on the entity's domain and what the active theme's renderer pack supports. If the current theme has no renderer pack, only universal settings are shown.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Domain</th><th>Available controls</th></tr></thead>
+            <tbody>
+              <tr><td>light</td><td>Show brightness, Show color temperature, Show RGB color</td></tr>
+              <tr><td>fan</td><td>Animate fan icon, Display mode (Auto, On-Off, Continuous, Stepped, Cycle)</td></tr>
+              <tr><td>climate</td><td>Show HVAC modes, Show presets, Show fan mode, Show swing mode</td></tr>
+              <tr><td>cover</td><td>Show position slider, Show tilt control</td></tr>
+              <tr><td>media_player</td><td>Show transport controls, Show volume, Show source selector</td></tr>
+              <tr><td>sensor, binary_sensor</td><td>Graph type (None, Line, Bar), Hours (1-168), Period (1-60 min)</td></tr>
+              <tr><td>input_number</td><td>Display mode (Slider, Buttons), Graph settings</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p><strong>Companions:</strong> add or remove companion entities that display inside the selected entity's card. Companion entities do not appear in the left entity list. This section auto-opens when companions already exist.</p>
+
+        <p><strong>Excluded attributes:</strong> a grid of toggles for each attribute the entity exposes. Excluding an attribute prevents it from being sent to the widget. These toggles are linked to the domain-specific controls above: disabling "Show brightness" for a light also excludes the brightness attribute, and vice versa.</p>
+
+        <p><strong>Gestures:</strong> maps tap, hold, and double-tap interactions on the card to actions:</p>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Gesture</th><th>Available actions</th></tr></thead>
@@ -177,27 +205,23 @@
           </table>
         </div>
 
-        <h3>Left panel - origins and security</h3>
-        <p>Below the entity list, collapsible sections for:</p>
+        <h3>Embed tab</h3>
+        <p>Ready-to-paste embed snippets that update in real time as you change entity or alias settings. The snippet panel has two tabs (HTML and WordPress) and a toggle to switch between <code>entity=</code> and <code>alias=</code> format. The alias format is useful when you don't want entity IDs visible in your page source.</p>
 
+        <h3>Preferences tab</h3>
+        <p>Collapsible sections for:</p>
         <ul>
           <li><strong>Origins</strong> - which websites can use this widget. Add specific URLs (e.g. <code>https://mysite.com</code>) with optional path restrictions, or enable "allow any origin".</li>
           <li><strong>Schedule</strong> - restrict access to specific days of the week and hours of the day, in a chosen timezone.</li>
-          <li><strong>Security</strong> - set a token secret for HMAC-signed auth, configure IP allowlists, and set session lifetime limits.</li>
           <li><strong>Rate limits</strong> - per-widget override for the global rate limit defaults.</li>
           <li><strong>Display defaults</strong> - language, accessibility mode, and offline/error message settings.</li>
         </ul>
 
-        <h3>Left panel - code snippets</h3>
-        <p>The Code section at the bottom of the left panel shows ready-to-paste embed snippets. These update in real time as you change entity or alias settings.</p>
+        <h3>Security tab</h3>
+        <p>Token secret for HMAC-signed auth, IP allowlists, and session lifetime limits. See the <a href="security.html">Security page</a> for details on each option.</p>
 
-        <p>The snippet panel has two tabs (HTML and WordPress) and a toggle to switch between <code>entity=</code> and <code>alias=</code> format. The alias format is useful when you don't want entity IDs visible in your page source.</p>
-
-        <h3>Right panel - sessions</h3>
-        <p>The right panel shows active sessions for this widget: session ID (truncated), origin, time connected, entities subscribed, and renewal count. The <strong>End</strong> button disconnects a specific session immediately.</p>
-
-        <h3>Right panel - activity</h3>
-        <p>Below the session list: a sparkline graph of the last 7 days of activity for this widget, followed by a filtered event list. Click any event row to expand its full details.</p>
+        <h3>Widget Info tab</h3>
+        <p>Usage stats (total sessions, commands, last connection time), a live list of active sessions with the ability to end individual sessions, and a recent activity feed for this widget. This is the same session and activity data that was previously shown in the right sidebar.</p>
 
         <h2 id="wizard">Widget wizard</h2>
 
@@ -220,23 +244,25 @@
 
         <h2 id="themes">Themes</h2>
 
-        <p>The Themes tab manages the visual appearance of widget cards. HArvest ships four bundled themes (Default, Glass, Access, Minimus) and you can create unlimited custom themes.</p>
+        <p>Theme management lives inside each widget's Entities tab. There is no separate global Themes screen. Each widget picks its own theme, and theme selection affects all entities within that widget.</p>
+
+        <p>HArvest ships four bundled themes (Default, Glass, Access, Minimus) and supports unlimited custom themes and user-contributed themes.</p>
 
         <div class="screenshot">
           <img src="theme.jpg">
         </div>
 
         <h3>Theme picker strip</h3>
-        <p>A horizontal scrollable strip shows all available themes as thumbnail cards. Bundled themes are marked with a <span class="badge badge-grey">System</span> badge. Themes that include a renderer pack are marked with a <span class="badge badge-amber">☆</span> badge. The count of tokens using each theme is shown on the card.</p>
+        <p>The theme card at the top of the Entities tab's right panel shows a horizontal scrollable strip of theme thumbnails. Bundled themes are marked with a <span class="badge badge-grey">System</span> badge. Themes that include a renderer pack are marked with a <span class="badge badge-amber">☆</span> badge. A text filter below the strip narrows results by theme name or ID.</p>
 
-        <h3>Live preview</h3>
-        <p>Selecting a theme shows a live preview panel with a sample widget card rendered using the theme's CSS variables. Use the renderer type dropdown to preview different card types (light, sensor, fan, etc.) and the Light/Dark/Auto toggle to check both color modes.</p>
+        <h3>Renderer packs</h3>
+        <p>Some themes include a renderer pack, which replaces the default card renderers with custom designs. When a pack theme is active, the domain-specific controls in the entity settings card are filtered to show only options the pack supports. Switching between themes preserves your display settings; options the new theme does not support are hidden but kept in storage.</p>
 
         <h3>Custom themes</h3>
-        <p>Click <strong>New theme</strong> to create a custom theme. You can start from scratch or duplicate an existing theme. The code editor shows the raw theme JSON, which you can edit directly. Changes are reflected in the live preview immediately. See the <a href="theming.html">Theming page</a> for the full theme JSON format and variable reference.</p>
+        <p>Custom themes are created and managed from the global Settings screen. The theme JSON editor lets you modify CSS variables, preview changes in real time, and export themes as JSON files. See the <a href="theming.html">Theming page</a> for the full theme JSON format and variable reference.</p>
 
-        <h3>Exporting and sharing themes</h3>
-        <p>Any theme (including bundled ones) can be exported as a JSON file via the <strong>Export JSON</strong> button. Custom themes can be imported on any HArvest instance via the Themes tab. This is how third-party themes are distributed - the theme author exports their JSON file and shares it; other users import it via the panel.</p>
+        <h3>Sharing themes</h3>
+        <p>Any theme can be exported as a JSON file. Custom themes can be imported on any HArvest instance. This is how third-party themes are distributed: the theme author exports their JSON file and shares it, and other users import it.</p>
 
         <h2 id="settings">Settings</h2>
 

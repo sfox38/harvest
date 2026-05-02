@@ -9,6 +9,8 @@
  *
  *   script-src  - the HTTPS origin so renderer pack JS files can be loaded
  *                 dynamically via script tag injection from the HA instance.
+ *                 'unsafe-inline' is intentionally included because renderer
+ *                 packs use inline script evaluation during dynamic loading.
  *
  * The HA URL is converted from https:// to wss:// for connect-src. For
  * example, https://myhome.duckdns.org becomes wss://myhome.duckdns.org.
@@ -69,7 +71,14 @@ class Harvest_Csp {
             // No existing CSP header from WordPress. Add a minimal one that
             // permits the WebSocket and pack script loading without restricting
             // anything else.
-            $headers['Content-Security-Policy'] = "connect-src 'self' {$ws_url}; script-src 'self' 'unsafe-inline' {$script_origin}";
+            // Apply the same validation as add_to_directive() before interpolation.
+            $valid_ws     = ! preg_match( '/[\s;,]/', $ws_url );
+            $valid_script = ! preg_match( '/[\s;,]/', $script_origin );
+
+            $connect_part = $valid_ws     ? " {$ws_url}"       : '';
+            $script_part  = $valid_script ? " {$script_origin}" : '';
+
+            $headers['Content-Security-Policy'] = "connect-src 'self'{$connect_part}; script-src 'self' 'unsafe-inline'{$script_part}";
         }
 
         return $headers;

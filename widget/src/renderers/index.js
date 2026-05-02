@@ -33,6 +33,7 @@ import { InputNumberCard }        from "./input-number-card.js";
 import { InputSelectCard }        from "./input-select-card.js";
 import { HarvestActionCard }      from "./harvest-action-card.js";
 import { TimerCard }              from "./timer-card.js";
+import { WeatherCard }            from "./weather-card.js";
 import { GenericCard }            from "./generic-card.js";
 
 /**
@@ -66,6 +67,9 @@ const _registry = new Map([
 
   // Timer
   ["timer",                   TimerCard],
+
+  // Weather
+  ["weather",                 WeatherCard],
 
   // Virtual domain
   ["harvest_action",          HarvestActionCard],
@@ -105,6 +109,15 @@ export function registerRenderer(key, rendererClass) {
   _registry.set(key, rendererClass);
 }
 
+export const _BUILTIN_CAPABILITIES = {
+  fan:          { display_modes: ["on-off", "continuous", "stepped", "cycle"] },
+  input_number: { display_modes: ["slider", "buttons"] },
+  light:        { features: ["brightness", "color_temp", "rgb"] },
+  climate:      { features: ["hvac_modes", "presets", "fan_mode", "swing_mode"] },
+  cover:        { features: ["position", "tilt"] },
+  media_player: { features: ["transport", "volume", "source"] },
+};
+
 // Re-export all renderer classes so they are accessible via
 // window.HArvest.renderers (assembled in the build entry point).
 export {
@@ -126,5 +139,6 @@ export {
   InputSelectCard,
   HarvestActionCard,
   TimerCard,
+  WeatherCard,
   GenericCard,
 };

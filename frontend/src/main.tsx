@@ -47,9 +47,6 @@ class HaPanelHarvest extends HTMLElement {
   private _mounted = false;
 
   connectedCallback(): void {
-    // Clear any stale 401-reload flag from a previous session in this tab.
-    sessionStorage.removeItem("hrv_401_reload");
-
     // Attach shadow DOM for style isolation.
     const shadow = this.attachShadow({ mode: "open" });
 

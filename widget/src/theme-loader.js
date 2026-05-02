@@ -136,7 +136,28 @@ export class ThemeLoader {
     }
 
     const applyVars = () => {
-      const isDark = colorScheme === "dark" || (colorScheme !== "light" && _darkMq.matches);
+      let isDark;
+      if (colorScheme === "dark") {
+        isDark = true;
+      } else if (colorScheme === "light") {
+        isDark = false;
+      } else {
+        const meta = document.querySelector('meta[name="color-scheme"]');
+        const metaVal = meta?.getAttribute("content")?.trim().toLowerCase() || "";
+        if (metaVal === "light" || metaVal === "only light") isDark = false;
+        else if (metaVal === "dark" || metaVal === "only dark") isDark = true;
+        else {
+          const htmlCS = document.documentElement.style.colorScheme || "";
+          if (htmlCS === "light") isDark = false;
+          else if (htmlCS === "dark") isDark = true;
+          else {
+            const computed = getComputedStyle(document.documentElement).colorScheme || "";
+            if (computed === "light") isDark = false;
+            else if (computed === "dark") isDark = true;
+            else isDark = _darkMq.matches;
+          }
+        }
+      }
       const vars = (isDark && theme.dark_variables)
         ? { ...theme.variables, ...theme.dark_variables }
         : theme.variables;
@@ -145,7 +166,10 @@ export class ThemeLoader {
       // when the incoming theme does not define that property.
       host.style.cssText = "";
 
+      const _dangerousValueRe = /url\s*\(|expression\s*\(|@import/i;
       for (const [key, value] of Object.entries(vars ?? {})) {
+        if (!key.startsWith("--")) continue;
+        if (_dangerousValueRe.test(value)) continue;
         host.style.setProperty(key, value);
       }
     };

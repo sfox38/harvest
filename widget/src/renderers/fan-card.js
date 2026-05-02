@@ -81,13 +81,13 @@ const FAN_CARD_STYLES = /* css */`
 
   [part=oscillate-button] {
     width: 100%;
-    min-height: 44px;
-    padding: var(--hrv-spacing-xs) var(--hrv-spacing-s);
-    border: 1px solid var(--hrv-color-border);
-    border-radius: var(--hrv-radius-s);
+    padding: var(--hrv-spacing-s) var(--hrv-spacing-m);
+    border: none;
+    border-radius: var(--hrv-radius-m);
     background: var(--hrv-color-surface-alt);
     color: var(--hrv-color-text);
     font-size: var(--hrv-font-size-s);
+    font-weight: var(--hrv-font-weight-medium);
     font-family: inherit;
     cursor: pointer;
     transition: opacity var(--hrv-transition-speed), background var(--hrv-transition-speed);
@@ -103,13 +103,13 @@ const FAN_CARD_STYLES = /* css */`
 
   [part=preset-button] {
     width: 100%;
-    min-height: 44px;
-    padding: var(--hrv-spacing-xs) var(--hrv-spacing-s);
-    border: 1px solid var(--hrv-color-border);
-    border-radius: var(--hrv-radius-s);
+    padding: var(--hrv-spacing-s) var(--hrv-spacing-m);
+    border: none;
+    border-radius: var(--hrv-radius-m);
     background: var(--hrv-color-surface-alt);
     color: var(--hrv-color-text);
     font-size: var(--hrv-font-size-s);
+    font-weight: var(--hrv-font-weight-medium);
     font-family: inherit;
     cursor: pointer;
     transition: opacity var(--hrv-transition-speed), background var(--hrv-transition-speed);
@@ -125,10 +125,9 @@ const FAN_CARD_STYLES = /* css */`
 
   [part=direction-select] {
     width: 100%;
-    min-height: 44px;
-    padding: var(--hrv-spacing-xs) var(--hrv-spacing-s);
-    border: 1px solid var(--hrv-color-border);
-    border-radius: var(--hrv-radius-s);
+    padding: var(--hrv-spacing-s) var(--hrv-spacing-m);
+    border: none;
+    border-radius: var(--hrv-radius-m);
     background: var(--hrv-color-surface);
     color: var(--hrv-color-text);
     font-size: var(--hrv-font-size-s);
@@ -170,7 +169,8 @@ function _esc(str) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 export class FanCard extends BaseCard {
@@ -213,14 +213,21 @@ export class FanCard extends BaseCard {
 
   render() {
     const isWritable   = this.def.capabilities === "read-write";
-    const hasSpeed     = this.def.supported_features?.includes("set_speed");
     const hasOscillate = this.def.supported_features?.includes("oscillate");
     const hasDirection = this.def.supported_features?.includes("direction");
     const hasPreset    = this.def.supported_features?.includes("preset_mode")
                       || (this.def.feature_config?.preset_modes?.length > 0);
     const presetModes  = this.def.feature_config?.preset_modes ?? [];
     const step         = this.#percentageStep;
-    const isCycle      = this.#isCycleFan;
+
+    const displayMode  = this.config.displayHints?.display_mode ?? null;
+    let hasSpeed       = this.def.supported_features?.includes("set_speed");
+    let isCycle        = this.#isCycleFan;
+
+    if (displayMode === "on-off")      { hasSpeed = false; }
+    else if (displayMode === "continuous") { isCycle = false; }
+    else if (displayMode === "stepped")   { isCycle = false; }
+    else if (displayMode === "cycle")     { isCycle = true; }
 
     let speedHTML = "";
     if (isWritable && hasSpeed) {

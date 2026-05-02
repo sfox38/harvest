@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { ThemeDefinition, HAEntityDetail } from "../types";
-import { api } from "../api";
+import { api, getHaDarkMode } from "../api";
 import { Toggle } from "./Toggle";
 import { EntityAutocomplete } from "./Shared";
 import { Icon } from "./Icon";
@@ -50,6 +50,9 @@ export const DOMAIN_FEATURES: Record<string, FeatureOption[]> = {
   ],
   input_number: [
     { key: "slider", label: "Value slider", default: true },
+  ],
+  weather: [
+    { key: "forecast", label: "Forecast", default: true },
   ],
 };
 
@@ -134,6 +137,22 @@ export const MOCK_ENTITIES: Record<string, MockEntity> = {
   remote:         { domain: "remote",         label: "Remote",         friendly_name: "TV Remote",        state: "on",       attributes: {} },
   harvest_action: { domain: "harvest_action", label: "Action",         friendly_name: "Good Night",       state: "idle",     attributes: {} },
   timer:          { domain: "timer",          label: "Timer",          friendly_name: "Oven Timer",       state: "idle",     attributes: { duration: "0:25:00", remaining: "0:25:00" } },
+  weather:        { domain: "weather",        label: "Weather",        friendly_name: "Weather",          state: "sunny",    attributes: { temperature: 24, temperature_unit: "°C", humidity: 45, wind_speed: 12, wind_speed_unit: "km/h", pressure: 1013, pressure_unit: "hPa", forecast_daily: [
+    { datetime: "2026-05-02", condition: "partlycloudy", temperature: 22, templow: 14 },
+    { datetime: "2026-05-03", condition: "rainy",        temperature: 18, templow: 12 },
+    { datetime: "2026-05-04", condition: "cloudy",       temperature: 20, templow: 13 },
+    { datetime: "2026-05-05", condition: "sunny",        temperature: 25, templow: 15 },
+    { datetime: "2026-05-06", condition: "partlycloudy", temperature: 23, templow: 14 },
+  ], forecast_hourly: [
+    { datetime: "2026-05-02T08:00:00", condition: "sunny",        temperature: 18 },
+    { datetime: "2026-05-02T09:00:00", condition: "sunny",        temperature: 19 },
+    { datetime: "2026-05-02T10:00:00", condition: "partlycloudy", temperature: 21 },
+    { datetime: "2026-05-02T11:00:00", condition: "partlycloudy", temperature: 22 },
+    { datetime: "2026-05-02T12:00:00", condition: "cloudy",       temperature: 23 },
+    { datetime: "2026-05-02T13:00:00", condition: "cloudy",       temperature: 24 },
+    { datetime: "2026-05-02T14:00:00", condition: "partlycloudy", temperature: 24 },
+    { datetime: "2026-05-02T15:00:00", condition: "sunny",        temperature: 23 },
+  ] } },
 };
 
 const RENDERER_OPTIONS = [
@@ -158,6 +177,7 @@ const DOMAIN_DEFAULT_ICONS: Record<string, Record<string, string>> = {
   binary_sensor:  { on: "mdi:radiobox-marked",          "*": "mdi:radiobox-blank" },
   harvest_action: { triggered: "mdi:play-circle",       "*": "mdi:play-circle-outline" },
   timer:          { active: "mdi:timer",                paused: "mdi:timer-pause", "*": "mdi:timer-outline" },
+  weather:        { sunny: "mdi:weather-sunny",          "*": "mdi:weather-cloudy" },
 };
 
 function resolveDefaultIcon(domain: string, state: string): string {
@@ -189,7 +209,7 @@ const _WIDGET_SRC = `/harvest_assets/harvest.min.js?v=${buildVersion.build}`;
 let _widgetScriptLoaded = false;
 let _widgetScriptLoading: Promise<void> | null = null;
 
-function loadWidgetScript(): Promise<void> {
+export function loadWidgetScript(): Promise<void> {
   if (_widgetScriptLoaded) return Promise.resolve();
   if (_widgetScriptLoading) return _widgetScriptLoading;
   _widgetScriptLoading = new Promise<void>((resolve, reject) => {
@@ -206,14 +226,14 @@ const _loadedPacks = new Set<string>();
 const _loadingPacks = new Map<string, Promise<void>>();
 const _packCacheBust = new Map<string, string>();
 
-function loadPackScript(packId: string): Promise<void> {
+export function loadPackScript(packId: string): Promise<void> {
   if (_loadedPacks.has(packId)) return Promise.resolve();
   const existing = _loadingPacks.get(packId);
   if (existing) return existing;
-  const bust = _packCacheBust.get(packId) ?? "";
+  const bust = _packCacheBust.get(packId) || String(buildVersion.build);
   const p = new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = `/api/harvest/packs/${encodeURIComponent(packId)}.js${bust ? `?v=${bust}` : ""}`;
+    script.src = `/api/harvest/packs/${encodeURIComponent(packId)}.js?v=${bust}`;
     // Tell the pack IIFE which ID to register under (may differ from its hardcoded default)
     (window as { __HARVEST_PACK_ID__?: string | null }).__HARVEST_PACK_ID__ = packId;
     script.onload = () => {
@@ -249,7 +269,7 @@ export function resolveVars(
   if (!theme && !editedVars) return {};
   const base = editedVars ?? theme?.variables ?? {};
   const dark = editedDarkVars ?? theme?.dark_variables ?? {};
-  const usesDark = colorMode === "dark" || (colorMode === "auto" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  const usesDark = colorMode === "dark" || (colorMode === "auto" && getHaDarkMode());
   return usesDark ? { ...base, ...dark } : { ...base };
 }
 
@@ -317,6 +337,7 @@ function buildEntityDef(
     icon: currentIcon,
     icon_state_map: iconMap,
     unit_of_measurement: mock.unit ?? null,
+    ...(domain === "weather" && features.forecast ? { display_hints: { show_forecast: true } } : {}),
   };
 }
 
@@ -329,7 +350,7 @@ function buildAttributes(mock: MockEntity): Record<string, unknown> {
   return attrs;
 }
 
-function generateMockHistory(domain: string, graphType: GraphType, state: string): Array<{ t: string; s: string }> {
+export function generateMockHistory(domain: string, graphType: GraphType, state: string): Array<{ t: string; s: string }> {
   const now = Date.now();
   const hours = 24;
   const points: Array<{ t: string; s: string }> = [];
@@ -478,6 +499,7 @@ export function WidgetPreview({ variables, darkVariables, packId }: WidgetPrevie
     const stored = _ls.get("hrv_preview_color_mode");
     return (stored === "light" || stored === "dark" || stored === "auto") ? stored : "auto";
   });
+  const [bgTone, setBgTone] = useState(0);
   const [features, setFeatures] = useState<Record<string, boolean>>(defaultFeatures(_initRenderer));
   const [graphType, setGraphType] = useState<GraphType>(() => {
     const stored = _ls.get("hrv_preview_graph_type") as GraphType | null;
@@ -564,7 +586,7 @@ export function WidgetPreview({ variables, darkVariables, packId }: WidgetPrevie
   const domainFeatures = DOMAIN_FEATURES[effectiveDomain] ?? [];
   const graphOptions = GRAPH_DOMAINS[effectiveDomain];
 
-  const usesDark = colorMode === "dark" || (colorMode === "auto" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  const usesDark = colorMode === "dark" || (colorMode === "auto" && getHaDarkMode());
   const vars = usesDark ? { ...variables, ...(darkVariables ?? {}) } : { ...variables };
 
   return (
@@ -638,13 +660,35 @@ export function WidgetPreview({ variables, darkVariables, packId }: WidgetPrevie
         )}
       </div>
 
-      <div
-        className="theme-preview-stage"
-        style={{
-          background: colorMode === "light" ? "#ffffff" : colorMode === "dark" ? "#000000" : undefined,
-        }}
-      >
-        <RealWidget mock={previewMock} vars={vars} capability={capability} features={features} graphType={graphType} packId={packId} />
+      <div style={{ display: "flex", alignItems: "stretch", gap: 8 }}>
+        <div
+          className="theme-preview-stage"
+          style={{
+            flex: 1,
+            background: (() => {
+              const toneColor = usesDark
+                ? (darkVariables?.["--hrv-color-surface"] ?? variables?.["--hrv-color-surface"] ?? "#1a1a2e")
+                : "#1a1a2e";
+              if (bgTone === 0) return "transparent";
+              return `color-mix(in srgb, ${toneColor} ${bgTone}%, transparent)`;
+            })(),
+          }}
+        >
+          <RealWidget mock={previewMock} vars={vars} capability={capability} features={features} graphType={graphType} packId={packId} />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", paddingBottom: 12 }}>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={bgTone}
+            onChange={ev => setBgTone(Number(ev.target.value))}
+            orient="vertical"
+            aria-label="Preview background tone"
+            title="Adjust preview background tone"
+            className="preview-bg-slider"
+          />
+        </div>
       </div>
     </div>
   );

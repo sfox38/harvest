@@ -55,11 +55,11 @@ export interface EntityAccess {
   capabilities: "read" | "read-write";
   exclude_attributes: string[];
   companion_of: string | null;
-  graph: "line" | "bar" | null;
-  hours: number;
-  period: number;
-  animate: boolean;
   gesture_config: GestureConfig;
+  name_override: string | null;
+  icon_override: string | null;
+  color_scheme: "auto" | "light" | "dark";
+  display_hints: Record<string, unknown>;
 }
 
 export type TokenStatus = "active" | "inactive" | "expiring_soon" | "expired" | "revoked";
@@ -176,6 +176,15 @@ export interface HarvestAction {
 // Theme
 // ---------------------------------------------------------------------------
 
+export interface ThemeCapabilities {
+  fan?: { display_modes?: string[] };
+  input_number?: { display_modes?: string[] };
+  light?: { features?: string[] };
+  climate?: { features?: string[] };
+  cover?: { features?: string[] };
+  media_player?: { features?: string[] };
+}
+
 export interface ThemeDefinition {
   theme_id: string;
   name: string;
@@ -184,12 +193,14 @@ export interface ThemeDefinition {
   harvest_version: number;
   variables: Record<string, string>;
   dark_variables: Record<string, string>;
-  renderer_pack: string;
+  renderer_pack: boolean;
+  has_pack: boolean;
   is_bundled: boolean;
   has_thumbnail: boolean;
   usage_count: number;
   created_by: string;
   created_at: string;
+  capabilities: ThemeCapabilities | null;
 }
 
 // ---------------------------------------------------------------------------

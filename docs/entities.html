@@ -101,8 +101,11 @@
         <section>
         <h2 id="tier1">Tier 1 - Dedicated renderers</h2>
 
+        <p>Every entity has universal settings available in the entity settings card: <strong>name override</strong> (custom display name replacing the HA friendly name), <strong>force color scheme</strong> (Auto, Light, or Dark per entity), <strong>access</strong> (Read only or Control), <strong>companions</strong>, <strong>gestures</strong>, and <strong>excluded attributes</strong>. Domain-specific settings are listed under each entity type below.</p>
+
         <h3>light</h3>
         <p>On/off toggle, brightness slider, color temperature slider. Hides controls the physical device doesn't support (e.g. no brightness slider on a non-dimmable light). Supported features are read from the entity's <code>supported_features</code> bitmask.</p>
+        <p><strong>Display settings:</strong> brightness, color temperature, and RGB color can each be individually toggled on or off in the entity settings card.</p>
         <p><strong>History graph:</strong> supported (configurable per entity in the panel)</p>
 
         <h3>switch</h3>
@@ -124,21 +127,27 @@
 
         <h3>fan</h3>
         <p>Toggle, speed percentage slider, oscillate toggle, direction selector (forward/reverse). The fan icon optionally spins when the entity is on (enabled via the <strong>Animate</strong> display setting in the panel). Controls that the physical device doesn't support are hidden.</p>
+        <p><strong>Display settings:</strong> choose a display mode to override auto-detection: Auto (default), On/Off only (hides speed controls), Continuous (forces slider), Stepped (forces step buttons), or Cycle (forces cycle button).</p>
 
         <h3>climate</h3>
         <p>HVAC mode selector (heat, cool, heat_cool, auto, dry, fan_only, off), target temperature controls (up/down buttons with numeric display), current temperature read-only display, fan mode dropdown, preset mode dropdown. All controls respect the entity's supported modes.</p>
+        <p><strong>Display settings:</strong> HVAC modes, presets, fan mode, and swing mode can each be individually toggled on or off.</p>
 
         <h3>cover</h3>
         <p>Open, stop, and close buttons. Position slider (0-100%). Controls are shown or hidden based on device capabilities (some covers are open/close only with no position support).</p>
+        <p><strong>Display settings:</strong> position slider and tilt control can be individually toggled.</p>
 
         <h3>media_player</h3>
         <p>Play/pause, next track, previous track, volume slider, mute toggle. Current track title, artist, and source display. Album art is not supported in v1.</p>
+        <p><strong>Display settings:</strong> transport controls, volume, and source selector can be individually toggled.</p>
 
         <h3>input_boolean</h3>
         <p>On/off toggle. Functionally equivalent to switch but for HA input helpers.</p>
 
         <h3>input_number</h3>
         <p>Range slider spanning the entity's min/max, with current value display. Step size respects the entity's configured step.</p>
+        <p><strong>Display settings:</strong> choose between Slider (default) or Buttons mode.</p>
+        <p><strong>History graph:</strong> supported</p>
 
         <h3>input_select</h3>
         <p>Dropdown selector showing all available options. Current option is pre-selected.</p>
@@ -148,6 +157,11 @@
 
         <h3>remote</h3>
         <p>Activity chip grid (selectable activities), raw command input with a send button. Power toggle. Shows the device's configured activity list.</p>
+
+        <h3>weather</h3>
+        <p>Read-only. Displays current conditions: a large condition icon paired with the temperature, condition label, and a detail row showing humidity, wind speed, and pressure. A 5-day forecast strip appears below, showing day name, condition icon, and high/low temperatures for each day.</p>
+        <p>Forecast data is fetched directly from HA's <code>weather/subscribe_forecast</code> API and pushed to the widget automatically. This works correctly on HA 2024.4+ where the <code>forecast</code> state attribute was removed.</p>
+        <p><strong>History graph:</strong> not supported.</p>
 
         <h3>harvest_action</h3>
         <p>A virtual entity domain for safe, panel-configured button actions. Each action is a pre-defined service call or automation trigger set up in the HArvest panel's Actions tab. The card renders as a full-width trigger button. Actions run with HA's full permissions but only execute the specific service calls you configured - visitors can't invoke arbitrary HA services.</p>
@@ -164,7 +178,7 @@
           <li>A basic toggle, if the domain supports <code>turn_on</code> / <code>turn_off</code></li>
         </ul>
 
-        <p>Some examples of Tier 2 domains: <code>number</code>, <code>select</code>, <code>text</code>, <code>date</code>, <code>time</code>, <code>event</code>, <code>calendar</code>, <code>weather</code>.</p>
+        <p>Some examples of Tier 2 domains: <code>number</code>, <code>select</code>, <code>text</code>, <code>date</code>, <code>time</code>, <code>event</code>, <code>calendar</code>.</p>
         </section>
 
         <section>
@@ -216,7 +230,7 @@
           </table>
         </div>
 
-        <p>Maximum 4 companions per card. Companions are configured per-entity in the panel's entity display settings - no HTML attribute needed. When the companion is assigned, the server automatically subscribes it and delivers its state alongside the primary entity.</p>
+        <p>There is no per-card companion limit. The total number of entities (primaries plus companions) per token is capped at 50. Companions are configured per-entity in the panel's entity display settings - no HTML attribute needed. When the companion is assigned, the server automatically subscribes it and delivers its state alongside the primary entity.</p>
 
         <div class="callout callout-warn">
           <span class="callout-label">Important</span>
@@ -236,13 +250,13 @@
               <tr><td><code>light</code></td><td><code>turn_on</code>, <code>turn_off</code>, <code>toggle</code></td></tr>
               <tr><td><code>switch</code></td><td><code>turn_on</code>, <code>turn_off</code>, <code>toggle</code></td></tr>
               <tr><td><code>input_boolean</code></td><td><code>turn_on</code>, <code>turn_off</code>, <code>toggle</code></td></tr>
-              <tr><td><code>fan</code></td><td><code>turn_on</code>, <code>turn_off</code>, <code>toggle</code>, <code>set_percentage</code>, <code>oscillate</code>, <code>set_direction</code></td></tr>
+              <tr><td><code>fan</code></td><td><code>turn_on</code>, <code>turn_off</code>, <code>toggle</code>, <code>set_percentage</code>, <code>oscillate</code>, <code>set_direction</code>, <code>set_preset_mode</code>, <code>increase_speed</code>, <code>decrease_speed</code></td></tr>
               <tr><td><code>cover</code></td><td><code>open_cover</code>, <code>close_cover</code>, <code>stop_cover</code>, <code>set_cover_position</code></td></tr>
               <tr><td><code>climate</code></td><td><code>turn_on</code>, <code>turn_off</code>, <code>set_temperature</code>, <code>set_hvac_mode</code>, <code>set_fan_mode</code>, <code>set_preset_mode</code>, <code>set_swing_mode</code></td></tr>
               <tr><td><code>input_number</code></td><td><code>set_value</code></td></tr>
               <tr><td><code>input_select</code></td><td><code>select_option</code></td></tr>
               <tr><td><code>timer</code></td><td><code>start</code>, <code>pause</code>, <code>cancel</code>, <code>finish</code></td></tr>
-              <tr><td><code>media_player</code></td><td><code>media_play_pause</code>, <code>media_next_track</code>, <code>media_previous_track</code>, <code>volume_up</code>, <code>volume_down</code>, <code>volume_set</code>, <code>volume_mute</code>, <code>turn_on</code>, <code>turn_off</code></td></tr>
+              <tr><td><code>media_player</code></td><td><code>media_play_pause</code>, <code>media_next_track</code>, <code>media_previous_track</code>, <code>volume_up</code>, <code>volume_down</code>, <code>volume_set</code>, <code>volume_mute</code>, <code>select_source</code>, <code>turn_on</code>, <code>turn_off</code></td></tr>
               <tr><td><code>remote</code></td><td><code>turn_on</code>, <code>turn_off</code>, <code>send_command</code></td></tr>
               <tr><td><code>harvest_action</code></td><td><code>trigger</code> (executes the pre-configured service call defined in the panel)</td></tr>
             </tbody>

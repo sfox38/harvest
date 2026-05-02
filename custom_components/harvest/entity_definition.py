@@ -131,42 +131,22 @@ FEATURE_FLAGS: dict[str, dict[int, str]] = {
     "remote": {1: "learn_command", 2: "delete_command"},
 }
 
-# Standard (card-level) attributes per domain. All other non-denied attributes
-# go to extended_attributes in state_update messages.
-STANDARD_ATTRIBUTES: dict[str, frozenset[str]] = {
-    "light": frozenset({
-        "brightness", "color_temp", "color_temp_kelvin", "color_mode",
-        "supported_color_modes",
-        "min_mireds", "max_mireds",
-        "min_color_temp_kelvin", "max_color_temp_kelvin",
-        "effect_list", "effect",
-        "rgb_color", "hs_color",
-    }),
-    "fan": frozenset({
-        "percentage", "percentage_step", "oscillating",
-        "direction", "preset_mode", "preset_modes",
-    }),
-    "cover": frozenset({"current_position", "current_tilt_position"}),
-    "climate": frozenset({
-        "current_temperature", "target_temp_high", "target_temp_low",
-        "temperature", "hvac_modes", "hvac_action", "fan_modes", "fan_mode",
-        "preset_modes", "preset_mode", "swing_modes", "swing_mode",
-        "min_temp", "max_temp", "target_temp_step",
-    }),
-    "sensor": frozenset({
-        "unit_of_measurement", "device_class", "state_class", "last_reset",
-    }),
-    "binary_sensor": frozenset({"device_class"}),
-    "media_player": frozenset({
-        "media_title", "media_artist", "media_album_name",
-        "media_duration", "media_position", "media_content_type",
-        "source", "source_list", "volume_level", "is_volume_muted",
-    }),
-    "remote": frozenset({"current_activity", "activity_list"}),
-    "input_number": frozenset({"min", "max", "step", "mode", "unit_of_measurement"}),
-    "input_select": frozenset({"options"}),
-    "timer": frozenset({"duration", "remaining", "finishes_at"}),
-}
+# Attributes blocked from state_update messages. All other attributes are
+# forwarded to the widget. Individual values exceeding MAX_ATTRIBUTE_VALUE_BYTES
+# are silently dropped as a safety net against oversized payloads.
+BLOCKED_ATTRIBUTES: frozenset[str] = frozenset({
+    "supported_features",
+    "supported_color_modes",
+    "friendly_name",
+    "attribution",
+    "assumed_state",
+    "editable",
+    "id",
+    # "forecast" -- injected by ws_proxy via weather/subscribe_forecast,
+    # not a state attribute in HA 2024.4+.
+})
+
+MAX_ATTRIBUTE_VALUE_BYTES = 8192
 
 # Default icon per state for each domain. Used when the entity registry has no
 # custom icon set. State key "*" applies to all unlisted states.
@@ -227,6 +207,24 @@ _DOMAIN_ICON_DEFAULTS: dict[str, dict[str, str]] = {
         "active": "mdi:timer",
         "paused": "mdi:timer-pause",
         "*":      "mdi:timer-outline",
+    },
+    "weather": {
+        "sunny":            "mdi:weather-sunny",
+        "clear-night":      "mdi:weather-night",
+        "partlycloudy":     "mdi:weather-partly-cloudy",
+        "cloudy":           "mdi:weather-cloudy",
+        "fog":              "mdi:weather-fog",
+        "rainy":            "mdi:weather-rainy",
+        "pouring":          "mdi:weather-pouring",
+        "snowy":            "mdi:weather-snowy",
+        "snowy-rainy":      "mdi:weather-snowy-heavy",
+        "hail":             "mdi:weather-hail",
+        "lightning":        "mdi:weather-lightning",
+        "lightning-rainy":  "mdi:weather-lightning-rainy",
+        "windy":            "mdi:weather-windy",
+        "windy-variant":    "mdi:weather-windy-variant",
+        "exceptional":      "mdi:alert-circle-outline",
+        "*":                "mdi:weather-cloudy",
     },
 }
 
@@ -289,11 +287,13 @@ def build_entity_definition(
     if device_class is None:
         device_class = attrs.get("device_class")
 
-    # friendly_name: prefer state attribute (HA keeps it current), fall back to
-    # registry original_name.
-    friendly_name: str = attrs.get("friendly_name") or ""
-    if not friendly_name and entry is not None:
-        friendly_name = entry.name or entry.original_name or entity_id
+    # friendly_name: name_override takes priority, then state attribute, then registry.
+    if entity_access.name_override:
+        friendly_name: str = entity_access.name_override
+    else:
+        friendly_name = attrs.get("friendly_name") or ""
+        if not friendly_name and entry is not None:
+            friendly_name = entry.name or entry.original_name or entity_id
 
     # supported_features bitmask -> string list.
     supported_features = decode_supported_features(
@@ -317,11 +317,21 @@ def build_entity_definition(
     if domain == "cover" and "buttons" not in supported_features:
         supported_features.append("buttons")
 
-    # icon_state_map (includes the icon for the current state as default icon).
-    icon_state_map = build_icon_state_map(domain, state, entry, device_class)
+    if domain == "weather":
+        raw_features = attrs.get("supported_features", 0) or 0
+        if raw_features & 1:
+            supported_features.append("forecast_daily")
+        if raw_features & 2:
+            supported_features.append("forecast_hourly")
 
-    # The entity's default icon is the one for its current state.
-    current_icon = icon_state_map.get(state.state) or icon_state_map.get("*", "mdi:help-circle")
+    # icon_state_map (includes the icon for the current state as default icon).
+    # icon_override replaces all state-specific icons with a single fixed icon.
+    if entity_access.icon_override:
+        icon_state_map = {"*": entity_access.icon_override}
+        current_icon = entity_access.icon_override
+    else:
+        icon_state_map = build_icon_state_map(domain, state, entry, device_class)
+        current_icon = icon_state_map.get(state.state) or icon_state_map.get("*", "mdi:help-circle")
 
     # feature_config for domain-specific sliders / range controls.
     feature_config = build_feature_config(domain, state)
@@ -354,10 +364,8 @@ def build_entity_definition(
         "renderer": renderer,
         "unit_of_measurement": unit_of_measurement,
         "gesture_config": entity_access.gesture_config or {},
-        "graph": entity_access.graph,
-        "hours": entity_access.hours,
-        "period": entity_access.period,
-        "animate": entity_access.animate,
+        "color_scheme": entity_access.color_scheme,
+        "display_hints": entity_access.display_hints or {},
         "companions": companions or [],
     }
 
@@ -372,19 +380,25 @@ def decode_supported_features(domain: str, bitmask: int) -> list[str]:
     return [name for bit, name in flags.items() if bitmask & bit]
 
 
-def split_attributes(domain: str, attributes: dict) -> tuple[dict, dict]:
-    """Split entity attributes into standard and extended dicts.
+def filter_attributes(attributes: dict) -> dict:
+    """Filter entity attributes using a blocklist and per-value size cap.
 
-    Standard attributes are those in STANDARD_ATTRIBUTES for the domain.
-    All others go to extended_attributes.
-    friendly_name is excluded from both (delivered in entity_definition separately).
+    Removes globally blocked attributes and any individual value whose JSON
+    serialization exceeds MAX_ATTRIBUTE_VALUE_BYTES.
     """
-    standard_keys = STANDARD_ATTRIBUTES.get(domain, frozenset())
-    standard = {k: v for k, v in attributes.items()
-                if k in standard_keys and k != "friendly_name"}
-    extended = {k: v for k, v in attributes.items()
-                if k not in standard_keys and k != "friendly_name"}
-    return standard, extended
+    import json
+
+    filtered = {}
+    for k, v in attributes.items():
+        if k in BLOCKED_ATTRIBUTES:
+            continue
+        try:
+            if len(json.dumps(v, default=str)) > MAX_ATTRIBUTE_VALUE_BYTES:
+                continue
+        except (TypeError, ValueError):
+            continue
+        filtered[k] = v
+    return filtered
 
 
 def build_icon_state_map(

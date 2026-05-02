@@ -77,7 +77,7 @@ def register_views(
     hass.http.register_view(HarvestActionsView(action_manager))
     hass.http.register_view(HarvestActionDetailView(action_manager))
     if theme_manager is not None:
-        hass.http.register_view(HarvestThemesView(theme_manager, token_manager))
+        hass.http.register_view(HarvestThemesView(theme_manager, token_manager, pack_manager))
         hass.http.register_view(HarvestThemeReloadView(theme_manager, token_manager, session_manager, pack_manager))
         hass.http.register_view(HarvestThemeDetailView(theme_manager, token_manager, session_manager, pack_manager))
         hass.http.register_view(HarvestThemeThumbnailView(hass, theme_manager))
@@ -222,17 +222,43 @@ def _parse_entities(raw_list: list) -> list[EntityAccess]:
         cap = str(e.get("capabilities", "read"))
         if cap not in _VALID_CAPABILITIES:
             raise ValueError(f"Invalid capabilities {cap!r}; must be one of {_VALID_CAPABILITIES}")
+        name_override = e.get("name_override") or None
+        if name_override is not None:
+            name_override = str(name_override).strip()
+            if len(name_override) > 100:
+                raise ValueError(f"name_override for {entity_id} exceeds 100 characters.")
+            if not name_override:
+                name_override = None
+
+        icon_override = e.get("icon_override") or None
+        if icon_override is not None:
+            icon_override = str(icon_override).strip()
+            if not icon_override.startswith("mdi:") or len(icon_override) > 64:
+                raise ValueError(f"icon_override for {entity_id} must be a valid mdi:<name> key.")
+
+        color_scheme = str(e.get("color_scheme", "auto"))
+        if color_scheme not in ("auto", "light", "dark"):
+            raise ValueError(f"Invalid color_scheme {color_scheme!r} for {entity_id}.")
+
+        display_hints = e.get("display_hints")
+        if display_hints is not None:
+            if not isinstance(display_hints, dict):
+                raise ValueError(f"display_hints for {entity_id} must be a dict.")
+            display_hints = dict(display_hints)
+        else:
+            display_hints = {}
+
         entities.append(EntityAccess(
             entity_id=entity_id,
             capabilities=cap,
             alias=e.get("alias") or None,
             exclude_attributes=list(e.get("exclude_attributes", [])),
             companion_of=e.get("companion_of") or None,
-            graph=e.get("graph") or None,
-            hours=int(e.get("hours", 24)),
-            period=int(e.get("period", 10)),
-            animate=bool(e.get("animate", False)),
             gesture_config=_parse_gesture_config(e.get("gesture_config", {})),
+            name_override=name_override,
+            icon_override=icon_override,
+            color_scheme=color_scheme,
+            display_hints=display_hints,
         ))
     return entities
 
@@ -495,9 +521,13 @@ class HarvestTokenDetailView(HomeAssistantView):
             return
         msg: dict[str, Any] = {"type": "renderer_pack", "url": ""}
         if token.renderer_pack and self._pack_manager:
-            pack_def = self._pack_manager.get(token.renderer_pack)
-            if pack_def:
-                msg["url"] = f"/api/harvest/packs/{token.renderer_pack}.js"
+            path = self._pack_manager.get_pack_path(token.renderer_pack)
+            if path:
+                try:
+                    mtime = int(path.stat().st_mtime)
+                except OSError:
+                    mtime = 0
+                msg["url"] = f"/api/harvest/packs/{token.renderer_pack}.js?v={mtime}"
         for session in self._session_manager.get_all_for_token(token_id):
             if not session.ws.closed:
                 try:
@@ -505,13 +535,20 @@ class HarvestTokenDetailView(HomeAssistantView):
                 except Exception:
                     pass
 
-    async def _push_entity_definitions_to_sessions(self, token_id: str) -> None:
-        """Push updated entity_definition messages to all active sessions for a token.
+    async def _push_entity_definitions_to_sessions(
+        self,
+        token_id: str,
+        changed_entity_ids: set[str] | None = None,
+    ) -> None:
+        """Push updated entity_definition messages to active sessions for a token.
 
         Called after entity capabilities, graph settings, or exclude_attributes
         change so that connected widgets reflect the new configuration without
-        requiring a reconnect. Also reconciles companion subscriptions: subscribes
-        new companions and unsubscribes removed ones.
+        requiring a reconnect. Also reconciles companion subscriptions.
+
+        If changed_entity_ids is provided, only those entities get a definition
+        push (companion reconciliation still runs for all). When None, all
+        subscribed entities are pushed.
         """
         token = self._token_manager.get(token_id)
         if not token:
@@ -519,7 +556,8 @@ class HarvestTokenDetailView(HomeAssistantView):
         ea_map = {ea.entity_id: ea for ea in token.entities}
         primary_ids = {ea.entity_id for ea in token.entities if ea.companion_of is None}
 
-        for session in self._session_manager.get_all_for_token(token_id):
+        sessions = self._session_manager.get_all_for_token(token_id)
+        for session in sessions:
             if session.ws.closed:
                 continue
 
@@ -533,12 +571,18 @@ class HarvestTokenDetailView(HomeAssistantView):
 
             current_subs = set(session.subscribed_entity_ids)
 
-            # Subscribe new companions.
+            # Subscribe new companions and register their outgoing IDs.
             new_companions = expected_companions - current_subs
             if new_companions:
                 self._session_manager.add_subscription(
                     session.session_id, list(new_companions)
                 )
+                for comp_id in new_companions:
+                    if comp_id not in session.outgoing_ids:
+                        comp_ea = ea_map.get(comp_id)
+                        session.outgoing_ids[comp_id] = (
+                            comp_ea.alias or comp_id
+                        ) if comp_ea else comp_id
 
             # Unsubscribe removed companions (only companions, not primaries).
             removed = (current_subs - expected_companions - primary_ids) & {
@@ -549,8 +593,10 @@ class HarvestTokenDetailView(HomeAssistantView):
                     session.session_id, list(removed)
                 )
                 for rem_id in removed:
-                    ea = ea_map.get(rem_id)
-                    out_id = (ea.alias if ea and ea.alias else rem_id)
+                    rem_ea = ea_map.get(rem_id)
+                    out_id = session.outgoing_ids.get(
+                        rem_id, rem_ea.alias if rem_ea and rem_ea.alias else rem_id
+                    )
                     try:
                         await session.ws.send_json({
                             "type": "entity_removed",
@@ -560,14 +606,21 @@ class HarvestTokenDetailView(HomeAssistantView):
                     except Exception:
                         pass
 
-            # Send updated definitions + state for all currently subscribed entities.
-            all_subs = set(session.subscribed_entity_ids)
-            for real_id in all_subs:
+            # Decide which entities to push.
+            push_ids = set(session.subscribed_entity_ids)
+            if changed_entity_ids is not None:
+                push_ids &= changed_entity_ids
+
+            if not push_ids:
+                continue
+
+            for real_id in push_ids:
                 ea = ea_map.get(real_id)
                 if ea is None:
                     continue
+                out_id = session.outgoing_ids.get(real_id, ea.alias or real_id)
                 companion_refs = [
-                    (comp_ea.alias or comp_ea.entity_id)
+                    session.outgoing_ids.get(comp_ea.entity_id, comp_ea.alias or comp_ea.entity_id)
                     for comp_ea in token.entities
                     if comp_ea.companion_of == real_id
                 ]
@@ -576,7 +629,6 @@ class HarvestTokenDetailView(HomeAssistantView):
                 )
                 if defn is None:
                     continue
-                out_id = ea.alias if ea.alias else real_id
                 defn = dict(defn)
                 defn["type"] = "entity_definition"
                 defn["entity_id"] = out_id
@@ -592,6 +644,14 @@ class HarvestTokenDetailView(HomeAssistantView):
                     filtered = self._token_manager.filter_attributes(
                         real_id, token, dict(state.attributes)
                     )
+                    if real_id.startswith("weather.") and ea.display_hints.get("show_forecast") is True:
+                        fc = await self._try_fetch_forecast(real_id)
+                        if fc:
+                            filtered = dict(filtered)
+                            if fc.get("daily"):
+                                filtered["forecast_daily"] = fc["daily"]
+                            if fc.get("hourly"):
+                                filtered["forecast_hourly"] = fc["hourly"]
                     try:
                         await session.ws.send_json({
                             "type": "state_update",
@@ -628,6 +688,27 @@ class HarvestTokenDetailView(HomeAssistantView):
                     await session.ws.send_json(update)
                 except Exception:
                     pass
+
+    async def _try_fetch_forecast(self, entity_id: str) -> dict[str, list | None] | None:
+        """Fetch daily and hourly forecast for a weather entity."""
+        try:
+            component = self._hass.data.get("weather")
+            if component is None:
+                return None
+            entity = component.get_entity(entity_id)
+            if entity is None:
+                return None
+            from homeassistant.components.weather import WeatherEntityFeature
+            from .ws_proxy import _normalize_forecast
+            features = entity.supported_features or 0
+            result: dict[str, list | None] = {}
+            if features & WeatherEntityFeature.FORECAST_DAILY:
+                result["daily"] = _normalize_forecast(await entity.async_forecast_daily())
+            if features & WeatherEntityFeature.FORECAST_HOURLY:
+                result["hourly"] = _normalize_forecast(await entity.async_forecast_hourly())
+            return result if result else None
+        except Exception:
+            return None
 
     def _resolve_token_display(self, token: "Token") -> dict:
         """Resolve effective display values for a token, falling back to global defaults."""
@@ -744,7 +825,7 @@ class HarvestTokenDetailView(HomeAssistantView):
             if self._theme_manager:
                 theme_id = theme_url_to_id(new_theme_url)
                 theme_def = self._theme_manager.get(theme_id)
-                updates["renderer_pack"] = theme_def.renderer_pack if theme_def else ""
+                updates["renderer_pack"] = theme_id if theme_def and theme_def.has_renderer_pack else ""
 
         if "custom_messages" in body:
             if not isinstance(body["custom_messages"], bool):
@@ -800,6 +881,8 @@ class HarvestTokenDetailView(HomeAssistantView):
                     reason='token_secret must be "generate" or null.'
                 )
 
+        old_ea_map = {ea.entity_id: ea for ea in token.entities} if "entities" in updates else {}
+
         try:
             token = await self._token_manager.update(token_id, updates)
         except (ValueError, KeyError) as exc:
@@ -813,7 +896,23 @@ class HarvestTokenDetailView(HomeAssistantView):
                     asyncio.create_task(_close_ws_with_auth_failed(ws))
 
         if "entities" in updates:
-            await self._push_entity_definitions_to_sessions(token_id)
+            changed: set[str] = set()
+            new_ea_map = {ea.entity_id: ea for ea in token.entities}
+            for eid, new_ea in new_ea_map.items():
+                old_ea = old_ea_map.get(eid)
+                if old_ea is None or old_ea != new_ea:
+                    changed.add(eid)
+                    # If this is a companion, also push the primary so its companions list updates.
+                    if new_ea.companion_of:
+                        changed.add(new_ea.companion_of)
+            for old_id in old_ea_map:
+                if old_id not in new_ea_map:
+                    changed.add(old_id)
+                    # If a companion was removed, push the primary too.
+                    old_ea = old_ea_map[old_id]
+                    if old_ea.companion_of:
+                        changed.add(old_ea.companion_of)
+            await self._push_entity_definitions_to_sessions(token_id, changed or None)
 
         if "theme_url" in updates:
             await self._push_theme_to_sessions(token_id)
@@ -1230,9 +1329,10 @@ class HarvestThemesView(HomeAssistantView):
     name = "api:harvest:themes"
     requires_auth = True
 
-    def __init__(self, theme_manager: ThemeManager, token_manager: TokenManager) -> None:
+    def __init__(self, theme_manager: ThemeManager, token_manager: TokenManager, pack_manager: PackManager | None = None) -> None:
         self._theme_manager = theme_manager
         self._token_manager = token_manager
+        self._pack_manager = pack_manager
 
     def _usage_counts(self) -> dict[str, int]:
         counts: dict[str, int] = {}
@@ -1250,6 +1350,10 @@ class HarvestThemesView(HomeAssistantView):
         for theme in self._theme_manager.get_all():
             d = theme_to_api_dict(theme, has_thumbnail=self._theme_manager.has_thumbnail(theme.theme_id))
             d["usage_count"] = counts.get(theme.theme_id, 0)
+            if theme.has_renderer_pack and self._pack_manager is not None:
+                d["has_pack"] = self._pack_manager.get_pack_path(theme.theme_id) is not None
+            else:
+                d["has_pack"] = False
             result.append(d)
         return self.json(result)
 
@@ -1275,6 +1379,8 @@ class HarvestThemesView(HomeAssistantView):
         if not isinstance(variables, dict):
             raise web.HTTPBadRequest(reason="variables must be an object.")
 
+        raw_cap = body.get("capabilities")
+        capabilities = raw_cap if isinstance(raw_cap, dict) else None
         theme = await self._theme_manager.create(
             name=name,
             variables=variables,
@@ -1282,9 +1388,12 @@ class HarvestThemesView(HomeAssistantView):
             created_by=user.id,
             author=str(body.get("author", "")),
             version=str(body.get("version", "1.0")),
-            renderer_pack=str(body.get("renderer_pack", "")),
+            has_renderer_pack=bool(body.get("renderer_pack", False)),
+            capabilities=capabilities,
         )
-        return self.json(theme_to_api_dict(theme), status_code=201)
+        d = theme_to_api_dict(theme)
+        d["has_pack"] = False
+        return self.json(d, status_code=201)
 
 
 class HarvestThemeReloadView(HomeAssistantView):
@@ -1329,8 +1438,7 @@ class HarvestThemeReloadView(HomeAssistantView):
             }
             pack_msg: dict[str, Any] = {"type": "renderer_pack", "url": ""}
             if token.renderer_pack and self._pack_manager:
-                pack_def = self._pack_manager.get(token.renderer_pack)
-                if pack_def:
+                if self._pack_manager.get_pack_path(token.renderer_pack):
                     pack_msg["url"] = f"/api/harvest/packs/{token.renderer_pack}.js?v={ts}"
             for session in self._session_manager.get_all_for_token(token.token_id):
                 if not session.ws.closed:
@@ -1391,6 +1499,10 @@ class HarvestThemeDetailView(HomeAssistantView):
             if theme_url_to_id(t.theme_url) == theme_id
         )
         d["usage_count"] = count
+        if theme.has_renderer_pack and self._pack_manager is not None:
+            d["has_pack"] = self._pack_manager.get_pack_path(theme_id) is not None
+        else:
+            d["has_pack"] = False
         return self.json(d)
 
     async def patch(self, request: web.Request, theme_id: str) -> web.Response:
@@ -1425,11 +1537,10 @@ class HarvestThemeDetailView(HomeAssistantView):
                 raise web.HTTPBadRequest(reason="dark_variables must be an object.")
             updates["dark_variables"] = body["dark_variables"]
         if "renderer_pack" in body:
-            pack_val = str(body["renderer_pack"] or "")
-            if pack_val and self._pack_manager:
-                if not self._pack_manager.get(pack_val):
-                    raise web.HTTPBadRequest(reason=f"Unknown renderer pack: {pack_val}")
-            updates["renderer_pack"] = pack_val
+            updates["has_renderer_pack"] = bool(body["renderer_pack"])
+        if "capabilities" in body:
+            raw_cap = body["capabilities"]
+            updates["capabilities"] = raw_cap if isinstance(raw_cap, dict) else None
 
         try:
             theme = await self._theme_manager.update(theme_id, updates)
@@ -1441,44 +1552,47 @@ class HarvestThemeDetailView(HomeAssistantView):
         if "variables" in updates or "dark_variables" in updates:
             await self._push_theme_to_tokens(theme_id, theme)
 
-        return self.json(theme_to_api_dict(theme))
+        d = theme_to_api_dict(theme)
+        if theme.has_renderer_pack and self._pack_manager is not None:
+            d["has_pack"] = self._pack_manager.get_pack_path(theme_id) is not None
+        else:
+            d["has_pack"] = False
+        return self.json(d)
 
     async def delete(self, request: web.Request, theme_id: str) -> web.Response:
         user = request.get("hass_user")
         if user is None or not user.is_admin:
             raise web.HTTPForbidden()
 
-        theme = self._theme_manager.get(theme_id)
-        if theme is None:
-            raise web.HTTPNotFound(reason=f"Theme not found: {theme_id}")
-        orphaned_pack = theme.renderer_pack
-
         try:
             await self._theme_manager.delete(theme_id)
         except ValueError as exc:
             raise web.HTTPForbidden(reason=str(exc))
         except KeyError:
-            raise web.HTTPNotFound(reason=f"Theme not found: {theme_id}")
+            pass
 
+        affected_token_ids: list[str] = []
         for token in self._token_manager.get_all():
             if theme_url_to_id(token.theme_url) == theme_id:
+                affected_token_ids.append(token.token_id)
                 await self._token_manager.update(
                     token.token_id, {"theme_url": "", "renderer_pack": ""},
                 )
 
-        # Delete the associated custom pack if no other theme still references it.
-        if orphaned_pack and self._pack_manager:
-            pack = self._pack_manager.get(orphaned_pack)
-            if pack and not pack.is_bundled:
-                still_used = any(
-                    t.renderer_pack == orphaned_pack
-                    for t in self._theme_manager.get_all()
-                )
-                if not still_used:
+        for tid in affected_token_ids:
+            for session in self._session_manager.get_all_for_token(tid):
+                if not session.ws.closed:
                     try:
-                        await self._pack_manager.delete(orphaned_pack)
+                        await session.ws.send_json({"type": "theme", "variables": {}})
+                        await session.ws.send_json({"type": "renderer_pack"})
                     except Exception:
                         pass
+
+        if self._pack_manager:
+            try:
+                await self._pack_manager.delete_user_pack(theme_id)
+            except Exception:
+                pass
 
         return web.Response(status=204)
 
@@ -1509,7 +1623,7 @@ class HarvestThemeThumbnailView(HomeAssistantView):
         return web.Response(
             body=data,
             content_type=ct,
-            headers={"Cache-Control": "public, max-age=300"},
+            headers={"Cache-Control": "no-store"},
         )
 
     async def post(self, request: web.Request, theme_id: str) -> web.Response:
@@ -1544,9 +1658,7 @@ class HarvestThemeThumbnailView(HomeAssistantView):
 
 
 class HarvestPacksView(HomeAssistantView):
-    """GET /api/harvest/packs - list packs + consent state.
-    POST /api/harvest/packs - create a custom pack.
-    """
+    """GET /api/harvest/packs - list bundled packs + consent state."""
 
     url = "/api/harvest/packs"
     name = "api:harvest:packs"
@@ -1564,30 +1676,6 @@ class HarvestPacksView(HomeAssistantView):
             "agreed": self._pack_manager.agreed,
             "packs": [pack_to_api_dict(p) for p in packs],
         })
-
-    async def post(self, request: web.Request) -> web.Response:
-        user = request.get("hass_user")
-        if user is None or not user.is_admin:
-            raise web.HTTPForbidden()
-        try:
-            body = await request.json()
-        except Exception:
-            raise web.HTTPBadRequest(reason="Invalid JSON body.")
-        name = body.get("name", "").strip()
-        if not name:
-            raise web.HTTPBadRequest(reason="Pack name is required.")
-        try:
-            pack = await self._pack_manager.create(
-                name=name,
-                description=str(body.get("description", "")),
-                version=str(body.get("version", "1.0")),
-                author=str(body.get("author", "")),
-                js_code=str(body.get("code", "")),
-                pack_id=str(body.get("pack_id", "")),
-            )
-        except ValueError as exc:
-            raise web.HTTPConflict(reason=str(exc))
-        return self.json(pack_to_api_dict(pack), status_code=201)
 
 
 class HarvestPackAgreeView(HomeAssistantView):
@@ -1635,12 +1723,12 @@ class HarvestPackFileView(HomeAssistantView):
         return web.Response(
             body=data,
             content_type="application/javascript",
-            headers={"Cache-Control": "public, max-age=3600"},
+            headers={"Cache-Control": "no-store"},
         )
 
 
 class HarvestPackDetailView(HomeAssistantView):
-    """PATCH/DELETE /api/harvest/packs/{pack_id} - update or delete a custom pack."""
+    """GET /api/harvest/packs/{pack_id} - get bundled pack info."""
 
     url = "/api/harvest/packs/{pack_id}"
     name = "api:harvest:pack_detail"
@@ -1649,39 +1737,14 @@ class HarvestPackDetailView(HomeAssistantView):
     def __init__(self, pack_manager: PackManager) -> None:
         self._pack_manager = pack_manager
 
-    async def patch(self, request: web.Request, pack_id: str) -> web.Response:
+    async def get(self, request: web.Request, pack_id: str) -> web.Response:
         user = request.get("hass_user")
         if user is None or not user.is_admin:
             raise web.HTTPForbidden()
-        try:
-            body = await request.json()
-        except Exception:
-            raise web.HTTPBadRequest(reason="Invalid JSON body.")
-        updates = {}
-        for key in ("name", "description", "version", "author"):
-            if key in body:
-                updates[key] = str(body[key])
-        if "name" in updates and not updates["name"].strip():
-            raise web.HTTPBadRequest(reason="Pack name cannot be empty.")
-        try:
-            pack = await self._pack_manager.update(pack_id, updates)
-        except ValueError as exc:
-            raise web.HTTPForbidden(reason=str(exc))
-        except KeyError as exc:
-            raise web.HTTPNotFound(reason=str(exc))
+        pack = self._pack_manager.get(pack_id)
+        if pack is None:
+            raise web.HTTPNotFound(reason=f"Pack not found: {pack_id}")
         return self.json(pack_to_api_dict(pack))
-
-    async def delete(self, request: web.Request, pack_id: str) -> web.Response:
-        user = request.get("hass_user")
-        if user is None or not user.is_admin:
-            raise web.HTTPForbidden()
-        try:
-            await self._pack_manager.delete(pack_id)
-        except ValueError as exc:
-            raise web.HTTPForbidden(reason=str(exc))
-        except KeyError as exc:
-            raise web.HTTPNotFound(reason=str(exc))
-        return web.Response(status=204)
 
 
 class HarvestPackCodeView(HomeAssistantView):
@@ -1699,7 +1762,7 @@ class HarvestPackCodeView(HomeAssistantView):
         user = request.get("hass_user")
         if user is None or not user.is_admin:
             raise web.HTTPForbidden()
-        if not self._pack_manager.get(pack_id):
+        if not self._pack_manager.get_pack_path(pack_id):
             raise web.HTTPNotFound()
         code = await self._hass.async_add_executor_job(
             self._pack_manager.get_code, pack_id,

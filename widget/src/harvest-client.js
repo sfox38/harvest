@@ -256,15 +256,19 @@ export class HarvestClient {
    * Request history data for an entity from the server.
    *
    * @param {string} entityId
+   * @param {{ hours?: number, period?: number }} [options]
    */
-  requestHistory(entityId) {
+  requestHistory(entityId, { hours, period } = {}) {
     if (!this.#sessionId || !this.#ws || this.#ws.readyState !== WebSocket.OPEN) return;
-    this.#sendJson({
+    const msg = {
       type: "history_request",
       session_id: this.#sessionId,
       entity_id: entityId,
       msg_id: this.#nextMsgId(),
-    });
+    };
+    if (hours != null) msg.hours = hours;
+    if (period != null) msg.period = period;
+    this.#sendJson(msg);
   }
 
   /**
@@ -525,7 +529,7 @@ export class HarvestClient {
     this.#absoluteExpiresAt = msg.absolute_expires_at ? new Date(msg.absolute_expires_at) : null;
     this.#renewalCount = 0;
     this.#maxRenewals = msg.max_renewals ?? null;
-    console.warn("[HArvest] auth_ok: session=" + msg.session_id);
+    console.debug("[HArvest] auth_ok: session=" + msg.session_id);
   }
 
   #handleAuthFailed(msg) {
@@ -693,8 +697,9 @@ export class HarvestClient {
   }
 
   #handleTheme(msg) {
-    if (!msg.variables) return;
-    const theme = { variables: msg.variables, dark_variables: msg.dark_variables ?? {} };
+    if (!("variables" in msg)) return;
+    const isEmpty = !msg.variables || Object.keys(msg.variables).length === 0;
+    const theme = isEmpty ? null : { variables: msg.variables, dark_variables: msg.dark_variables ?? {} };
     for (const card of this.#cards.values()) {
       card.receiveTheme?.(theme);
     }
@@ -744,9 +749,8 @@ export class HarvestClient {
     this.#packLoadPromise = new Promise(r => { resolve = r; });
     const script = document.createElement("script");
     script.src = this.#haUrl + msg.url + "?_=" + Date.now();
-    window.__HARVEST_PACK_ID__ = packId;
+    script.dataset.packId = packId;
     script.onload = () => {
-      window.__HARVEST_PACK_ID__ = null;
       document.head.removeChild(script);
       this.#activePack = packId;
       this.#packLoadPromise = null;
@@ -756,7 +760,6 @@ export class HarvestClient {
       }
     };
     script.onerror = () => {
-      window.__HARVEST_PACK_ID__ = null;
       console.warn("[HArvest] Failed to load renderer pack:", msg.url);
       document.head.removeChild(script);
       this.#packLoadPromise = null;
@@ -774,7 +777,7 @@ export class HarvestClient {
    * Payload format: "{token_id}:{timestamp}:{nonce}"
    *
    * @param {number} timestamp - Unix seconds
-   * @param {string} nonce     - Random hex nonce
+   * @param {string} nonce     - Random base62 nonce
    * @returns {Promise<string>} - Lowercase hex string
    */
   async #buildHmacSignature(timestamp, nonce) {

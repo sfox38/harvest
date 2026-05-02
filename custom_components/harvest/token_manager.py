@@ -69,11 +69,11 @@ class EntityAccess:
     exclude_attributes: list[str] = field(default_factory=list)
     companion_of: str | None = None         # entity_id of the primary entity this is a companion of.
                                             # None means this is a primary entity.
-    graph: str | None = None                # "line" or "bar"; None means no graph
-    hours: int = 24
-    period: int = 10                        # aggregation period in minutes
-    animate: bool = False
     gesture_config: dict = field(default_factory=dict)  # per-gesture action configs
+    name_override: str | None = None        # custom display name; None means use HA friendly_name
+    icon_override: str | None = None        # custom MDI icon key; None means use auto-detected icon
+    color_scheme: str = "auto"              # per-entity: "auto" | "light" | "dark"
+    display_hints: dict = field(default_factory=dict)  # domain-specific display overrides
 
 
 @dataclass
@@ -141,7 +141,7 @@ class Token:
     paused: bool = False
     embed_mode: str = "single"             # "single", "group", or "page"
     theme_url: str = ""                    # bundled theme URL or custom theme URL; empty means default
-    renderer_pack: str = ""                # "" = none, "minimus" = bundled pack ID
+    renderer_pack: str = ""                # "" = none; derived from theme_id when theme has a pack
     lang: str = "auto"                     # BCP 47 language tag or "auto"
     a11y: str = "standard"                 # "standard" or "enhanced"
     color_scheme: str = "auto"             # "auto" | "light" | "dark"
@@ -150,6 +150,32 @@ class Token:
     on_error: str = "message"              # "dim" | "hide" | "message"
     offline_text: str = ""
     error_text: str = ""
+
+
+_VALID_COLOR_SCHEMES = {"auto", "light", "dark"}
+
+
+def _migrate_display_hints(e: dict) -> dict:
+    """Build display_hints from a stored entity dict.
+
+    If display_hints already exists, return it. Otherwise migrate legacy
+    top-level graph/hours/period/animate fields into the new dict.
+    """
+    if "display_hints" in e:
+        return dict(e["display_hints"])
+    hints: dict = {}
+    graph = e.get("graph")
+    if graph:
+        hints["graph"] = graph
+    hours = e.get("hours")
+    if hours is not None and hours != 24:
+        hints["hours"] = hours
+    period = e.get("period")
+    if period is not None and period != 10:
+        hints["period"] = period
+    if e.get("animate"):
+        hints["animate"] = True
+    return hints
 
 
 class TokenManager:
@@ -737,6 +763,13 @@ class TokenManager:
                     f"allow_paths entry must not contain a query string or fragment: {path!r}"
                 )
 
+    @staticmethod
+    def _migrate_entity_dict(e: dict) -> dict:
+        """Strip legacy top-level fields that moved into display_hints."""
+        for key in ("graph", "hours", "period", "animate"):
+            e.pop(key, None)
+        return e
+
     def _token_to_dict(self, token: Token) -> dict:
         """Serialise a Token to a JSON-compatible dict for HA storage."""
         d = dataclasses.asdict(token)
@@ -756,11 +789,10 @@ class TokenManager:
                 alias=e.get("alias"),
                 exclude_attributes=e.get("exclude_attributes", []),
                 companion_of=e.get("companion_of"),
-                graph=e.get("graph"),
-                hours=e.get("hours", 24),
-                period=e.get("period", 10),
-                animate=e.get("animate", False),
                 gesture_config=e.get("gesture_config", {}),
+                name_override=e.get("name_override"),
+                color_scheme=e.get("color_scheme", "auto"),
+                display_hints=_migrate_display_hints(e),
             )
             for e in d.get("entities", [])
         ]

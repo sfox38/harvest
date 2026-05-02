@@ -24,7 +24,8 @@
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   function _debounce(fn, ms) {
@@ -483,9 +484,10 @@
     render() {
       const isWritable = this.def.capabilities === "read-write";
       const features = this.def.supported_features ?? [];
-      const hasBrightness = features.includes("brightness");
-      const hasColorTemp = features.includes("color_temp");
-      const hasColor = features.includes("rgb_color");
+      const hints = this.config.displayHints ?? {};
+      const hasBrightness = hints.show_brightness !== false && features.includes("brightness");
+      const hasColorTemp = hints.show_color_temp !== false && features.includes("color_temp");
+      const hasColor = hints.show_rgb !== false && features.includes("rgb_color");
       const showDial = isWritable && (hasBrightness || hasColorTemp || hasColor);
       const modeCount = [hasBrightness, hasColorTemp, hasColor].filter(Boolean).length;
       const showSwitch = isWritable && modeCount > 1;
@@ -570,8 +572,12 @@
       this.#modeSwitch = this.root.querySelector(".hrv-mode-switch");
 
       if (this.#toggleBtn) {
-        this.#toggleBtn.addEventListener("click", () => {
-          this.config.card?.sendCommand("toggle", {});
+        this._attachGestureHandlers(this.#toggleBtn, {
+          onTap: () => {
+            const tap = this.config.gestureConfig?.tap;
+            if (tap) { this._runAction(tap); return; }
+            this.config.card?.sendCommand("toggle", {});
+          },
         });
       }
 
@@ -1108,14 +1114,23 @@
     render() {
       const isWritable   = this.def.capabilities === "read-write";
       const features     = this.def.supported_features ?? [];
-      const hasSpeed     = features.includes("set_speed");
+      const displayMode  = (this.config.displayHints ?? this.def.display_hints ?? {}).display_mode ?? null;
+      let hasSpeed       = features.includes("set_speed");
       const hasOscillate = features.includes("oscillate");
       const hasDirection = features.includes("direction");
       const hasPreset    = features.includes("preset_mode");
-      const showDial     = isWritable && hasSpeed;
-      const isStepped    = showDial && this.#isStepped;
-      const useHoriz     = isStepped && !this.#presets.length;
-      const useCycle     = isStepped && !!this.#presets.length;
+
+      if (displayMode === "on-off") hasSpeed = false;
+
+      let showDial  = isWritable && hasSpeed;
+      let isStepped = showDial && this.#isStepped;
+      let useHoriz  = isStepped && !this.#presets.length;
+      let useCycle  = isStepped && !!this.#presets.length;
+
+      if (displayMode === "continuous")   { isStepped = false; useHoriz = false; useCycle = false; }
+      else if (displayMode === "stepped") { useCycle = false; useHoriz = isStepped && !this.#presets.length; }
+      else if (displayMode === "cycle")   { isStepped = true; useCycle = true; useHoriz = false; }
+
       const startPt      = _arcPoint(ARC_START_DEG);
 
       this.root.innerHTML = /* html */`
@@ -1217,8 +1232,12 @@
         this.renderIcon(this.def.icon ?? "mdi:fan", "fan-onoff-icon");
         this.#toggleBtn.setAttribute("data-animate", String(!!this.config.animate));
       }
-      this.#toggleBtn?.addEventListener("click", () => {
-        this.config.card?.sendCommand("toggle", {});
+      this._attachGestureHandlers(this.#toggleBtn, {
+        onTap: () => {
+          const tap = this.config.gestureConfig?.tap;
+          if (tap) { this._runAction(tap); return; }
+          this.config.card?.sendCommand("toggle", {});
+        },
       });
       if (this.#dialSvg) {
         this.#dialSvg.addEventListener("pointerdown",   this.#onPointerDown.bind(this));
@@ -1759,13 +1778,14 @@
 
     render() {
       const isWritable  = this.def.capabilities === "read-write";
+      const hints       = this.config.displayHints ?? {};
       const hasDial     = this.def.supported_features?.includes("target_temperature");
-      const hasFan      = this.def.supported_features?.includes("fan_mode")
-                       || (this.def.feature_config?.fan_modes?.length > 0);
-      const hasPreset   = this.def.supported_features?.includes("preset_mode")
-                       || (this.def.feature_config?.preset_modes?.length > 0);
-      const hasSwing    = this.def.supported_features?.includes("swing_mode")
-                       || (this.def.feature_config?.swing_modes?.length > 0);
+      const hasFan      = hints.show_fan_mode !== false && (this.def.supported_features?.includes("fan_mode")
+                       || (this.def.feature_config?.fan_modes?.length > 0));
+      const hasPreset   = hints.show_presets !== false && (this.def.supported_features?.includes("preset_mode")
+                       || (this.def.feature_config?.preset_modes?.length > 0));
+      const hasSwing    = hints.show_swing_mode !== false && (this.def.supported_features?.includes("swing_mode")
+                       || (this.def.feature_config?.swing_modes?.length > 0));
 
       this.#minTemp     = this.def.feature_config?.min_temp ?? 16;
       this.#maxTemp     = this.def.feature_config?.max_temp ?? 32;
@@ -1817,7 +1837,7 @@
               </div>
             ` : ""}
             <div class="hrv-climate-grid">
-              ${this.#hvacModes.length ? /* html */`
+              ${hints.show_hvac_modes !== false && this.#hvacModes.length ? /* html */`
                 <button class="hrv-cf-btn" data-feat="mode" type="button"
                   ${!isWritable ? 'data-readonly="true" title="Read-only"' : 'title="Change HVAC mode"'}>
                   <span class="hrv-cf-label">Mode</span>
@@ -1905,6 +1925,7 @@
 
       this.renderCompanions();
       _applyCompanionTooltips(this.root);
+      this._attachGestureHandlers(this.root.querySelector("[part=card]"));
     }
 
     #toggleDropdown(feat) {
@@ -2177,14 +2198,14 @@
       );
 
       if (this.#triggerBtn && isWritable) {
-        this.#triggerBtn.addEventListener("click", () => {
-          this.#triggerBtn.disabled = true;
-          this.config.card?.sendCommand("trigger", {});
+        this._attachGestureHandlers(this.#triggerBtn, {
+          onTap: () => {
+            const tap = this.config.gestureConfig?.tap;
+            if (tap) { this._runAction(tap); return; }
+            this.#triggerBtn.disabled = true;
+            this.config.card?.sendCommand("trigger", {});
+          },
         });
-        this.#triggerBtn.addEventListener("pointerdown",   () => this.#triggerBtn.setAttribute("data-pressing", "true"));
-        this.#triggerBtn.addEventListener("pointerup",     () => this.#triggerBtn.removeAttribute("data-pressing"));
-        this.#triggerBtn.addEventListener("pointerleave",  () => this.#triggerBtn.removeAttribute("data-pressing"));
-        this.#triggerBtn.addEventListener("pointercancel", () => this.#triggerBtn.removeAttribute("data-pressing"));
       }
 
       this.renderCompanions();
@@ -2291,6 +2312,7 @@
 
       this.renderCompanions();
       _applyCompanionTooltips(this.root);
+      this._attachGestureHandlers(this.root.querySelector("[part=card]"));
     }
 
     applyState(state, _attributes) {
@@ -2437,7 +2459,8 @@
 
     render() {
       const isWritable  = this.def.capabilities === "read-write";
-      const hasPosition = this.def.supported_features?.includes("set_position");
+      const hints       = this.config.displayHints ?? {};
+      const hasPosition = hints.show_position !== false && this.def.supported_features?.includes("set_position");
       const hasButtons  = !this.def.supported_features || this.def.supported_features.includes("buttons");
 
       this.root.innerHTML = /* html */`
@@ -2525,6 +2548,7 @@
 
       this.renderCompanions();
       _applyCompanionTooltips(this.root);
+      this._attachGestureHandlers(this.root.querySelector("[part=card]"));
     }
 
     #updateSliderFromPointer(e) {
@@ -2754,7 +2778,9 @@
     }
 
     render() {
-      const isWritable = this.def.capabilities === "read-write";
+      const isWritable  = this.def.capabilities === "read-write";
+      const displayMode = this.config.displayHints?.display_mode ?? null;
+      const hasSlider   = displayMode === "buttons" ? false : true;
       this.#min  = this.def.feature_config?.min  ?? 0;
       this.#max  = this.def.feature_config?.max  ?? 100;
       this.#step = this.def.feature_config?.step ?? 1;
@@ -2768,12 +2794,14 @@
           </div>
           <div part="card-body">
             ${isWritable ? /* html */`
-              <div class="hrv-num-slider-wrap" title="Drag to set value">
-                <div class="hrv-num-slider-track">
-                  <div class="hrv-num-slider-fill" style="width:0%"></div>
-                  <div class="hrv-num-slider-thumb" style="left:0%"></div>
+              ${hasSlider ? /* html */`
+                <div class="hrv-num-slider-wrap" title="Drag to set value">
+                  <div class="hrv-num-slider-track">
+                    <div class="hrv-num-slider-fill" style="width:0%"></div>
+                    <div class="hrv-num-slider-thumb" style="left:0%"></div>
+                  </div>
                 </div>
-              </div>
+              ` : ""}
               <div class="hrv-num-input-row">
                 <button class="hrv-num-btn" type="button" part="dec-btn"
                   aria-label="Decrease ${_esc(this.def.friendly_name)}">-</button>
@@ -2871,6 +2899,7 @@
 
       this.renderCompanions();
       _applyCompanionTooltips(this.root);
+      this._attachGestureHandlers(this.root.querySelector("[part=card]"));
     }
 
     #valToPct(v) {
@@ -3057,6 +3086,7 @@
 
       this.renderCompanions();
       _applyCompanionTooltips(this.root);
+      this._attachGestureHandlers(this.root.querySelector("[part=card]"));
     }
 
     #openDropdown() {
@@ -3260,6 +3290,8 @@
     /** @type {boolean}                 */ #isMuted      = false;
     /** @type {number}                  */ #volume       = 0;
     /** @type {boolean}                 */ #dragging     = false;
+    /** @type {string}                  */ #lastState    = "idle";
+    /** @type {object}                  */ #lastAttrs    = {};
     /** @type {Function}                */ #sendDebounce;
 
     constructor(def, root, config, i18n) {
@@ -3268,10 +3300,12 @@
     }
 
     render() {
-      const isWritable  = this.def.capabilities === "read-write";
-      const features    = this.def.supported_features ?? [];
-      const hasVolume   = features.includes("volume_set");
-      const hasPrevNext = features.includes("previous_track");
+      const isWritable    = this.def.capabilities === "read-write";
+      const features      = this.def.supported_features ?? [];
+      const hints         = this.config.displayHints ?? {};
+      const showTransport = hints.show_transport !== false;
+      const hasVolume     = hints.show_volume !== false && features.includes("volume_set");
+      const hasPrevNext   = features.includes("previous_track");
 
       this.root.innerHTML = /* html */`
         <style>${this.getSharedStyles()}${MEDIA_PLAYER_STYLES}${COMPANION_DOT_STYLES}</style>
@@ -3284,7 +3318,7 @@
               <div class="hrv-mp-artist" title="Artist"></div>
               <div class="hrv-mp-title" title="Title"></div>
             </div>
-            ${isWritable ? /* html */`
+            ${isWritable && showTransport ? /* html */`
               <div class="hrv-mp-controls">
                 ${hasPrevNext ? /* html */`
                   <button class="hrv-mp-btn" data-role="prev" type="button"
@@ -3396,6 +3430,7 @@
 
       this.renderCompanions();
       _applyCompanionTooltips(this.root);
+      this._attachGestureHandlers(this.root.querySelector("[part=card]"));
     }
 
     #updateSliderFromPointer(e) {
@@ -3411,6 +3446,8 @@
     }
 
     applyState(state, attributes) {
+      this.#lastState = state;
+      this.#lastAttrs = attributes;
       const isPlaying = state === "playing";
       const isPaused  = state === "paused";
 
@@ -3453,6 +3490,19 @@
       this.announceState(
         `${this.def.friendly_name}, ${state}${title ? ` - ${title}` : ""}`,
       );
+    }
+
+    predictState(action, data) {
+      if (action === "media_play_pause") {
+        return { state: this.#lastState === "playing" ? "paused" : "playing", attributes: this.#lastAttrs };
+      }
+      if (action === "volume_mute") {
+        return { state: this.#lastState, attributes: { ...this.#lastAttrs, is_volume_muted: !!data.is_volume_muted } };
+      }
+      if (action === "volume_set") {
+        return { state: this.#lastState, attributes: { ...this.#lastAttrs, volume_level: data.volume_level } };
+      }
+      return null;
     }
   }
 
@@ -3539,16 +3589,16 @@
       this.renderIcon(icon, "remote-icon");
 
       if (this.#btn && isWritable) {
-        this.#btn.addEventListener("click", () => {
-          const cmd    = this.config.tapAction?.data?.command ?? "power";
-          const device = this.config.tapAction?.data?.device ?? undefined;
-          const data   = device ? { command: cmd, device } : { command: cmd };
-          this.config.card?.sendCommand("send_command", data);
+        this._attachGestureHandlers(this.#btn, {
+          onTap: () => {
+            const tap = this.config.gestureConfig?.tap;
+            if (tap) { this._runAction(tap); return; }
+            const cmd    = this.config.tapAction?.data?.command ?? "power";
+            const device = this.config.tapAction?.data?.device ?? undefined;
+            const data   = device ? { command: cmd, device } : { command: cmd };
+            this.config.card?.sendCommand("send_command", data);
+          },
         });
-        this.#btn.addEventListener("pointerdown",   () => this.#btn.setAttribute("data-pressing", "true"));
-        this.#btn.addEventListener("pointerup",     () => this.#btn.removeAttribute("data-pressing"));
-        this.#btn.addEventListener("pointerleave",  () => this.#btn.removeAttribute("data-pressing"));
-        this.#btn.addEventListener("pointercancel", () => this.#btn.removeAttribute("data-pressing"));
       }
 
       this.renderCompanions();
@@ -3632,6 +3682,7 @@
 
       this.renderCompanions();
       _applyCompanionTooltips(this.root);
+      this._attachGestureHandlers(this.root.querySelector("[part=card]"));
     }
 
     applyState(state, attributes) {
@@ -3762,8 +3813,12 @@
       this.#roLabel = this.root.querySelector(".hrv-switch-ro");
 
       if (this.#track && isWritable) {
-        this.#track.addEventListener("click", () => {
-          this.config.card?.sendCommand("toggle", {});
+        this._attachGestureHandlers(this.#track, {
+          onTap: () => {
+            const tap = this.config.gestureConfig?.tap;
+            if (tap) { this._runAction(tap); return; }
+            this.config.card?.sendCommand("toggle", {});
+          },
         });
       }
 
@@ -3958,6 +4013,7 @@
 
       this.renderCompanions();
       _applyCompanionTooltips(this.root);
+      this._attachGestureHandlers(this.root.querySelector("[part=card]"));
     }
 
     applyState(state, attributes) {
@@ -4165,8 +4221,12 @@
       this.#toggle  = this.root.querySelector(".hrv-generic-toggle");
 
       if (this.#toggle && isWritable) {
-        this.#toggle.addEventListener("click", () => {
-          this.config.card?.sendCommand("toggle", {});
+        this._attachGestureHandlers(this.#toggle, {
+          onTap: () => {
+            const tap = this.config.gestureConfig?.tap;
+            if (tap) { this._runAction(tap); return; }
+            this.config.card?.sendCommand("toggle", {});
+          },
         });
       }
 
@@ -4203,11 +4263,464 @@
   }
 
   // ---------------------------------------------------------------------------
+  // WeatherCard
+  // ---------------------------------------------------------------------------
+
+  const _COND_PATHS = {
+    "sunny":           "M12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,2L14.39,5.42C13.65,5.15 12.84,5 12,5C11.16,5 10.35,5.15 9.61,5.42L12,2M3.34,7L7.5,6.65C6.9,7.16 6.36,7.78 5.94,8.5C5.5,9.24 5.25,10 5.11,10.79L3.34,7M3.36,17L5.12,13.23C5.26,14 5.53,14.78 5.95,15.5C6.37,16.24 6.91,16.86 7.5,17.37L3.36,17M20.65,7L18.88,10.79C18.74,10 18.47,9.23 18.05,8.5C17.63,7.78 17.1,7.15 16.5,6.64L20.65,7M20.64,17L16.5,17.36C17.09,16.85 17.62,16.22 18.04,15.5C18.46,14.77 18.73,14 18.87,13.21L20.64,17M12,22L9.59,18.56C10.33,18.83 11.14,19 12,19C12.82,19 13.63,18.83 14.37,18.56L12,22Z",
+    "clear-night":     "M17.75,4.09L15.22,6.03L16.13,9.09L13.5,7.28L10.87,9.09L11.78,6.03L9.25,4.09L12.44,4L13.5,1L14.56,4L17.75,4.09M21.25,11L19.61,12.25L20.2,14.23L18.5,13.06L16.8,14.23L17.39,12.25L15.75,11L17.81,10.95L18.5,9L19.19,10.95L21.25,11M18.97,15.95C19.8,15.87 20.69,17.05 20.16,17.8C19.84,18.25 19.5,18.67 19.08,19.07C15.17,23 8.84,23 4.94,19.07C1.03,15.17 1.03,8.83 4.94,4.93C5.34,4.53 5.76,4.17 6.21,3.85C6.96,3.32 8.14,4.21 8.06,5.04C7.79,7.9 8.75,10.87 10.95,13.06C13.14,15.26 16.1,16.22 18.97,15.95M17.33,17.97C14.5,17.81 11.7,16.64 9.53,14.5C7.36,12.31 6.2,9.5 6.04,6.68C3.23,9.82 3.34,14.64 6.35,17.66C9.37,20.67 14.19,20.78 17.33,17.97Z",
+    "partlycloudy":    "M12.74,5.47C15.1,6.5 16.35,9.03 15.92,11.46C17.19,12.56 18,14.19 18,16V16.17C18.31,16.06 18.65,16 19,16A3,3 0 0,1 22,19A3,3 0 0,1 19,22H6A4,4 0 0,1 2,18A4,4 0 0,1 6,14H6.27C5,12.45 4.6,10.24 5.5,8.26C6.72,5.5 9.97,4.24 12.74,5.47M11.93,7.3C10.16,6.5 8.09,7.31 7.31,9.07C6.85,10.09 6.93,11.22 7.41,12.13C8.5,10.83 10.16,10 12,10C12.7,10 13.38,10.12 14,10.34C13.94,9.06 13.18,7.86 11.93,7.3M13.55,3.64C13,3.4 12.45,3.23 11.88,3.12L14.37,1.82L15.27,4.71C14.76,4.29 14.19,3.93 13.55,3.64M6.09,4.44C5.6,4.79 5.17,5.19 4.8,5.63L4.91,2.82L7.87,3.5C7.25,3.71 6.65,4.03 6.09,4.44M18,9.71C17.91,9.12 17.78,8.55 17.59,8L19.97,9.5L17.92,11.73C18.03,11.08 18.05,10.4 18,9.71M3.04,11.3C3.11,11.9 3.24,12.47 3.43,13L1.06,11.5L3.1,9.28C3,9.93 2.97,10.61 3.04,11.3M19,18H16V16A4,4 0 0,0 12,12A4,4 0 0,0 8,16H6A2,2 0 0,0 4,18A2,2 0 0,0 6,20H19A1,1 0 0,0 20,19A1,1 0 0,0 19,18Z",
+    "cloudy":          "M6,19A5,5 0 0,1 1,14A5,5 0 0,1 6,9C7,6.65 9.3,5 12,5C15.43,5 18.24,7.66 18.5,11.03L19,11A4,4 0 0,1 23,15A4,4 0 0,1 19,19H6M19,13H17V12A5,5 0 0,0 12,7C9.5,7 7.45,8.82 7.06,11.19C6.73,11.07 6.37,11 6,11A3,3 0 0,0 3,14A3,3 0 0,0 6,17H19A2,2 0 0,0 21,15A2,2 0 0,0 19,13Z",
+    "fog":             "M3,15H13A1,1 0 0,1 14,16A1,1 0 0,1 13,17H3A1,1 0 0,1 2,16A1,1 0 0,1 3,15M16,15H21A1,1 0 0,1 22,16A1,1 0 0,1 21,17H16A1,1 0 0,1 15,16A1,1 0 0,1 16,15M1,12A5,5 0 0,1 6,7C7,4.65 9.3,3 12,3C15.43,3 18.24,5.66 18.5,9.03L19,9C21.19,9 22.97,10.76 23,13H21A2,2 0 0,0 19,11H17V10A5,5 0 0,0 12,5C9.5,5 7.45,6.82 7.06,9.19C6.73,9.07 6.37,9 6,9A3,3 0 0,0 3,12C3,12.35 3.06,12.69 3.17,13H1.1L1,12M3,19H5A1,1 0 0,1 6,20A1,1 0 0,1 5,21H3A1,1 0 0,1 2,20A1,1 0 0,1 3,19M8,19H21A1,1 0 0,1 22,20A1,1 0 0,1 21,21H8A1,1 0 0,1 7,20A1,1 0 0,1 8,19Z",
+    "rainy":           "M6,14.03A1,1 0 0,1 7,15.03C7,15.58 6.55,16.03 6,16.03C3.24,16.03 1,13.79 1,11.03C1,8.27 3.24,6.03 6,6.03C7,3.68 9.3,2.03 12,2.03C15.43,2.03 18.24,4.69 18.5,8.06L19,8.03A4,4 0 0,1 23,12.03C23,14.23 21.21,16.03 19,16.03H18C17.45,16.03 17,15.58 17,15.03C17,14.47 17.45,14.03 18,14.03H19A2,2 0 0,0 21,12.03A2,2 0 0,0 19,10.03H17V9.03C17,6.27 14.76,4.03 12,4.03C9.5,4.03 7.45,5.84 7.06,8.21C6.73,8.09 6.37,8.03 6,8.03A3,3 0 0,0 3,11.03A3,3 0 0,0 6,14.03M12,14.15C12.18,14.39 12.37,14.66 12.56,14.94C13,15.56 14,17.03 14,18C14,19.11 13.1,20 12,20A2,2 0 0,1 10,18C10,17.03 11,15.56 11.44,14.94C11.63,14.66 11.82,14.4 12,14.15M12,11.03L11.5,11.59C11.5,11.59 10.65,12.55 9.79,13.81C8.93,15.06 8,16.56 8,18A4,4 0 0,0 12,22A4,4 0 0,0 16,18C16,16.56 15.07,15.06 14.21,13.81C13.35,12.55 12.5,11.59 12.5,11.59",
+    "pouring":         "M9,12C9.53,12.14 9.85,12.69 9.71,13.22L8.41,18.05C8.27,18.59 7.72,18.9 7.19,18.76C6.65,18.62 6.34,18.07 6.5,17.54L7.78,12.71C7.92,12.17 8.47,11.86 9,12M13,12C13.53,12.14 13.85,12.69 13.71,13.22L11.64,20.95C11.5,21.5 10.95,21.8 10.41,21.66C9.88,21.5 9.56,20.97 9.7,20.43L11.78,12.71C11.92,12.17 12.47,11.86 13,12M17,12C17.53,12.14 17.85,12.69 17.71,13.22L16.41,18.05C16.27,18.59 15.72,18.9 15.19,18.76C14.65,18.62 14.34,18.07 14.5,17.54L15.78,12.71C15.92,12.17 16.47,11.86 17,12M17,10V9A5,5 0 0,0 12,4C9.5,4 7.45,5.82 7.06,8.19C6.73,8.07 6.37,8 6,8A3,3 0 0,0 3,11C3,12.11 3.6,13.08 4.5,13.6V13.59C5,13.87 5.14,14.5 4.87,14.96C4.59,15.43 4,15.6 3.5,15.32V15.33C2,14.47 1,12.85 1,11A5,5 0 0,1 6,6C7,3.65 9.3,2 12,2C15.43,2 18.24,4.66 18.5,8.03L19,8A4,4 0 0,1 23,12C23,13.5 22.2,14.77 21,15.46V15.46C20.5,15.73 19.91,15.57 19.63,15.09C19.36,14.61 19.5,14 20,13.72V13.73C20.6,13.39 21,12.74 21,12A2,2 0 0,0 19,10H17Z",
+    "snowy":           "M6,14A1,1 0 0,1 7,15A1,1 0 0,1 6,16A5,5 0 0,1 1,11A5,5 0 0,1 6,6C7,3.65 9.3,2 12,2C15.43,2 18.24,4.66 18.5,8.03L19,8A4,4 0 0,1 23,12A4,4 0 0,1 19,16H18A1,1 0 0,1 17,15A1,1 0 0,1 18,14H19A2,2 0 0,0 21,12A2,2 0 0,0 19,10H17V9A5,5 0 0,0 12,4C9.5,4 7.45,5.82 7.06,8.19C6.73,8.07 6.37,8 6,8A3,3 0 0,0 3,11A3,3 0 0,0 6,14M7.88,18.07L10.07,17.5L8.46,15.88C8.07,15.5 8.07,14.86 8.46,14.46C8.85,14.07 9.5,14.07 9.88,14.46L11.5,16.07L12.07,13.88C12.21,13.34 12.76,13.03 13.29,13.17C13.83,13.31 14.14,13.86 14,14.4L13.41,16.59L15.6,16C16.14,15.86 16.69,16.17 16.83,16.71C16.97,17.24 16.66,17.79 16.12,17.93L13.93,18.5L15.54,20.12C15.93,20.5 15.93,21.15 15.54,21.54C15.15,21.93 14.5,21.93 14.12,21.54L12.5,19.93L11.93,22.12C11.79,22.66 11.24,22.97 10.71,22.83C10.17,22.69 9.86,22.14 10,21.6L10.59,19.41L8.4,20C7.86,20.14 7.31,19.83 7.17,19.29C7.03,18.76 7.34,18.21 7.88,18.07Z",
+    "snowy-rainy":     "M4,16.36C3.86,15.82 4.18,15.25 4.73,15.11L7,14.5L5.33,12.86C4.93,12.46 4.93,11.81 5.33,11.4C5.73,11 6.4,11 6.79,11.4L8.45,13.05L9.04,10.8C9.18,10.24 9.75,9.92 10.29,10.07C10.85,10.21 11.17,10.78 11,11.33L10.42,13.58L12.67,13C13.22,12.83 13.79,13.15 13.93,13.71C14.08,14.25 13.76,14.82 13.2,14.96L10.95,15.55L12.6,17.21C13,17.6 13,18.27 12.6,18.67C12.2,19.07 11.54,19.07 11.15,18.67L9.5,17L8.89,19.27C8.75,19.83 8.18,20.14 7.64,20C7.08,19.86 6.77,19.29 6.91,18.74L7.5,16.5L5.26,17.09C4.71,17.23 4.14,16.92 4,16.36M1,10A5,5 0 0,1 6,5C7,2.65 9.3,1 12,1C15.43,1 18.24,3.66 18.5,7.03L19,7A4,4 0 0,1 23,11A4,4 0 0,1 19,15A1,1 0 0,1 18,14A1,1 0 0,1 19,13A2,2 0 0,0 21,11A2,2 0 0,0 19,9H17V8A5,5 0 0,0 12,3C9.5,3 7.45,4.82 7.06,7.19C6.73,7.07 6.37,7 6,7A3,3 0 0,0 3,10C3,10.85 3.35,11.61 3.91,12.16C4.27,12.55 4.26,13.16 3.88,13.54C3.5,13.93 2.85,13.93 2.47,13.54C1.56,12.63 1,11.38 1,10M14.03,20.43C14.13,20.82 14.5,21.04 14.91,20.94L16.5,20.5L16.06,22.09C15.96,22.5 16.18,22.87 16.57,22.97C16.95,23.08 17.35,22.85 17.45,22.46L17.86,20.89L19.03,22.05C19.3,22.33 19.77,22.33 20.05,22.05C20.33,21.77 20.33,21.3 20.05,21.03L18.89,19.86L20.46,19.45C20.85,19.35 21.08,18.95 20.97,18.57C20.87,18.18 20.5,17.96 20.09,18.06L18.5,18.5L18.94,16.91C19.04,16.5 18.82,16.13 18.43,16.03C18.05,15.92 17.65,16.15 17.55,16.54L17.14,18.11L15.97,16.95C15.7,16.67 15.23,16.67 14.95,16.95C14.67,17.24 14.67,17.7 14.95,17.97L16.11,19.14L14.54,19.55C14.15,19.65 13.92,20.05 14.03,20.43Z",
+    "hail":            "M6,14A1,1 0 0,1 7,15A1,1 0 0,1 6,16A5,5 0 0,1 1,11A5,5 0 0,1 6,6C7,3.65 9.3,2 12,2C15.43,2 18.24,4.66 18.5,8.03L19,8A4,4 0 0,1 23,12A4,4 0 0,1 19,16H18A1,1 0 0,1 17,15A1,1 0 0,1 18,14H19A2,2 0 0,0 21,12A2,2 0 0,0 19,10H17V9A5,5 0 0,0 12,4C9.5,4 7.45,5.82 7.06,8.19C6.73,8.07 6.37,8 6,8A3,3 0 0,0 3,11A3,3 0 0,0 6,14M10,18A2,2 0 0,1 12,20A2,2 0 0,1 10,22A2,2 0 0,1 8,20A2,2 0 0,1 10,18M14.5,16A1.5,1.5 0 0,1 16,17.5A1.5,1.5 0 0,1 14.5,19A1.5,1.5 0 0,1 13,17.5A1.5,1.5 0 0,1 14.5,16M10.5,12A1.5,1.5 0 0,1 12,13.5A1.5,1.5 0 0,1 10.5,15A1.5,1.5 0 0,1 9,13.5A1.5,1.5 0 0,1 10.5,12Z",
+    "lightning":       "M6,16A5,5 0 0,1 1,11A5,5 0 0,1 6,6C7,3.65 9.3,2 12,2C15.43,2 18.24,4.66 18.5,8.03L19,8A4,4 0 0,1 23,12A4,4 0 0,1 19,16H18A1,1 0 0,1 17,15A1,1 0 0,1 18,14H19A2,2 0 0,0 21,12A2,2 0 0,0 19,10H17V9A5,5 0 0,0 12,4C9.5,4 7.45,5.82 7.06,8.19C6.73,8.07 6.37,8 6,8A3,3 0 0,0 3,11A3,3 0 0,0 6,14H7A1,1 0 0,1 8,15A1,1 0 0,1 7,16H6M12,11H15L13,15H15L11.25,22L12,17H9.5L12,11Z",
+    "lightning-rainy": "M4.5,13.59C5,13.87 5.14,14.5 4.87,14.96C4.59,15.44 4,15.6 3.5,15.33V15.33C2,14.47 1,12.85 1,11A5,5 0 0,1 6,6C7,3.65 9.3,2 12,2C15.43,2 18.24,4.66 18.5,8.03L19,8A4,4 0 0,1 23,12A4,4 0 0,1 19,16A1,1 0 0,1 18,15A1,1 0 0,1 19,14A2,2 0 0,0 21,12A2,2 0 0,0 19,10H17V9A5,5 0 0,0 12,4C9.5,4 7.45,5.82 7.06,8.19C6.73,8.07 6.37,8 6,8A3,3 0 0,0 3,11C3,12.11 3.6,13.08 4.5,13.6V13.59M9.5,11H12.5L10.5,15H12.5L8.75,22L9.5,17H7L9.5,11M17.5,18.67C17.5,19.96 16.5,21 15.25,21C14,21 13,19.96 13,18.67C13,17.12 15.25,14.5 15.25,14.5C15.25,14.5 17.5,17.12 17.5,18.67Z",
+    "windy":           "M4,10A1,1 0 0,1 3,9A1,1 0 0,1 4,8H12A2,2 0 0,0 14,6A2,2 0 0,0 12,4C11.45,4 10.95,4.22 10.59,4.59C10.2,5 9.56,5 9.17,4.59C8.78,4.2 8.78,3.56 9.17,3.17C9.9,2.45 10.9,2 12,2A4,4 0 0,1 16,6A4,4 0 0,1 12,10H4M19,12A1,1 0 0,0 20,11A1,1 0 0,0 19,10C18.72,10 18.47,10.11 18.29,10.29C17.9,10.68 17.27,10.68 16.88,10.29C16.5,9.9 16.5,9.27 16.88,8.88C17.42,8.34 18.17,8 19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14H5A1,1 0 0,1 4,13A1,1 0 0,1 5,12H19M18,18H4A1,1 0 0,1 3,17A1,1 0 0,1 4,16H18A3,3 0 0,1 21,19A3,3 0 0,1 18,22C17.17,22 16.42,21.66 15.88,21.12C15.5,20.73 15.5,20.1 15.88,19.71C16.27,19.32 16.9,19.32 17.29,19.71C17.47,19.89 17.72,20 18,20A1,1 0 0,0 19,19A1,1 0 0,0 18,18Z",
+    "windy-variant":   "M6,6L6.69,6.06C7.32,3.72 9.46,2 12,2A5.5,5.5 0 0,1 17.5,7.5L17.42,8.45C17.88,8.16 18.42,8 19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14H6A4,4 0 0,1 2,10A4,4 0 0,1 6,6M6,8A2,2 0 0,0 4,10A2,2 0 0,0 6,12H19A1,1 0 0,0 20,11A1,1 0 0,0 19,10H15.5V7.5A3.5,3.5 0 0,0 12,4A3.5,3.5 0 0,0 8.5,7.5V8H6M18,18H4A1,1 0 0,1 3,17A1,1 0 0,1 4,16H18A3,3 0 0,1 21,19A3,3 0 0,1 18,22C17.17,22 16.42,21.66 15.88,21.12C15.5,20.73 15.5,20.1 15.88,19.71C16.27,19.32 16.9,19.32 17.29,19.71C17.47,19.89 17.72,20 18,20A1,1 0 0,0 19,19A1,1 0 0,0 18,18Z",
+    "exceptional":     "M11,15H13V17H11V15M11,7H13V13H11V7M12,2C6.47,2 2,6.5 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20Z",
+  };
+  const _COND_DEFAULT = _COND_PATHS["cloudy"];
+  const _HUMIDITY_PATH = "M12,3.77L11.25,4.61C11.25,4.61 9.97,6.06 8.68,7.94C7.39,9.82 6,12.07 6,14.23A6,6 0 0,0 12,20.23A6,6 0 0,0 18,14.23C18,12.07 16.61,9.82 15.32,7.94C14.03,6.06 12.75,4.61 12.75,4.61L12,3.77M12,1A1,1 0 0,1 13,2L13,2.01C13,2.01 14.35,3.56 15.72,5.55C17.09,7.54 18.5,9.93 18.5,12.5A6.5,6.5 0 0,1 12,19A6.5,6.5 0 0,1 5.5,12.5C5.5,9.93 6.91,7.54 8.28,5.55C9.65,3.56 11,2.01 11,2.01L11,2A1,1 0 0,1 12,1Z";
+  const _WIND_PATH = "M4,10A1,1 0 0,1 3,9A1,1 0 0,1 4,8H12A2,2 0 0,0 14,6A2,2 0 0,0 12,4C11.45,4 10.95,4.22 10.59,4.59C10.2,5 9.56,5 9.17,4.59C8.78,4.2 8.78,3.56 9.17,3.17C9.9,2.45 10.9,2 12,2A4,4 0 0,1 16,6A4,4 0 0,1 12,10H4M19,12A1,1 0 0,0 20,11A1,1 0 0,0 19,10C18.72,10 18.47,10.11 18.29,10.29C17.9,10.68 17.27,10.68 16.88,10.29C16.5,9.9 16.5,9.27 16.88,8.88C17.42,8.34 18.17,8 19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14H5A1,1 0 0,1 4,13A1,1 0 0,1 5,12H19M18,18H4A1,1 0 0,1 3,17A1,1 0 0,1 4,16H18A3,3 0 0,1 21,19A3,3 0 0,1 18,22C17.17,22 16.42,21.66 15.88,21.12C15.5,20.73 15.5,20.1 15.88,19.71C16.27,19.32 16.9,19.32 17.29,19.71C17.47,19.89 17.72,20 18,20A1,1 0 0,0 19,19A1,1 0 0,0 18,18Z";
+  const _PRESSURE_PATH = "M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4A8,8 0 0,1 20,12C20,14.4 19,16.5 17.3,18C15.9,16.7 14,16 12,16C10,16 8.2,16.7 6.7,18C5,16.5 4,14.4 4,12A8,8 0 0,1 12,4M14,5.89C13.62,5.9 13.26,6.15 13.1,6.54L11.58,10C10.6,10.18 9.81,10.79 9.4,11.6L6.27,11.29C5.82,11.25 5.4,11.54 5.29,11.97C5.18,12.41 5.4,12.86 5.82,13.04L8.88,14.31C9.16,15.29 9.93,16.08 10.92,16.35L11.28,19.39C11.33,19.83 11.7,20.16 12.14,20.16C12.18,20.16 12.22,20.16 12.27,20.15C12.75,20.09 13.1,19.66 13.04,19.18L12.68,16.19C13.55,15.8 14.15,14.96 14.21,14H17.58C18.05,14 18.44,13.62 18.44,13.14C18.44,12.67 18.05,12.29 17.58,12.29H14.21C14.15,11.74 13.93,11.24 13.59,10.84L15.07,7.42C15.27,6.97 15.07,6.44 14.63,6.24C14.43,6 14.21,5.88 14,5.89Z";
+  const _SHORT_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  function _condSvg(condition, size) {
+    const d = _COND_PATHS[condition] ?? _COND_DEFAULT;
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true" focusable="false"><path d="${d}" fill="currentColor"/></svg>`;
+  }
+
+  function _statSvg(path) {
+    return `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path d="${path}" fill="currentColor"/></svg>`;
+  }
+
+  const WEATHER_STYLES = /* css */`
+    [part=card] {
+      padding-bottom: 0 !important;
+    }
+
+    [part=card-body] {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding: 12px 0 16px;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .hrv-weather-main {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .hrv-weather-icon {
+      color: var(--hrv-color-state-on, #1976d2);
+      flex-shrink: 0;
+      line-height: 0;
+    }
+
+    .hrv-weather-temp {
+      font-size: 48px;
+      font-weight: 300;
+      color: var(--hrv-color-text, #fff);
+      line-height: 1;
+    }
+
+    .hrv-weather-unit {
+      font-size: 18px;
+      color: var(--hrv-color-text-secondary, rgba(255,255,255,0.7));
+    }
+
+    .hrv-weather-cond {
+      font-size: 13px;
+      color: var(--hrv-color-text-secondary, rgba(255,255,255,0.7));
+      text-transform: capitalize;
+    }
+
+    .hrv-weather-stats {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      width: 100%;
+      padding-top: 8px;
+      margin-top: 4px;
+      border-top: 1px solid var(--hrv-ex-outline, rgba(255,255,255,0.15));
+    }
+
+    .hrv-weather-stat {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 11px;
+      color: var(--hrv-color-text-secondary, rgba(255,255,255,0.7));
+    }
+
+    .hrv-weather-stat svg {
+      color: var(--hrv-color-icon, rgba(255,255,255,0.6));
+      flex-shrink: 0;
+    }
+
+    .hrv-forecast-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 10px;
+      border: 1px solid var(--hrv-ex-outline, rgba(255,255,255,0.15));
+      border-radius: 12px;
+      background: none;
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--hrv-color-text-secondary, rgba(255,255,255,0.7));
+      cursor: pointer;
+      font-family: inherit;
+      margin-top: 4px;
+    }
+    .hrv-forecast-toggle:hover {
+      background: rgba(255,255,255,0.08);
+    }
+    .hrv-forecast-toggle:empty { display: none; }
+
+    .hrv-forecast-strip {
+      width: 100%;
+      padding-top: 8px;
+      margin-top: 4px;
+      border-top: 1px solid var(--hrv-ex-outline, rgba(255,255,255,0.15));
+    }
+
+    .hrv-forecast-strip:empty { display: none; }
+
+    .hrv-forecast-strip[data-mode=daily] {
+      display: flex;
+      justify-content: space-between;
+      gap: 4px;
+    }
+
+    .hrv-forecast-strip[data-mode=hourly] {
+      display: flex;
+      gap: 4px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      width: 0;
+      min-width: 100%;
+    }
+    .hrv-forecast-strip[data-mode=hourly]::-webkit-scrollbar { display: none; }
+
+    .hrv-forecast-day {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      flex: 0 0 auto;
+      min-width: 42px;
+    }
+    .hrv-forecast-strip[data-mode=daily] .hrv-forecast-day {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .hrv-forecast-day-name {
+      font-size: 10px;
+      color: var(--hrv-color-text-secondary, rgba(255,255,255,0.7));
+      font-weight: 500;
+    }
+
+    .hrv-forecast-day svg {
+      color: var(--hrv-color-icon, rgba(255,255,255,0.6));
+    }
+
+    .hrv-forecast-temps {
+      font-size: 10px;
+      color: var(--hrv-color-text, #fff);
+      white-space: nowrap;
+    }
+
+    .hrv-forecast-lo {
+      color: var(--hrv-color-text-secondary, rgba(255,255,255,0.7));
+    }
+
+    .hrv-forecast-scroll-track {
+      width: 100%;
+      align-self: stretch;
+      height: 3px;
+      border-radius: 2px;
+      background: var(--hrv-color-surface-alt, rgba(255,255,255,0.10));
+      position: relative;
+      margin-top: 4px;
+      cursor: pointer;
+    }
+    .hrv-forecast-scroll-track[hidden] { display: none; }
+    .hrv-forecast-scroll-thumb {
+      position: absolute;
+      top: 0;
+      height: 100%;
+      border-radius: 2px;
+      background: var(--hrv-color-text-secondary, rgba(255,255,255,0.30));
+      transition: left 80ms linear;
+    }
+
+    [part=history-graph] {
+      margin-top: 0;
+      padding: 0;
+      border-radius: 0 0 var(--hrv-radius-l, 16px) var(--hrv-radius-l, 16px);
+      overflow: hidden;
+    }
+    [part=history-svg] {
+      height: 56px;
+      display: block;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      [part=card] * { transition: none !important; }
+    }
+  `;
+
+  class WeatherCard extends BaseCard {
+    /** @type {HTMLElement|null} */ #iconEl         = null;
+    /** @type {HTMLElement|null} */ #tempEl         = null;
+    /** @type {HTMLElement|null} */ #condEl         = null;
+    /** @type {HTMLElement|null} */ #humidityEl     = null;
+    /** @type {HTMLElement|null} */ #windEl         = null;
+    /** @type {HTMLElement|null} */ #pressureEl     = null;
+    /** @type {HTMLElement|null} */ #forecastEl     = null;
+    /** @type {HTMLElement|null} */ #toggleEl       = null;
+    /** @type {HTMLElement|null} */ #scrollTrackEl  = null;
+    /** @type {HTMLElement|null} */ #scrollThumbEl  = null;
+    get #forecastMode() { return this.config._forecastMode ?? "daily"; }
+    set #forecastMode(v) { this.config._forecastMode = v; }
+    #forecastDaily  = null;
+    #forecastHourly = null;
+
+    render() {
+      this.root.innerHTML = /* html */`
+        <style>${this.getSharedStyles()}${WEATHER_STYLES}${COMPANION_DOT_STYLES}</style>
+        <div part="card">
+          <div part="card-header">
+            <span part="card-name">${_esc(this.def.friendly_name)}</span>
+          </div>
+          <div part="card-body">
+            <div class="hrv-weather-main">
+              <span class="hrv-weather-icon">${_condSvg("cloudy", 44)}</span>
+              <span class="hrv-weather-temp">--<span class="hrv-weather-unit"></span></span>
+            </div>
+            <span class="hrv-weather-cond" aria-live="polite">--</span>
+            <div class="hrv-weather-stats">
+              <span class="hrv-weather-stat" data-stat="humidity">
+                ${_statSvg(_HUMIDITY_PATH)}
+                <span data-value>--</span>
+              </span>
+              <span class="hrv-weather-stat" data-stat="wind">
+                ${_statSvg(_WIND_PATH)}
+                <span data-value>--</span>
+              </span>
+              <span class="hrv-weather-stat" data-stat="pressure">
+                ${_statSvg(_PRESSURE_PATH)}
+                <span data-value>--</span>
+              </span>
+            </div>
+            <button class="hrv-forecast-toggle" type="button"></button>
+            <div class="hrv-forecast-strip" data-mode="daily" role="list"></div>
+            <div class="hrv-forecast-scroll-track" hidden><div class="hrv-forecast-scroll-thumb"></div></div>
+          </div>
+          ${this.renderHistoryZoneHTML()}
+          ${this.renderAriaLiveHTML()}
+          ${this.renderCompanionZoneHTML()}
+          <div part="stale-indicator" aria-hidden="true"></div>
+        </div>
+      `;
+
+      this.#iconEl        = this.root.querySelector(".hrv-weather-icon");
+      this.#tempEl        = this.root.querySelector(".hrv-weather-temp");
+      this.#condEl        = this.root.querySelector(".hrv-weather-cond");
+      this.#humidityEl    = this.root.querySelector("[data-stat=humidity] [data-value]");
+      this.#windEl        = this.root.querySelector("[data-stat=wind] [data-value]");
+      this.#pressureEl    = this.root.querySelector("[data-stat=pressure] [data-value]");
+      this.#forecastEl    = this.root.querySelector(".hrv-forecast-strip");
+      this.#toggleEl      = this.root.querySelector(".hrv-forecast-toggle");
+      this.#scrollTrackEl = this.root.querySelector(".hrv-forecast-scroll-track");
+      this.#scrollThumbEl = this.root.querySelector(".hrv-forecast-scroll-thumb");
+
+      if (this.#forecastEl) {
+        this.#forecastEl.addEventListener("scroll", () => this.#syncScrollThumb(), { passive: true });
+      }
+      if (this.#scrollTrackEl) {
+        this.#scrollTrackEl.addEventListener("pointerdown", (e) => this.#onTrackPointerDown(e));
+      }
+
+      this.renderCompanions();
+      _applyCompanionTooltips(this.root);
+      this._attachGestureHandlers(this.root.querySelector("[part=card]"));
+    }
+
+    applyState(state, attributes) {
+      const condition = state || "cloudy";
+
+      if (this.#iconEl) {
+        this.#iconEl.innerHTML = _condSvg(condition, 44);
+      }
+
+      const condLabel = this.i18n.t(`weather.${condition}`) !== `weather.${condition}`
+        ? this.i18n.t(`weather.${condition}`)
+        : condition.replace(/-/g, " ");
+      if (this.#condEl) this.#condEl.textContent = condLabel;
+
+      const temp = attributes.temperature ?? attributes.native_temperature;
+      const tempUnit = attributes.temperature_unit ?? "";
+      if (this.#tempEl) {
+        const unitEl = this.#tempEl.querySelector(".hrv-weather-unit");
+        this.#tempEl.firstChild.textContent = temp != null ? Math.round(Number(temp)) : "--";
+        if (unitEl) unitEl.textContent = tempUnit ? ` ${tempUnit}` : "";
+      }
+
+      if (this.#humidityEl) {
+        const h = attributes.humidity;
+        this.#humidityEl.textContent = h != null ? `${h}%` : "--";
+      }
+
+      if (this.#windEl) {
+        const w = attributes.wind_speed;
+        const wu = attributes.wind_speed_unit ?? "";
+        this.#windEl.textContent = w != null ? `${w} ${wu}`.trim() : "--";
+      }
+
+      if (this.#pressureEl) {
+        const p = attributes.pressure;
+        const pu = attributes.pressure_unit ?? "";
+        this.#pressureEl.textContent = p != null ? `${p} ${pu}`.trim() : "--";
+      }
+
+      const show = (this.config.displayHints ?? this.def.display_hints ?? {}).show_forecast === true;
+      this.#forecastDaily  = show ? (attributes.forecast_daily  ?? attributes.forecast ?? null) : null;
+      this.#forecastHourly = show ? (attributes.forecast_hourly ?? null) : null;
+
+      this.#buildToggle();
+      this.#renderActiveForecast();
+
+      this.announceState(
+        `${this.def.friendly_name}, ${condLabel}, ${temp != null ? temp : "--"} ${tempUnit}`,
+      );
+    }
+
+    #buildToggle() {
+      if (!this.#toggleEl) return;
+      const hasDaily  = Array.isArray(this.#forecastDaily)  && this.#forecastDaily.length > 0;
+      const hasHourly = Array.isArray(this.#forecastHourly) && this.#forecastHourly.length > 0;
+
+      if (!hasDaily && !hasHourly) {
+        this.#toggleEl.textContent = "";
+        return;
+      }
+      if (hasDaily && !hasHourly) { this.#forecastMode = "daily"; }
+      if (!hasDaily && hasHourly) { this.#forecastMode = "hourly"; }
+
+      if (hasDaily && hasHourly) {
+        this.#toggleEl.textContent = this.#forecastMode === "daily" ? "Hourly" : "5-Day";
+        this.#toggleEl.onclick = () => {
+          this.#forecastMode = this.#forecastMode === "daily" ? "hourly" : "daily";
+          this.#buildToggle();
+          this.#renderActiveForecast();
+        };
+      } else {
+        this.#toggleEl.textContent = "";
+        this.#toggleEl.onclick = null;
+      }
+    }
+
+    #renderActiveForecast() {
+      if (!this.#forecastEl) return;
+      const data = this.#forecastMode === "hourly" ? this.#forecastHourly : this.#forecastDaily;
+      this.#forecastEl.setAttribute("data-mode", this.#forecastMode);
+
+      if (!Array.isArray(data) || data.length === 0) {
+        this.#forecastEl.innerHTML = "";
+        if (this.#scrollTrackEl) this.#scrollTrackEl.hidden = true;
+        return;
+      }
+
+      const items = this.#forecastMode === "daily" ? data.slice(0, 5) : data;
+      this.#forecastEl.innerHTML = items.map(day => {
+        const dt = new Date(day.datetime);
+        let label;
+        if (this.#forecastMode === "hourly") {
+          label = dt.toLocaleTimeString([], { hour: "numeric" });
+        } else {
+          label = _SHORT_DAYS[dt.getDay()] ?? "";
+        }
+        const hi = (day.temperature ?? day.native_temperature) != null
+          ? Math.round(day.temperature ?? day.native_temperature) : "--";
+        const lo = (day.templow ?? day.native_templow) != null
+          ? Math.round(day.templow ?? day.native_templow) : null;
+
+        return /* html */`
+          <div class="hrv-forecast-day" role="listitem">
+            <span class="hrv-forecast-day-name">${_esc(String(label))}</span>
+            ${_condSvg(day.condition || "cloudy", 18)}
+            <span class="hrv-forecast-temps">
+              ${_esc(String(hi))}${lo != null ? `/<span class="hrv-forecast-lo">${_esc(String(lo))}</span>` : ""}
+            </span>
+          </div>`;
+      }).join("");
+
+      if (this.#forecastMode === "hourly") {
+        requestAnimationFrame(() => this.#syncScrollThumb());
+      } else if (this.#scrollTrackEl) {
+        this.#scrollTrackEl.hidden = true;
+      }
+    }
+
+    #syncScrollThumb() {
+      const strip = this.#forecastEl;
+      const track = this.#scrollTrackEl;
+      const thumb = this.#scrollThumbEl;
+      if (!strip || !track || !thumb) return;
+      const ratio = strip.scrollWidth > strip.clientWidth
+        ? strip.clientWidth / strip.scrollWidth : 1;
+      if (ratio >= 1) { track.hidden = true; return; }
+      track.hidden = false;
+      const trackW = track.clientWidth;
+      const thumbW = Math.max(20, ratio * trackW);
+      const maxLeft = trackW - thumbW;
+      const scrollRatio = strip.scrollLeft / (strip.scrollWidth - strip.clientWidth);
+      thumb.style.width = `${thumbW}px`;
+      thumb.style.left  = `${scrollRatio * maxLeft}px`;
+    }
+
+    #onTrackPointerDown(e) {
+      const strip = this.#forecastEl;
+      const track = this.#scrollTrackEl;
+      const thumb = this.#scrollThumbEl;
+      if (!strip || !track || !thumb) return;
+      e.preventDefault();
+      const trackRect = track.getBoundingClientRect();
+      const thumbW = parseFloat(thumb.style.width) || 20;
+      const scrollTo = (clientX) => {
+        const relX = clientX - trackRect.left - thumbW / 2;
+        const maxLeft = trackRect.width - thumbW;
+        const r = Math.max(0, Math.min(1, relX / maxLeft));
+        strip.scrollLeft = r * (strip.scrollWidth - strip.clientWidth);
+      };
+      scrollTo(e.clientX);
+      const onMove = (ev) => scrollTo(ev.clientX);
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Register all example renderers into the pack-scoped registry
   // ---------------------------------------------------------------------------
 
   HArvest._packs = HArvest._packs || {};
-  const _packKey = window.__HARVEST_PACK_ID__ || "minimus";
+  const _packKey = (document.currentScript && document.currentScript.dataset.packId) || "minimus";
   HArvest._packs[_packKey] = {
     "light":          DialLightCard,
     "fan":            FanCard,
@@ -4223,6 +4736,15 @@
     "sensor":         SensorCard,
     "switch":         SwitchCard,
     "timer":          TimerCard,
+    "weather":        WeatherCard,
     "generic":        GenericCard,
+    _capabilities: {
+      fan:          { display_modes: ["on-off", "continuous", "stepped", "cycle"] },
+      input_number: { display_modes: ["slider", "buttons"] },
+      light:        { features: ["brightness", "color_temp", "rgb"] },
+      climate:      { features: ["hvac_modes", "presets", "fan_mode", "swing_mode"] },
+      cover:        { features: ["position", "tilt"] },
+      media_player: { features: ["transport", "volume", "source"] },
+    },
   };
 })();

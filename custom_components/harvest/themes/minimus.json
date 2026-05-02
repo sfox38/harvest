@@ -3,7 +3,15 @@
   "author": "sfox38",
   "version": "1.0",
   "harvest_version": 1,
-  "renderer_pack": "minimus",
+  "renderer_pack": true,
+  "capabilities": {
+    "fan":          { "display_modes": ["on-off", "continuous", "stepped", "cycle"] },
+    "input_number": { "display_modes": ["slider", "buttons"] },
+    "light":        { "features": ["brightness", "color_temp", "rgb"] },
+    "climate":      { "features": ["hvac_modes", "presets", "fan_mode", "swing_mode"] },
+    "cover":        { "features": ["position", "tilt"] },
+    "media_player": { "features": ["transport", "volume", "source"] }
+  },
   "variables": {
     "--hrv-color-primary":         "#3E3F29",
     "--hrv-color-primary-dim":     "#C8C8B8",

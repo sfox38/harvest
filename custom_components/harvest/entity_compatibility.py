@@ -31,6 +31,7 @@ TIER1_DOMAINS: dict[str, str] = {
     "input_select":    "InputSelectCard",
     "harvest_action":  "HarvestActionCard",
     "timer":           "TimerCard",
+    "weather":         "WeatherCard",
 }
 
 SENSOR_DEVICE_CLASS_RENDERERS: dict[str, str] = {
@@ -66,7 +67,8 @@ ALLOWED_SERVICES: dict[str, set[str]] = {
     "input_select":   {"select_option"},
     "timer":          {"start", "pause", "cancel", "finish"},
     "media_player":   {"media_play_pause", "media_next_track", "media_previous_track",
-                       "volume_up", "volume_down", "volume_set", "turn_on", "turn_off"},
+                       "volume_up", "volume_down", "volume_set", "volume_mute",
+                       "select_source", "turn_on", "turn_off"},
     "remote":         {"turn_on", "turn_off", "send_command"},
     "harvest_action": {"trigger"},
     # sensor and binary_sensor are intentionally absent: read-only domains with no HA

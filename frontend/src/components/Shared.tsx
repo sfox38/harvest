@@ -670,11 +670,7 @@ export function EntityAutocomplete({ value, onChange, onSelect, disabled, filter
     loadEntityCache().then(() => setCacheLen(getEntityCache().length));
   }, []);
 
-  // Re-focus the input when it transitions from disabled back to enabled (alias loading complete).
   useEffect(() => {
-    if (prevDisabled.current && !disabled) {
-      inputRef.current?.focus();
-    }
     prevDisabled.current = !!disabled;
   }, [disabled]);
 
@@ -735,7 +731,8 @@ export function EntityAutocomplete({ value, onChange, onSelect, disabled, filter
       const vvH = window.visualViewport?.height ?? window.innerHeight;
       const spaceBelow = vvH - r.bottom - 8;
       if (spaceBelow >= 80) {
-        setDropdownRect({ top: r.bottom + 2, left: r.left, width: r.width, maxHeight: Math.min(280, spaceBelow) });
+        const minW = Math.min(Math.max(r.width, 380), window.innerWidth - r.left - 8);
+      setDropdownRect({ top: r.bottom + 2, left: r.left, width: minW, maxHeight: Math.min(280, spaceBelow) });
       } else {
         const maxH = Math.min(280, r.top - 8);
         setDropdownRect(maxH > 40

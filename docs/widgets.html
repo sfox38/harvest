@@ -284,15 +284,17 @@ HArvest.renderers.ClimateCard
 HArvest.renderers.CoverCard
 HArvest.renderers.MediaPlayerCard
 HArvest.renderers.RemoteCard
-HArvest.renderers.SensorTemperatureCard
-HArvest.renderers.SensorHumidityCard
-HArvest.renderers.SensorBatteryCard
+HArvest.renderers.TemperatureSensorCard
+HArvest.renderers.HumiditySensorCard
+HArvest.renderers.BatterySensorCard
+HArvest.renderers.GenericSensorCard
 HArvest.renderers.BinarySensorCard
 HArvest.renderers.InputBooleanCard
 HArvest.renderers.InputNumberCard
 HArvest.renderers.InputSelectCard
 HArvest.renderers.HarvestActionCard
 HArvest.renderers.TimerCard
+HArvest.renderers.WeatherCard
 HArvest.renderers.GenericCard    // Tier 2 fallback</code></pre>
 
         <h3>HArvest.track.anyState(callback)</h3>
@@ -331,33 +333,44 @@ HArvest.renderers.GenericCard    // Tier 2 fallback</code></pre>
           </table>
         </div>
 
-        <p>Maximum 4 companions per card. Companions with "read" capability never trigger service calls regardless of the domain, even if the domain normally allows control.</p>
+        <p>There is no per-card companion limit; the 50-entity token budget is the only constraint. Companions with "read" capability never trigger service calls regardless of the domain, even if the domain normally allows control.</p>
         </section>
 
         <section>
         <h2 id="server-config">Server-managed settings</h2>
 
-        <p>Several card settings that used to be HTML attributes are now managed server-side per entity in the panel. They are delivered to the widget over WebSocket during authentication and update in real time when changed in the panel.</p>
+        <p>Card settings are managed server-side per entity in the panel. They are delivered to the widget over WebSocket during authentication and update in real time when changed.</p>
 
         <div class="table-wrap">
           <table>
             <thead><tr><th>Setting</th><th>Configured in panel</th><th>Notes</th></tr></thead>
             <tbody>
-              <tr><td>Graph type (line/bar/none)</td><td>Entity display settings</td><td>History graph for sensor entities</td></tr>
-              <tr><td>Graph hours</td><td>Entity display settings</td><td>Time window, 1-168 hours</td></tr>
-              <tr><td>Graph period</td><td>Entity display settings</td><td>Aggregation period in minutes</td></tr>
-              <tr><td>Animate fan icon</td><td>Entity display settings</td><td>Spinning fan when entity is on</td></tr>
-              <tr><td>Companion entities</td><td>Entity display settings</td><td>See above</td></tr>
-              <tr><td>Theme / CSS variables</td><td>Token appearance settings</td><td>Pushed on connect and on theme change</td></tr>
-              <tr><td>Language</td><td>Token display defaults</td><td>BCP 47 tag or "auto"</td></tr>
-              <tr><td>Accessibility mode</td><td>Token display defaults</td><td>"standard" or "enhanced"</td></tr>
-              <tr><td>On offline behavior</td><td>Token display defaults</td><td>"dim", "hide", "message", or "last-state"</td></tr>
-              <tr><td>On error behavior</td><td>Token display defaults</td><td>"dim", "hide", or "message"</td></tr>
-              <tr><td>Offline message text</td><td>Token display defaults</td><td>Custom text shown when entity is offline</td></tr>
-              <tr><td>Error message text</td><td>Token display defaults</td><td>Custom text shown on connection error</td></tr>
+              <tr><td>Name override</td><td>Entity settings card</td><td>Custom display name, overrides HA friendly_name</td></tr>
+              <tr><td>Force color scheme</td><td>Entity settings card</td><td>Auto, Light, or Dark per entity</td></tr>
+              <tr><td>Graph type (line/bar/none)</td><td>Entity settings card</td><td>History graph for sensor, binary_sensor, input_number</td></tr>
+              <tr><td>Graph hours</td><td>Entity settings card</td><td>Time window, 1-168 hours</td></tr>
+              <tr><td>Graph period</td><td>Entity settings card</td><td>Aggregation period in minutes</td></tr>
+              <tr><td>Animate fan icon</td><td>Entity settings card</td><td>Spinning fan when entity is on</td></tr>
+              <tr><td>Fan display mode</td><td>Entity settings card</td><td>Auto, On/Off, Continuous, Stepped, or Cycle</td></tr>
+              <tr><td>Light feature toggles</td><td>Entity settings card</td><td>Show/hide brightness, color temp, RGB controls</td></tr>
+              <tr><td>Climate feature toggles</td><td>Entity settings card</td><td>Show/hide HVAC modes, presets, fan mode, swing mode</td></tr>
+              <tr><td>Cover feature toggles</td><td>Entity settings card</td><td>Show/hide position slider, tilt control</td></tr>
+              <tr><td>Media player feature toggles</td><td>Entity settings card</td><td>Show/hide transport, volume, source selector</td></tr>
+              <tr><td>Input number display mode</td><td>Entity settings card</td><td>Slider or Buttons</td></tr>
+              <tr><td>Companion entities</td><td>Entity settings card</td><td>See above</td></tr>
+              <tr><td>Excluded attributes</td><td>Entity settings card</td><td>Linked with feature toggles bidirectionally</td></tr>
+              <tr><td>Theme / CSS variables</td><td>Entities tab, theme card</td><td>Pushed on connect and on theme change</td></tr>
+              <tr><td>Language</td><td>Preferences tab</td><td>BCP 47 tag or "auto"</td></tr>
+              <tr><td>Accessibility mode</td><td>Preferences tab</td><td>"standard" or "enhanced"</td></tr>
+              <tr><td>On offline behavior</td><td>Preferences tab</td><td>"dim", "hide", "message", or "last-state"</td></tr>
+              <tr><td>On error behavior</td><td>Preferences tab</td><td>"dim", "hide", or "message"</td></tr>
+              <tr><td>Offline message text</td><td>Preferences tab</td><td>Custom text shown when entity is offline</td></tr>
+              <tr><td>Error message text</td><td>Preferences tab</td><td>Custom text shown on connection error</td></tr>
             </tbody>
           </table>
         </div>
+
+        <p>All per-entity settings are stored as <code>display_hints</code> on the entity access configuration. Feature toggles and excluded attributes are bidirectionally linked: disabling a feature toggle automatically excludes the corresponding attribute, and vice versa.</p>
         </section>
 
         <section>

@@ -66,10 +66,11 @@ class Harvest_Shortcode {
 
         // entity takes priority over alias when both are present.
         if ( ! empty( $atts['entity'] ) && ! empty( $atts['alias'] ) ) {
-            trigger_error(
-                'HArvest shortcode: both entity and alias attributes are set. ' .
+            _doing_it_wrong(
+                'harvest shortcode',
+                'Both entity and alias attributes are set. ' .
                 'entity takes priority. Remove alias to suppress this notice.',
-                E_USER_NOTICE
+                '1.0.0'
             );
         }
 
@@ -131,6 +132,12 @@ class Harvest_Shortcode {
         }
 
         $ha_url = Harvest_Settings::get_ha_url();
+
+        if ( empty( $ha_url ) ) {
+            return self::render_error(
+                __( 'HArvest: Home Assistant URL is not configured. Go to Settings > HArvest to set it up.', 'harvest' )
+            );
+        }
 
         $data_attrs = [
             'data-token'  => $atts['token'],

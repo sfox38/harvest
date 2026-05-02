@@ -9,8 +9,8 @@
  * Fallback chain: requested language -> English -> raw key string.
  *
  * Language codes follow BCP 47 primary subtags (two-letter ISO 639-1).
- * When lang="auto", the primary subtag of navigator.language is used
- * (e.g. "en-US" -> "en", "zh-TW" -> "zh").
+ * When lang="auto", navigator.language is resolved with script-tag
+ * awareness (e.g. "en-US" -> "en", "zh-TW" -> "zh-Hant", "zh-CN" -> "zh-Hans").
  *
  * String keys are dot-separated namespaces:
  *   state.*        - entity state labels
@@ -35,10 +35,25 @@ import pt from "../i18n/pt.json";
 import nl from "../i18n/nl.json";
 import th from "../i18n/th.json";
 import ja from "../i18n/ja.json";
-import zh from "../i18n/zh.json";
+import zhHans from "../i18n/zh-Hans.json";
+import zhHant from "../i18n/zh-Hant.json";
 
 /** @type {Record<string, Record<string, string>>} */
-const STRINGS = { en, de, fr, es, pt, nl, th, ja, zh };
+const STRINGS = { en, de, fr, es, pt, nl, th, ja, "zh-Hans": zhHans, "zh-Hant": zhHant };
+
+const _HANT_REGIONS = new Set(["tw", "hk", "mo"]);
+
+function _resolveCode(lang) {
+  if (lang === "auto") lang = navigator.language ?? "en";
+  lang = lang.toLowerCase();
+  if (lang === "zh-hans") return "zh-Hans";
+  if (lang === "zh-hant") return "zh-Hant";
+  if (lang.startsWith("zh")) {
+    const region = lang.split("-")[1] ?? "";
+    return _HANT_REGIONS.has(region) ? "zh-Hant" : "zh-Hans";
+  }
+  return lang.split("-")[0];
+}
 
 // ---------------------------------------------------------------------------
 // I18n class
@@ -58,10 +73,7 @@ export class I18n {
    *   "auto" resolves from navigator.language at construction time.
    */
   constructor(lang) {
-    const code = lang === "auto"
-      ? (navigator.language ?? "en").split("-")[0].toLowerCase()
-      : lang.toLowerCase();
-
+    const code = _resolveCode(lang);
     this.#strings = STRINGS[code] ?? STRINGS["en"];
   }
 

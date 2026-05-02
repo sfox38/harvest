@@ -167,9 +167,10 @@ export class LightCard extends BaseCard {
 
   render() {
     const isWritable    = this.def.capabilities === "read-write";
-    const hasBrightness = this.def.supported_features?.includes("brightness");
-    const hasColorTemp  = this.def.supported_features?.includes("color_temp");
-    const hasColor      = this.def.supported_features?.includes("rgb_color");
+    const hints         = this.config.displayHints ?? {};
+    const hasBrightness = hints.show_brightness !== false && this.def.supported_features?.includes("brightness");
+    const hasColorTemp  = hints.show_color_temp !== false && this.def.supported_features?.includes("color_temp");
+    const hasColor      = hints.show_rgb !== false && this.def.supported_features?.includes("rgb_color");
     // Kelvin range - HA 2022.5+ uses color_temp_kelvin; default 2000-6500K.
     const minCt         = this.def.feature_config?.min_color_temp_kelvin ?? 2000;
     const maxCt         = this.def.feature_config?.max_color_temp_kelvin ?? 6500;
@@ -410,5 +411,6 @@ function _esc(str) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }

@@ -8,8 +8,8 @@
  * Requires PHP:      7.4
  * Author:            HArvest Contributors
  * Author URI:        https://github.com/sfox38/harvest
- * License:           MIT
- * License URI:       https://opensource.org/licenses/MIT
+ * License:           GPL-2.0-or-later
+ * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       harvest
  * Domain Path:       /languages
  */

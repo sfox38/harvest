@@ -29,11 +29,10 @@ const INPUT_NUMBER_STYLES = /* css */`
 
   [part=value-input] {
     width: 64px;
-    min-height: 44px;
-    padding: var(--hrv-spacing-xs) var(--hrv-spacing-s);
-    border: 1px solid var(--hrv-color-border);
-    border-radius: var(--hrv-radius-s);
-    background: var(--hrv-color-surface);
+    padding: var(--hrv-spacing-s) var(--hrv-spacing-s);
+    border: none;
+    border-radius: var(--hrv-radius-m);
+    background: var(--hrv-color-surface-alt);
     color: var(--hrv-color-text);
     font-size: var(--hrv-font-size-s);
     font-family: inherit;
@@ -61,7 +60,8 @@ function _esc(str) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 export class InputNumberCard extends BaseCard {
@@ -77,7 +77,8 @@ export class InputNumberCard extends BaseCard {
 
   render() {
     const isWritable  = this.def.capabilities === "read-write";
-    const hasSlider   = this.def.supported_features?.includes("slider") ?? true;
+    const displayMode = this.config.displayHints?.display_mode ?? null;
+    const hasSlider   = displayMode === "buttons" ? false : (this.def.supported_features?.includes("slider") ?? true);
     const min  = this.def.feature_config?.min  ?? 0;
     const max  = this.def.feature_config?.max  ?? 100;
     const step = this.def.feature_config?.step ?? 1;
