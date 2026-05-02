@@ -48,4 +48,4 @@ The HArvest wizard generates the exact snippet you need.
 
 ## Documentation
 
-Full documentation: **[sfox38.github.io/harvest](https://sfox38.github.io/harvest)**
+Full documentation: **[sfox38.github.io/HArvest](https://sfox38.github.io/HArvest)**
