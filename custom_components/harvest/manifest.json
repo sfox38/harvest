@@ -1,9 +1,9 @@
 {
   "domain": "harvest",
   "name": "HArvest",
-  "version": "0.9.1",
-  "documentation": "https://github.com/sfox38/harvest/",
-  "issue_tracker": "https://github.com/sfox38/harvest/issues",
+  "version": "0.9.2",
+  "documentation": "https://github.com/sfox38/HArvest/",
+  "issue_tracker": "https://github.com/sfox38/HArvest/issues",
   "requirements": [],
   "dependencies": [],
   "after_dependencies": ["frontend"],

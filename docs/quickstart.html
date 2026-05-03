@@ -17,7 +17,7 @@
         <img src="logo.png" alt="HArvest logo">
         <div>
           <div class="sidebar-logo-text">HArvest</div>
-          <span class="sidebar-logo-version">v0.9.0 documentation</span>
+          <span class="sidebar-logo-version">v0.9.2 documentation</span>
         </div>
       </div>
       <div class="sidebar-nav">
@@ -46,7 +46,7 @@
         </div>
       </div>
       <div class="sidebar-footer">
-        <a href="https://github.com/sfox38/harvest" target="_blank">GitHub</a>
+        <a href="https://github.com/sfox38/HArvest" target="_blank">GitHub</a>
         <button class="theme-toggle" id="themeToggle">Dark mode</button>
       </div>
     </nav>
@@ -72,31 +72,26 @@
         <section>
         <h2 id="first-widget">Create your first widget</h2>
 
-        <p>From the HArvest panel dashboard, click <strong>+ Create Widget</strong> in the bottom-right corner. This opens the six-step wizard.</p>
+        <p>From the HArvest panel dashboard, click <strong>+ Create Widget</strong> in the bottom-right corner. This opens the four-step wizard.</p>
 
-        <h3>Step 1 - Pick entities</h3>
+        <h3>Step 1 - Design</h3>
         <p>Search for the entity you want to embed. The search matches entity IDs and friendly names, for example "Bedroom light" or <code>light.bedroom_main</code>.</p>
         <ul>
           <li>Click an entity to add it. Each one becomes its own card on your page.</li>
-          <li>Optionally add companion entities. These are small secondary indicators that appear inside another card, for example a motion sensor pill inside a light card.</li>
+          <li>Optionally add companion entities using the <strong>[+]</strong> button on each row. These are small secondary indicators that appear inside another card, for example a motion sensor pill inside a light card.</li>
           <li>Give the widget a name for your own reference. Visitors to your page never see it.</li>
+          <li>Set permissions: <strong>View only</strong> (visitors see state but cannot change anything) or <strong>Control</strong> (visitors can also interact, for example toggling a light). You can override this per entity later from the widget detail screen.</li>
+          <li>Pick a visual theme from the theme strip. You can change the theme later from the widget detail screen.</li>
         </ul>
+        <p>A live preview of your selected entity appears as you configure it, updating in real time when you change the permission level or theme.</p>
 
         <img src="widget-step-1.jpg" alt="Step 1 - entity picker showing search results and selected entities">
 
-        <h3>Step 2 - Set permissions</h3>
-        <p>Decide what visitors can do with your entities:</p>
-        <ul>
-          <li><strong>View only</strong> - visitors see the current state (on/off, temperature, etc.) but cannot change anything.</li>
-          <li><strong>Control</strong> - visitors can also interact, for example toggling a light or adjusting a thermostat.</li>
-        </ul>
-        <p>This sets the default for all entities in the widget. You can override it per entity later from the widget detail screen.</p>
-
-        <h3>Step 3 - Set origin</h3>
+        <h3>Step 2 - Set origin</h3>
         <p>Specify which website is allowed to use this widget. This prevents someone from copying your embed code and using it on a different site.</p>
         <p>Enter your site URL (e.g. <code>https://mysite.com</code>) or choose <strong>Any website</strong> if you don't need this restriction. For widgets that allow control, setting an origin is strongly recommended.</p>
 
-        <h3>Step 4 - Set expiry</h3>
+        <h3>Step 3 - Set expiry</h3>
         <p>Choose when the widget expires: never, 30 days, 90 days, 365 days, or a custom date. An expired widget can be renewed from the panel at any time.</p>
 
         <p>The <strong>Advanced</strong> section has additional options you can skip for now:</p>
@@ -106,18 +101,16 @@
           <li><strong>HMAC signing</strong> - adds a shared secret that the page must prove it knows before connecting. Useful for high-security widgets. See the <a href="security.html#hmac">security page</a> for details.</li>
         </ul>
 
-        <h3>Step 5 - Choose appearance</h3>
-        <p>Pick a visual theme for the widget cards. A live preview shows your actual entity state with the theme applied, so you can see exactly how it will look.</p>
-        <p>You can change the theme later from the widget detail screen. Changes apply immediately to anyone viewing the widget, with no page edits needed.</p>
+        <p>Click <strong>Generate</strong> to create the widget.</p>
 
-        <h3>Step 6 - Get the code</h3>
+        <h3>Step 4 - Get the code</h3>
         <p>The wizard shows a ready-to-paste code snippet. Use the tabs to switch between plain HTML and WordPress shortcode format.</p>
 
         <p>There is also a toggle to use <strong>aliases</strong> instead of real entity IDs. An alias is a short random code like <code>dJ5x3Apd</code> that stands in for <code>light.bedroom_main</code>, so visitors cannot see your actual Home Assistant entity IDs in the page source.</p>
 
         <p>Copy the snippet and paste it into your page. That's it.</p>
 
-        <img src="widget-step-6.jpg" alt="Step 6 - generated embed snippet with copy button">
+        <img src="widget-step-4.jpg" alt="Step 4 - generated embed snippet with copy button">
         </section>
 
         <section>
@@ -160,7 +153,7 @@
 
         <p>Paste it into any post or page using the Classic Editor or any editor that allows shortcodes. The HArvest WordPress plugin takes care of the rest: loading the widget script, setting up browser security headers, and matching your site's light or dark mode.</p>
 
-        <p>The plugin needs to be installed and configured with your HA URL before shortcodes will work. Download the latest release zip from <a href="https://github.com/sfox38/harvest/releases" target="_blank">GitHub Releases</a> and find <code>harvest.zip</code> in the <code>wordpress/</code> folder. See the <a href="wordpress.html">WordPress setup page</a> for the full install process.</p>
+        <p>The plugin needs to be installed and configured with your HA URL before shortcodes will work. Download the latest release zip from <a href="https://github.com/sfox38/HArvest/releases" target="_blank">GitHub Releases</a> and find <code>harvest.zip</code> in the <code>wordpress/</code> folder. See the <a href="wordpress.html">WordPress setup page</a> for the full install process.</p>
 
         <div class="callout callout-tip">
           <span class="callout-label">Where to go next</span>

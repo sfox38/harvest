@@ -162,30 +162,6 @@ const RENDERER_OPTIONS = [
   { value: "custom", label: "Custom Entity" },
 ];
 
-const DOMAIN_DEFAULT_ICONS: Record<string, Record<string, string>> = {
-  light:          { on: "mdi:lightbulb",               "*": "mdi:lightbulb-outline" },
-  switch:         { on: "mdi:toggle-switch",            "*": "mdi:toggle-switch-off-outline" },
-  fan:            { on: "mdi:fan",                      "*": "mdi:fan-off" },
-  cover:          { open: "mdi:window-shutter-open",    "*": "mdi:window-shutter" },
-  climate:        { "*": "mdi:thermostat" },
-  media_player:   { playing: "mdi:cast-connected",      "*": "mdi:cast" },
-  remote:         { "*": "mdi:remote" },
-  input_boolean:  { on: "mdi:toggle-switch",            "*": "mdi:toggle-switch-off-outline" },
-  input_number:   { "*": "mdi:ray-vertex" },
-  input_select:   { "*": "mdi:format-list-bulleted" },
-  sensor:         { "*": "mdi:gauge" },
-  binary_sensor:  { on: "mdi:radiobox-marked",          "*": "mdi:radiobox-blank" },
-  harvest_action: { triggered: "mdi:play-circle",       "*": "mdi:play-circle-outline" },
-  timer:          { active: "mdi:timer",                paused: "mdi:timer-pause", "*": "mdi:timer-outline" },
-  weather:        { sunny: "mdi:weather-sunny",          "*": "mdi:weather-cloudy" },
-};
-
-function resolveDefaultIcon(domain: string, state: string): string {
-  const map = DOMAIN_DEFAULT_ICONS[domain];
-  if (!map) return "mdi:help-circle";
-  return map[state] ?? map["*"] ?? "mdi:help-circle";
-}
-
 // ---------------------------------------------------------------------------
 // Widget script loader and preview helpers
 // ---------------------------------------------------------------------------
@@ -198,9 +174,14 @@ declare global {
         entityDef: Record<string, unknown>,
         state: string,
         attributes: Record<string, unknown>,
-        themeVars?: Record<string, string>,
+        themeVars?: Record<string, string> | { variables: Record<string, string>; dark_variables?: Record<string, string> },
         options?: { graph?: string; hours?: number; historyData?: Array<{ t: string; s: string }>; packId?: string },
       ) => HTMLElement;
+      buildEntityDef: (
+        rawEntity: { domain: string; state: string; friendly_name: string; attributes: Record<string, unknown>; unit?: string },
+        options?: { capabilities?: string; features?: Record<string, boolean>; iconOverride?: string; nameOverride?: string; colorScheme?: string; displayHints?: Record<string, unknown>; gestureConfig?: Record<string, unknown> },
+      ) => Record<string, unknown>;
+      filterAttributes: (attributes: Record<string, unknown>) => Record<string, unknown>;
     };
   }
 }
@@ -264,91 +245,26 @@ export function resolveVars(
   theme: ThemeDefinition | null,
   editedVars: Record<string, string> | null,
   editedDarkVars: Record<string, string> | null,
-  colorMode: "light" | "dark" | "auto",
+  _colorMode: "light" | "dark" | "auto",
 ): Record<string, string> {
   if (!theme && !editedVars) return {};
   const base = editedVars ?? theme?.variables ?? {};
   const dark = editedDarkVars ?? theme?.dark_variables ?? {};
-  const usesDark = colorMode === "dark" || (colorMode === "auto" && getHaDarkMode());
+  const usesDark = _colorMode === "dark" || (_colorMode === "auto" && getHaDarkMode());
   return usesDark ? { ...base, ...dark } : { ...base };
 }
 
-function buildEntityDef(
-  mock: MockEntity,
-  features: Record<string, boolean>,
-  capability: "read" | "read-write",
-): Record<string, unknown> {
-  const domain = mock.domain;
-  const deviceClass = (mock.attributes.device_class as string) ?? null;
-  const supported: string[] = [];
-  const featureConfig: Record<string, unknown> = {};
-
-  if (domain === "light") {
-    if (features.brightness) supported.push("brightness");
-    if (features.color_temp) supported.push("color_temp");
-    if (features.rgb_color) supported.push("rgb_color");
-    featureConfig.min_brightness = 0;
-    featureConfig.max_brightness = 255;
-    if (mock.attributes.min_mireds != null) featureConfig.min_color_temp = mock.attributes.min_mireds;
-    if (mock.attributes.max_mireds != null) featureConfig.max_color_temp = mock.attributes.max_mireds;
-  } else if (domain === "fan") {
-    if (features.percentage) supported.push("set_speed");
-    if (features.oscillating) supported.push("oscillate");
-    if (features.direction) supported.push("direction");
-    if (features.preset_mode) supported.push("preset_mode");
-    const step = mock.attributes.percentage_step as number;
-    if (step && step > 0) featureConfig.speed_count = Math.round(100 / step);
-    if (features.preset_mode && mock.attributes.preset_modes) {
-      featureConfig.preset_modes = mock.attributes.preset_modes;
-    }
-  } else if (domain === "cover") {
-    if (features.current_position) supported.push("set_position");
-    if (features.buttons) supported.push("buttons");
-  } else if (domain === "climate") {
-    if (features.temperature) supported.push("target_temperature");
-    if (mock.attributes.min_temp != null) featureConfig.min_temp = mock.attributes.min_temp;
-    if (mock.attributes.max_temp != null) featureConfig.max_temp = mock.attributes.max_temp;
-    if (mock.attributes.target_temp_step != null) featureConfig.temp_step = mock.attributes.target_temp_step;
-    featureConfig.hvac_modes = features.hvac_modes ? (mock.attributes.hvac_modes ?? []) : [];
-    if (mock.attributes.fan_modes) featureConfig.fan_modes = mock.attributes.fan_modes;
-    if (mock.attributes.preset_modes) featureConfig.preset_modes = mock.attributes.preset_modes;
-    if (mock.attributes.swing_modes) featureConfig.swing_modes = mock.attributes.swing_modes;
-  } else if (domain === "media_player") {
-    if (features.transport) supported.push("play", "pause", "previous_track", "next_track");
-    if (features.volume) supported.push("volume_set");
-  } else if (domain === "input_number") {
-    if (features.slider) supported.push("slider");
-    for (const key of ["min", "max", "step"]) {
-      if (mock.attributes[key] != null) featureConfig[key] = mock.attributes[key];
-    }
-  }
-
-  const iconMap = DOMAIN_DEFAULT_ICONS[domain] ?? {};
-  const currentIcon = resolveDefaultIcon(domain, mock.state);
-
+export function resolveThemeObj(
+  theme: ThemeDefinition | null,
+  editedVars: Record<string, string> | null,
+  editedDarkVars: Record<string, string> | null,
+): { variables: Record<string, string>; dark_variables: Record<string, string> } {
   return {
-    entity_id: mock.attributes._entity_id ?? `${domain}.preview`,
-    domain,
-    device_class: deviceClass,
-    friendly_name: mock.friendly_name,
-    capabilities: capability,
-    supported_features: supported,
-    feature_config: featureConfig,
-    icon: currentIcon,
-    icon_state_map: iconMap,
-    unit_of_measurement: mock.unit ?? null,
-    ...(domain === "weather" && features.forecast ? { display_hints: { show_forecast: true } } : {}),
+    variables: editedVars ?? theme?.variables ?? {},
+    dark_variables: editedDarkVars ?? theme?.dark_variables ?? {},
   };
 }
 
-function buildAttributes(mock: MockEntity): Record<string, unknown> {
-  const attrs = { ...mock.attributes };
-  delete attrs._entity_id;
-  delete attrs.device_class;
-  delete attrs.state_class;
-  delete attrs.last_reset;
-  return attrs;
-}
 
 export function generateMockHistory(domain: string, graphType: GraphType, state: string): Array<{ t: string; s: string }> {
   const now = Date.now();
@@ -384,9 +300,9 @@ export function generateMockHistory(domain: string, graphType: GraphType, state:
 // RealWidget - renders a single hrv-card preview
 // ---------------------------------------------------------------------------
 
-function RealWidget({ mock, vars, capability, features, graphType, packId }: {
+function RealWidget({ mock, themeObj, capability, features, graphType, packId }: {
   mock: MockEntity;
-  vars: Record<string, string>;
+  themeObj: { variables: Record<string, string>; dark_variables: Record<string, string> };
   capability: "read" | "read-write";
   features: Record<string, boolean>;
   graphType: GraphType;
@@ -399,8 +315,6 @@ function RealWidget({ mock, vars, capability, features, graphType, packId }: {
 
   useEffect(() => {
     const load = async () => {
-      // Reset ready if this packId hasn't been loaded yet, so the card render
-      // effect waits until the pack script is available before mounting.
       if (packId && !_loadedPacks.has(packId)) {
         setReady(false);
       }
@@ -421,8 +335,13 @@ function RealWidget({ mock, vars, capability, features, graphType, packId }: {
     container.innerHTML = "";
     cardRef.current = null;
 
-    const entityDef = buildEntityDef(mock, features, capability);
-    const attrs = buildAttributes(mock);
+    const entityDef = window.HArvest.buildEntityDef(
+      { domain: mock.domain, state: mock.state, friendly_name: mock.friendly_name,
+        attributes: mock.attributes, unit: mock.unit },
+      { capabilities: capability, features,
+        ...(mock.domain === "weather" && features.forecast ? { displayHints: { show_forecast: true } } : {}) },
+    );
+    const attrs = window.HArvest.filterAttributes(mock.attributes);
 
     const graphOpts: Record<string, unknown> = {};
     if (graphType !== "none") {
@@ -434,7 +353,7 @@ function RealWidget({ mock, vars, capability, features, graphType, packId }: {
     if (features.animate) graphOpts.animate = true;
     const opts = Object.keys(graphOpts).length > 0 ? graphOpts : undefined;
 
-    const card = window.HArvest.preview(container, entityDef, mock.state, attrs, vars, opts as any);
+    const card = window.HArvest.preview(container, entityDef, mock.state, attrs, themeObj as any, opts as any);
     cardRef.current = card;
 
     return () => {
@@ -443,18 +362,19 @@ function RealWidget({ mock, vars, capability, features, graphType, packId }: {
     };
   }, [ready, cardKey]);
 
-  const varsJson = JSON.stringify(vars);
+  const themeJson = JSON.stringify(themeObj);
   useEffect(() => {
-    const card = cardRef.current as (HTMLElement & { applyPreviewTheme?: (v: Record<string, string>) => void }) | null;
+    const card = cardRef.current as (HTMLElement & { applyPreviewTheme?: (v: Record<string, unknown>) => void }) | null;
     if (!card?.applyPreviewTheme) return;
-    card.applyPreviewTheme(vars);
-  }, [varsJson]);
+    card.applyPreviewTheme(themeObj);
+  }, [themeJson]);
 
   const stateKey = `${mock.state}:${JSON.stringify(mock.attributes)}`;
   useEffect(() => {
+    if (!window.HArvest) return;
     const card = cardRef.current as (HTMLElement & { updatePreviewState?: (s: string, a: Record<string, unknown>) => void }) | null;
     if (!card?.updatePreviewState) return;
-    const attrs = buildAttributes(mock);
+    const attrs = window.HArvest.filterAttributes(mock.attributes);
     card.updatePreviewState(mock.state, attrs);
   }, [stateKey]);
 
@@ -586,8 +506,8 @@ export function WidgetPreview({ variables, darkVariables, packId }: WidgetPrevie
   const domainFeatures = DOMAIN_FEATURES[effectiveDomain] ?? [];
   const graphOptions = GRAPH_DOMAINS[effectiveDomain];
 
+  const themeObj = { variables, dark_variables: darkVariables ?? {} };
   const usesDark = colorMode === "dark" || (colorMode === "auto" && getHaDarkMode());
-  const vars = usesDark ? { ...variables, ...(darkVariables ?? {}) } : { ...variables };
 
   return (
     <div className="col" style={{ gap: 12 }}>
@@ -674,7 +594,7 @@ export function WidgetPreview({ variables, darkVariables, packId }: WidgetPrevie
             })(),
           }}
         >
-          <RealWidget mock={previewMock} vars={vars} capability={capability} features={features} graphType={graphType} packId={packId} />
+          <RealWidget mock={previewMock} themeObj={themeObj} capability={capability} features={features} graphType={graphType} packId={packId} />
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", paddingBottom: 12 }}>
           <input

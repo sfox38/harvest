@@ -388,7 +388,7 @@ class HarvestWsView(HomeAssistantView):
             "expires_at": session.expires_at.isoformat(),
             "absolute_expires_at": session.absolute_expires_at.isoformat(),
             "max_renewals": token.session.max_renewals,
-            "entity_ids": entity_refs,  # echo back exactly as received
+            "entity_ids": list(outgoing_ids.values()),  # only accepted refs
             "msg_id": msg_id,
         })
 

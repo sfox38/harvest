@@ -17,7 +17,7 @@
         <img src="logo.png" alt="HArvest logo">
         <div>
           <div class="sidebar-logo-text">HArvest</div>
-          <span class="sidebar-logo-version">v0.9.0 documentation</span>
+          <span class="sidebar-logo-version">v0.9.2 documentation</span>
         </div>
       </div>
       <div class="sidebar-nav">
@@ -46,7 +46,7 @@
         </div>
       </div>
       <div class="sidebar-footer">
-        <a href="https://github.com/sfox38/harvest" target="_blank">GitHub</a>
+        <a href="https://github.com/sfox38/HArvest" target="_blank">GitHub</a>
         <button class="theme-toggle" id="themeToggle">Dark mode</button>
       </div>
     </nav>
@@ -225,15 +225,18 @@
 
         <h2 id="wizard">Widget wizard</h2>
 
-        <p>The wizard guides you through creating a new widget in six steps. It's accessible from the <strong>+ Create Widget</strong> button on the dashboard or widget list.</p>
+        <p>The wizard guides you through creating a new widget in four steps: Design, Origin, Expiry, and Done. It's accessible from the <strong>+ Create Widget</strong> button on the dashboard or widget list.</p>
 
         <p>The wizard is covered step-by-step in the <a href="quickstart.html#first-widget">Quick setup page</a>. Additional details on the options available at each step:</p>
 
         <h3>Single vs. group mode</h3>
-        <p>Step 1 has a toggle between <strong>Single widget</strong> and <strong>Group</strong> mode. Single mode creates one widget with one or more entities that each get their own card. Group mode creates a widget for a set of cards that share a group container - useful when you want cards laid out together on a page.</p>
+        <p>Step 1 (Design) has a toggle between <strong>Single card</strong>, <strong>Group of cards</strong>, and <strong>Page of cards</strong> modes. Switching between modes preserves your selected entities. Single mode keeps only the first entity. In Group and Page modes, clicking an entity row selects it for preview, and a <strong>[+]</strong> badge on each row lets you add companion entities inline.</p>
 
-        <h3>Alias toggle (Step 6)</h3>
-        <p>The code snippet in Step 6 has an <strong>Aliases</strong> toggle. When enabled, the snippet uses 8-character random aliases instead of real entity IDs in the embed code. Both formats work - aliases are just privacy aliases, not a different access mechanism. Aliases for each entity are generated when you select the entity in Step 1 and are stored with the widget permanently.</p>
+        <h3>Live preview</h3>
+        <p>Step 1 shows a live preview of your selected entity as you configure it. The preview updates in real time when you change the permission level, select a different entity, or pick a theme. Companions also appear in the preview.</p>
+
+        <h3>Alias toggle (Step 4)</h3>
+        <p>The code snippet in Step 4 (Done) has an <strong>Aliases</strong> toggle. When enabled, the snippet uses 8-character random aliases instead of real entity IDs in the embed code. Both formats work - aliases are just privacy aliases, not a different access mechanism. Aliases for each entity are generated when you select the entity in Step 1 and are stored with the widget permanently.</p>
 
         <h3>Embed modes</h3>
         <p>The snippet panel shows two embed modes:</p>

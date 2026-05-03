@@ -518,11 +518,24 @@
 
 .entity-list-id {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.entity-list-name {
   font-size: 12px;
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-width: 0;
+}
+.entity-list-eid {
+  font-size: 10px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .entity-list-alias {
@@ -544,6 +557,25 @@
 .entity-list-row:hover .entity-list-delete { opacity: 1; }
 .entity-list-delete:hover { color: var(--danger); }
 .entity-list-delete:focus-visible { opacity: 1; outline: 2px solid var(--accent); }
+
+.wizard-companion-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  min-width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: var(--accent-weak);
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0 4px;
+  transition: background 0.15s;
+}
+.wizard-companion-badge:hover { background: var(--accent); color: var(--paper); }
 
 .entity-config-section {
   border: 1px solid var(--divider);
@@ -1488,7 +1520,7 @@ button.entity-setting-group-title:focus-visible {
   justify-content: center;
   z-index: 9000;
   animation: overlay-fade 180ms ease;
-  padding: 20px;
+  padding: 10px;
 }
 
 @keyframes overlay-fade {
@@ -1503,7 +1535,7 @@ button.entity-setting-group-title:focus-visible {
 
 .wizard {
   width: min(780px, 100%);
-  max-height: min(860px, 100%);
+  max-height: 100%;
   background: var(--paper);
   display: flex;
   flex-direction: column;
@@ -1549,7 +1581,7 @@ button.entity-setting-group-title:focus-visible {
 }
 
 .wizard-body {
-  flex: 1;
+  flex: 1 1 auto;
   overflow-y: auto;
   padding: 24px 28px;
 }
@@ -2195,6 +2227,15 @@ button.entity-setting-group-title:focus-visible {
   max-height: 280px;
   overflow-y: auto;
 }
+.autocomplete-dropdown-inline {
+  position: relative;
+  top: auto;
+  left: auto;
+  width: 100%;
+  margin-top: 4px;
+  box-shadow: none;
+  border-radius: var(--radius-lg);
+}
 
 .autocomplete-item {
   padding: 8px 12px;
@@ -2549,29 +2590,34 @@ button.entity-setting-group-title:focus-visible {
   .widget-hide-sm { display: none !important; }
   .widget-thumb { width: 32px !important; height: 32px !important; }
 
-  /* Anchor the wizard near the top on mobile, let the overlay itself scroll,
-     and keep the slack OUTSIDE the card so the wizard fits the screen. */
+  /* Full-screen wizard on mobile */
   .overlay {
-    padding: 10px 10px 60vh;
-    align-items: flex-start;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
+    padding: 0;
+    align-items: stretch;
   }
   .wizard {
-    border-radius: var(--radius-xl) !important;
-    max-height: none !important;
+    width: 100% !important;
+    max-height: 100% !important;
+    height: 100%;
+    border-radius: 0 !important;
+    animation: none !important;
   }
   .wizard-body {
     padding: 16px !important;
-    overflow: visible !important;
   }
-  .content { padding-bottom: 60vh; }
+  .content { padding-bottom: 80px; }
   .wizard-head { padding: 12px 16px !important; }
   .wizard-foot { padding: 10px 14px !important; }
   .widgets-grid { grid-template-columns: 1fr !important; }
 
-  .step-label { display: none; }
+  .step-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
   .step-line { width: 10px; margin: 0 4px; }
+
+  .entity-list-delete { opacity: 1; }
+  .wizard-companion-badge { min-width: 44px; min-height: 44px; }
+  .autocomplete-item { min-height: 44px; }
+
+  .display-settings-row { flex-wrap: wrap; }
 
   .stat-value { font-size: 24px !important; }
 

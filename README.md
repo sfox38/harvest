@@ -24,8 +24,6 @@ HArvest creates a secure bridge between your Home Assistant instance and any web
 
 ## Installation
 
-HArvest installs as a custom HACS repository. Open HACS, add `https://github.com/sfox38/harvest` as a custom repository (category: Integration), then download and restart HA. Full steps in the [installation guide](https://sfox38.github.io/HArvest/installation.html).
-
 After restarting, go to **Settings > Devices and Services > Add Integration**, search for **HArvest**, and select it. The HArvest panel appears in your sidebar.
 
 ## Quick start
@@ -33,7 +31,7 @@ After restarting, go to **Settings > Devices and Services > Add Integration**, s
 Embedding a light card on an HTML page:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/sfox38/harvest/widget/dist/harvest.min.js"></script>
+<script src="/harvest.min.js"></script>
 <script>HArvest.config({ haUrl: "https://ha.example.com", token: "hwt_..." })</script>
 <hrv-card entity="light.bedroom_main"></hrv-card>
 ```

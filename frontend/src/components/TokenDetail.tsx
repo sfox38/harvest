@@ -600,8 +600,6 @@ function reverseAttrMap(domain: string): Record<string, string> {
 // Entity settings live preview
 // ---------------------------------------------------------------------------
 
-const _PREVIEW_BLOCKED_ATTRS = new Set(["supported_features", "supported_color_modes", "friendly_name", "attribution", "assumed_state", "editable"]);
-
 const _MOCK_WEATHER_FORECAST_DAILY = [
   { datetime: "2025-06-10T12:00:00", condition: "sunny",        temperature: 27, templow: 18 },
   { datetime: "2025-06-11T12:00:00", condition: "partlycloudy", temperature: 24, templow: 16 },
@@ -620,106 +618,6 @@ const _MOCK_WEATHER_FORECAST_HOURLY = [
   { datetime: "2025-06-10T15:00:00", condition: "sunny",        temperature: 25 },
 ];
 
-const _PREVIEW_ICON_MAP: Record<string, Record<string, string>> = {
-  light:          { on: "mdi:lightbulb",            "*": "mdi:lightbulb-outline" },
-  switch:         { on: "mdi:toggle-switch",         "*": "mdi:toggle-switch-off-outline" },
-  fan:            { on: "mdi:fan",                   "*": "mdi:fan-off" },
-  cover:          { open: "mdi:window-shutter-open", "*": "mdi:window-shutter" },
-  climate:        { "*": "mdi:thermostat" },
-  media_player:   { playing: "mdi:cast-connected",   "*": "mdi:cast" },
-  remote:         { "*": "mdi:remote" },
-  input_boolean:  { on: "mdi:toggle-switch",         "*": "mdi:toggle-switch-off-outline" },
-  input_number:   { "*": "mdi:numeric" },
-  input_select:   { "*": "mdi:format-list-bulleted" },
-  sensor:         { "*": "mdi:gauge" },
-  binary_sensor:  { on: "mdi:radiobox-marked",       "*": "mdi:radiobox-blank" },
-  harvest_action: { triggered: "mdi:play-circle",    "*": "mdi:play-circle-outline" },
-  timer:          { active: "mdi:timer", paused: "mdi:timer-pause", "*": "mdi:timer-outline" },
-  weather:        { sunny: "mdi:weather-sunny",       "*": "mdi:weather-cloudy" },
-};
-
-function buildEntityDefFromHADetail(entity: HAEntityDetail, ea: Token["entities"][number]): Record<string, unknown> {
-  const domain = entity.entity_id.split(".")[0];
-  const attrs = entity.attributes;
-  const friendly = ea.name_override || (attrs.friendly_name as string) || entity.entity_id;
-  const bitmask = (attrs.supported_features as number) ?? 0;
-  const supported: string[] = [];
-  const featureConfig: Record<string, unknown> = {};
-
-  if (domain === "light") {
-    const modes = new Set((attrs.supported_color_modes as string[]) ?? []);
-    const dimmable = new Set(["brightness", "color_temp", "hs", "xy", "rgb", "rgbw", "rgbww", "white"]);
-    if ([...modes].some(m => dimmable.has(m))) supported.push("brightness");
-    if (modes.has("color_temp")) supported.push("color_temp");
-    if ([...modes].some(m => new Set(["hs", "xy", "rgb", "rgbw", "rgbww"]).has(m))) supported.push("rgb_color");
-    featureConfig.min_brightness = 0; featureConfig.max_brightness = 255;
-    if (attrs.min_mireds != null) featureConfig.min_color_temp = attrs.min_mireds;
-    if (attrs.max_mireds != null) featureConfig.max_color_temp = attrs.max_mireds;
-    if (attrs.min_color_temp_kelvin != null) featureConfig.min_color_temp_kelvin = attrs.min_color_temp_kelvin;
-    if (attrs.max_color_temp_kelvin != null) featureConfig.max_color_temp_kelvin = attrs.max_color_temp_kelvin;
-  } else if (domain === "fan") {
-    if (bitmask & 1) supported.push("set_speed");
-    if (bitmask & 2) supported.push("oscillate");
-    if (bitmask & 4) supported.push("direction");
-    if (bitmask & 8) supported.push("preset_mode");
-    const step = attrs.percentage_step as number;
-    if (step > 0) { featureConfig.percentage_step = step; featureConfig.speed_count = Math.round(100 / step); }
-    if (attrs.preset_modes) featureConfig.preset_modes = attrs.preset_modes;
-  } else if (domain === "cover") {
-    if (bitmask & 4) supported.push("set_position");
-    supported.push("buttons");
-  } else if (domain === "climate") {
-    if (bitmask & 1) supported.push("target_temperature");
-    if (bitmask & 4) supported.push("fan_mode");
-    if (bitmask & 8) supported.push("preset_mode");
-    if (bitmask & 16) supported.push("swing_mode");
-    if (attrs.min_temp != null) featureConfig.min_temp = attrs.min_temp;
-    if (attrs.max_temp != null) featureConfig.max_temp = attrs.max_temp;
-    if (attrs.target_temp_step != null) featureConfig.temp_step = attrs.target_temp_step;
-    if (attrs.hvac_modes) featureConfig.hvac_modes = attrs.hvac_modes;
-    if (attrs.fan_modes) featureConfig.fan_modes = attrs.fan_modes;
-    if (attrs.preset_modes) featureConfig.preset_modes = attrs.preset_modes;
-    if (attrs.swing_modes) featureConfig.swing_modes = attrs.swing_modes;
-  } else if (domain === "media_player") {
-    if (bitmask & 1) supported.push("play_pause");
-    if (bitmask & 2) supported.push("next_track");
-    if (bitmask & 4) supported.push("previous_track");
-    if (bitmask & 8) supported.push("volume_set");
-    if (bitmask & 16) supported.push("volume_step");
-  } else if (domain === "input_number") {
-    if (attrs.min != null) featureConfig.min = attrs.min;
-    if (attrs.max != null) featureConfig.max = attrs.max;
-    if (attrs.step != null) featureConfig.step = attrs.step;
-  }
-
-  const baseIconMap = _PREVIEW_ICON_MAP[domain] ?? { "*": "mdi:help-circle" };
-  const iconMap = ea.icon_override ? { "*": ea.icon_override } : baseIconMap;
-  const icon = ea.icon_override ?? (baseIconMap[entity.state] ?? baseIconMap["*"] ?? "mdi:help-circle");
-
-  const filteredAttrs: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(attrs)) {
-    if (!_PREVIEW_BLOCKED_ATTRS.has(k)) filteredAttrs[k] = v;
-  }
-
-  return {
-    entity_id: entity.entity_id,
-    domain,
-    device_class: (attrs.device_class as string) ?? null,
-    friendly_name: friendly,
-    capabilities: ea.capabilities,
-    supported_features: supported,
-    feature_config: featureConfig,
-    icon,
-    icon_state_map: iconMap,
-    unit_of_measurement: (attrs.unit_of_measurement as string) ?? null,
-    color_scheme: ea.color_scheme,
-    display_hints: ea.display_hints ?? {},
-    gesture_config: ea.gesture_config ?? {},
-    companions: [],
-    support_tier: 1,
-  };
-}
-
 function EntityPreview({
   entity,
   entityAccess,
@@ -735,6 +633,7 @@ function EntityPreview({
   const cardRef = useRef<HTMLElement | null>(null);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [serverDef, setServerDef] = useState<{ definition: Record<string, unknown>; state: string; attributes: Record<string, unknown> } | null>(null);
   const packId = theme?.renderer_pack ? theme.theme_id : undefined;
 
   useEffect(() => {
@@ -744,25 +643,41 @@ function EntityPreview({
       .catch(() => setLoadError(true));
   }, [packId]);
 
-  const themeVars = useMemo(() => {
-    if (!theme) return {};
-    const cs = entityAccess.color_scheme === "dark" ? "dark"
-      : entityAccess.color_scheme === "light" ? "light"
-      : getHaDarkMode() ? "dark" : "light";
-    return cs === "dark" ? { ...theme.variables, ...theme.dark_variables } : { ...theme.variables };
-  }, [theme?.theme_id, entityAccess.color_scheme]);
+  const defKey = `${entity.entity_id}:${JSON.stringify(entityAccess)}:${companions.map(c => c.entity_id).join(",")}`;
+  useEffect(() => {
+    let cancelled = false;
+    api.entities.getDefinition(entity.entity_id, {
+      capabilities: entityAccess.capabilities,
+      name_override: entityAccess.name_override ?? undefined,
+      icon_override: entityAccess.icon_override ?? undefined,
+      color_scheme: entityAccess.color_scheme ?? undefined,
+      exclude_attributes: entityAccess.exclude_attributes ?? undefined,
+      display_hints: entityAccess.display_hints ?? undefined,
+      gesture_config: entityAccess.gesture_config ?? undefined,
+      companion_ids: companions.map(c => c.entity_id),
+    }).then(result => {
+      if (!cancelled) setServerDef(result);
+    }).catch(() => {
+      if (!cancelled) setServerDef(null);
+    });
+    return () => { cancelled = true; };
+  }, [defKey]);
 
-  const cardKey = `${entity.entity_id}:${entity.state}:${JSON.stringify(entityAccess)}:${theme?.theme_id ?? ""}:${companions.map(c => c.entity_id).join(",")}`;
+  const themeObj = useMemo(() => {
+    if (!theme) return { variables: {}, dark_variables: {} };
+    return { variables: theme.variables ?? {}, dark_variables: theme.dark_variables ?? {} };
+  }, [theme?.theme_id]);
+
+  const cardKey = `${entity.entity_id}:${entity.state}:${defKey}:${theme?.theme_id ?? ""}`;
 
   useEffect(() => {
-    if (!ready || !containerRef.current || !window.HArvest) return;
+    if (!ready || !serverDef || !containerRef.current || !window.HArvest) return;
     const container = containerRef.current;
     container.innerHTML = "";
     cardRef.current = null;
     const domain = entity.entity_id.split(".")[0];
-    const entityDef = buildEntityDefFromHADetail(entity, entityAccess);
+    const entityDef: Record<string, unknown> = { ...serverDef.definition, capabilities: entityAccess.capabilities };
 
-    // Include companions so the preview card renders companion pills.
     entityDef.preview_companions = companions.map(c => ({
       entity_id: c.entity_id,
       capabilities: c.capabilities,
@@ -770,7 +685,7 @@ function EntityPreview({
     }));
 
     let attrs: Record<string, unknown>;
-    let previewState = entity.state;
+    let previewState = serverDef.state;
 
     if (domain === "weather") {
       previewState = "partlycloudy";
@@ -787,14 +702,9 @@ function EntityPreview({
         } : {}),
       };
     } else {
-      const excludedAttrs = new Set(entityAccess.exclude_attributes ?? []);
-      attrs = {};
-      for (const [k, v] of Object.entries(entity.attributes)) {
-        if (!_PREVIEW_BLOCKED_ATTRS.has(k) && !excludedAttrs.has(k)) attrs[k] = v;
-      }
+      attrs = serverDef.attributes;
     }
 
-    // Build options - include graph + mock history when display_hints.graph is set.
     const graphType = (entityAccess.display_hints?.graph as string) ?? null;
     const opts: Record<string, unknown> = {};
     if (packId) opts.packId = packId;
@@ -805,17 +715,17 @@ function EntityPreview({
     }
 
     const card = window.HArvest!.preview(
-      container, entityDef, previewState, attrs, themeVars,
+      container, entityDef, previewState, attrs, themeObj as any,
       Object.keys(opts).length ? opts as never : undefined,
     );
     cardRef.current = card;
     return () => { container.innerHTML = ""; cardRef.current = null; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, cardKey, JSON.stringify(themeVars)]);
+  }, [ready, cardKey, serverDef, JSON.stringify(themeObj)]);
 
   if (loadError) return <div className="muted" style={{ fontSize: 12, padding: "8px 0" }}>Preview unavailable.</div>;
-  if (!ready) return <div style={{ display: "flex", justifyContent: "center", padding: 12 }}><Spinner size={20} /></div>;
-  return <div ref={containerRef} className="theme-preview-widget" style={{ display: "flex", justifyContent: "center", minHeight: 100, padding: "12px 0" }} />;
+  if (!ready || !serverDef) return <div style={{ display: "flex", justifyContent: "center", padding: 12 }}><Spinner size={20} /></div>;
+  return <div ref={containerRef} className="theme-preview-widget" role="region" aria-label="Entity preview" style={{ display: "flex", justifyContent: "center", minHeight: 100, padding: "12px 0" }} />;
 }
 
 function hasFeature(cap: ThemeCapabilities | null, domain: string, feature: string): boolean {
@@ -847,6 +757,7 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
   const [attrLoading, setAttrLoading] = useState<Set<string>>(new Set());
   const [haActionEntities, setHaActionEntities] = useState<import("../types").HAEntity[]>([]);
   const [entityDetail, setEntityDetail] = useState<Record<string, HAEntityDetail>>({});
+  const configPanelRef = useRef<HTMLDivElement>(null);
   const [localEntities, setLocalEntities] = useState<Token["entities"] | null>(null);
   const [companionInputs, setCompanionInputs] = useState<Record<string, string>>({});
 
@@ -1196,11 +1107,18 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
             const e = g.primary;
             const domain = e.entity_id.split(".")[0];
             const isSelected = selectedEntityId === e.entity_id;
+            const friendly = getEntityCache().find(c => c.entity_id === e.entity_id)?.friendly_name;
             return (
               <button
                 key={e.entity_id}
                 className={`entity-list-row${isSelected ? " selected" : ""}`}
-                onClick={() => setSelectedEntityId(isSelected ? null : e.entity_id)}
+                onClick={() => {
+                  const next = isSelected ? null : e.entity_id;
+                  setSelectedEntityId(next);
+                  if (next && window.innerWidth <= 720) {
+                    requestAnimationFrame(() => configPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
+                  }
+                }}
                 aria-selected={isSelected}
                 role="option"
                 data-entity-id={e.entity_id}
@@ -1209,7 +1127,10 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
                 <div className="widget-thumb" style={{ width: 24, height: 24 }}>
                   <Icon name={DOMAIN_ICON[domain] ?? "plug"} size={12} />
                 </div>
-                <span className="entity-list-id mono">{e.entity_id}</span>
+                <div className="entity-list-id">
+                  {friendly && friendly !== e.entity_id && <span className="entity-list-name">{friendly}</span>}
+                  <span className="entity-list-eid mono">{e.entity_id}</span>
+                </div>
                 {e.alias && <span className="entity-list-alias mono">{e.alias}</span>}
                 {canEdit && (
                   <span
@@ -1234,7 +1155,7 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
         </div>
       </div>
 
-      <div className="entities-config-panel">
+      <div className="entities-config-panel" ref={configPanelRef}>
         <div className="entity-config-section">
           <div className="entity-config-title">Theme</div>
           <input
@@ -1387,53 +1308,54 @@ function EntitiesEditor({ token, readonly, saving, setSaving, setToken, setError
               </div>
             </div>
 
-            <div className="entity-setting-row" style={{ justifyContent: "space-between" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <label className="entity-setting-label" style={{ marginBottom: 0 }}>Access</label>
-                <div className="segmented-toggle">
-                  <button
-                    className={selectedEntity.capabilities === "read" ? "active" : ""}
-                    onClick={() => toggleCap(selectedEntity.entity_id, "read")}
-                    disabled={!canEdit}
-                    type="button"
-                  >Read only</button>
-                  <button
-                    className={selectedEntity.capabilities === "read-write" ? "active" : ""}
-                    onClick={() => toggleCap(selectedEntity.entity_id, "read-write")}
-                    disabled={!canEdit}
-                    type="button"
-                  >Control</button>
-                </div>
+            <div className="entity-setting-row">
+              <label className="entity-setting-label">Access</label>
+              <div className="segmented-toggle" role="group" aria-label="Access level" style={{ marginLeft: "auto" }}>
+                <button
+                  className={selectedEntity.capabilities === "read" ? "active" : ""}
+                  aria-pressed={selectedEntity.capabilities === "read"}
+                  onClick={() => toggleCap(selectedEntity.entity_id, "read")}
+                  disabled={!canEdit}
+                  type="button"
+                >Read only</button>
+                <button
+                  className={selectedEntity.capabilities === "read-write" ? "active" : ""}
+                  aria-pressed={selectedEntity.capabilities === "read-write"}
+                  onClick={() => toggleCap(selectedEntity.entity_id, "read-write")}
+                  disabled={!canEdit}
+                  type="button"
+                >Control</button>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <label className="entity-setting-label" style={{ marginBottom: 0, minWidth: "auto", whiteSpace: "nowrap" }}>Always use</label>
-                <div className="segmented-toggle">
-                  {(["auto", "light", "dark"] as const).map(scheme => (
-                    <button
-                      key={scheme}
-                      className={selectedEntity.color_scheme === scheme ? "active" : ""}
-                      onClick={() => updateColorScheme(selectedEntity.entity_id, scheme)}
-                      disabled={!canEdit}
-                      type="button"
-                    >
-                      {scheme.charAt(0).toUpperCase() + scheme.slice(1)}
-                    </button>
-                  ))}
-                </div>
+            </div>
+            <div className="entity-setting-row">
+              <label className="entity-setting-label">Always use</label>
+              <div className="segmented-toggle" role="group" aria-label="Color scheme" style={{ marginLeft: "auto" }}>
+                {(["auto", "light", "dark"] as const).map(scheme => (
+                  <button
+                    key={scheme}
+                    className={selectedEntity.color_scheme === scheme ? "active" : ""}
+                    aria-pressed={selectedEntity.color_scheme === scheme}
+                    onClick={() => updateColorScheme(selectedEntity.entity_id, scheme)}
+                    disabled={!canEdit}
+                    type="button"
+                  >
+                    {scheme.charAt(0).toUpperCase() + scheme.slice(1)}
+                  </button>
+                ))}
               </div>
             </div>
 
             <div className="entity-setting-group">
-              <button className="entity-setting-group-title" onClick={() => setShowCompanions(!showCompanions)} type="button">
+              <button className="entity-setting-group-title" onClick={() => setShowCompanions(!showCompanions)} type="button" aria-expanded={showCompanions}>
                 Companions ({selectedGroup?.companions.length ?? 0})
                 {" "}<Icon name={showCompanions ? "chevron-up" : "chevron-down"} size={10} />
               </button>
               {showCompanions && (
                 <div style={{ paddingTop: 4 }}>
                   {selectedGroup?.companions.map(c => (
-                    <div key={c.entity_id} className="chip" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                      <span style={{ flex: 1, fontSize: 12 }} className="mono">{c.entity_id}</span>
-                      {c.alias && <span className="muted" style={{ fontSize: 10 }}>alias: {c.alias}</span>}
+                    <div key={c.entity_id} className="chip" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, minWidth: 0 }}>
+                      <span style={{ flex: 1, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }} className="mono" title={c.entity_id}>{c.entity_id}</span>
+                      {c.alias && <span className="muted" style={{ fontSize: 10, flexShrink: 0 }}>alias: {c.alias}</span>}
                       {canEdit && (
                         <button
                           onClick={() => removeCompanion(c.entity_id)}

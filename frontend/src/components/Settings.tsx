@@ -687,24 +687,24 @@ export function Settings({ theme, onThemeChange, onKillSwitchChange }: SettingsP
             <tr>
               <td className="info-label">GitHub Repository</td>
               <td>
-                <a href="https://github.com/sfox38/harvest/" target="_blank" rel="noopener noreferrer" className="info-link">
-                  https://github.com/sfox38/harvest/ <Icon name="external" size={12} />
+                <a href="https://github.com/sfox38/HArvest/" target="_blank" rel="noopener noreferrer" className="info-link">
+                  https://github.com/sfox38/HArvest/ <Icon name="external" size={12} />
                 </a>
               </td>
             </tr>
             <tr>
               <td className="info-label">Report an Issue</td>
               <td>
-                <a href="https://github.com/sfox38/harvest/issues" target="_blank" rel="noopener noreferrer" className="info-link">
-                  https://github.com/sfox38/harvest/issues <Icon name="external" size={12} />
+                <a href="https://github.com/sfox38/HArvest/issues" target="_blank" rel="noopener noreferrer" className="info-link">
+                  https://github.com/sfox38/HArvest/issues <Icon name="external" size={12} />
                 </a>
               </td>
             </tr>
             <tr>
               <td className="info-label">Documentation</td>
               <td>
-                <a href="https://sfox38.github.io/harvest/" target="_blank" rel="noopener noreferrer" className="info-link">
-                  https://sfox38.github.io/harvest/ <Icon name="external" size={12} />
+                <a href="https://sfox38.github.io/HArvest/" target="_blank" rel="noopener noreferrer" className="info-link">
+                  https://sfox38.github.io/HArvest/ <Icon name="external" size={12} />
                 </a>
               </td>
             </tr>

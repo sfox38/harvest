@@ -1,13 +1,13 @@
 <?php
 /**
  * Plugin Name:       HArvest
- * Plugin URI:        https://github.com/sfox38/harvest
+ * Plugin URI:        https://github.com/sfox38/HArvest
  * Description:       Embed live Home Assistant entity widgets on any page or post.
  * Version:           1.0.0
  * Requires at least: 5.0
  * Requires PHP:      7.4
  * Author:            HArvest Contributors
- * Author URI:        https://github.com/sfox38/harvest
+ * Author URI:        https://github.com/sfox38/HArvest
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       harvest

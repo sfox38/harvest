@@ -540,6 +540,7 @@ export class HarvestClient {
       "HRV_TOKEN_INVALID", "HRV_TOKEN_EXPIRED",
       "HRV_TOKEN_REVOKED",
       "HRV_IP_DENIED", "HRV_ORIGIN_DENIED", "HRV_SIGNATURE_INVALID",
+      "HRV_ENTITY_NOT_IN_TOKEN", "HRV_ENTITY_INCOMPATIBLE",
     ];
 
     if (permanentCodes.includes(code)) {

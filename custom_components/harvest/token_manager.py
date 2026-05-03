@@ -29,7 +29,6 @@ from .const import (
     CONF_MAX_ENTITIES_HARD_CAP,
     CONF_MAX_ENTITIES_PER_TOKEN,
     DEFAULTS,
-    ERR_ENTITY_INCOMPATIBLE,
     ERR_ENTITY_NOT_IN_TOKEN,
     ERR_IP_DENIED,
     ERR_ORIGIN_DENIED,
@@ -578,17 +577,21 @@ class TokenManager:
                 if normalised not in token.origins.allow_paths:
                     return token, ERR_ORIGIN_DENIED
 
-        # 8. Resolve all entity refs.
+        # 8. Resolve entity refs - skip unresolvable or incompatible refs
+        # instead of rejecting the entire auth. Only fail if zero refs resolve.
+        from .entity_compatibility import get_support_tier  # local import to avoid circular dep
+        valid_count = 0
         for ref in entity_refs:
             resolved = self._resolve_entity_ref(ref, token)
             if resolved is None:
-                return token, ERR_ENTITY_NOT_IN_TOKEN
-
-            # 9. Tier 3 compatibility check (defence-in-depth; Tier 3 is also blocked at create time).
-            from .entity_compatibility import get_support_tier  # local import to avoid circular dep
+                continue
             domain = resolved.entity_id.split(".")[0]
             if get_support_tier(domain) == 3:
-                return token, ERR_ENTITY_INCOMPATIBLE
+                continue
+            valid_count += 1
+
+        if valid_count == 0 and len(entity_refs) > 0:
+            return token, ERR_ENTITY_NOT_IN_TOKEN
 
         # 10. HMAC signature.
         if token.token_secret is not None:

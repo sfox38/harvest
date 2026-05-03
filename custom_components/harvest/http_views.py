@@ -23,7 +23,7 @@ from homeassistant.core import HomeAssistant
 from .activity_store import ActivityStore, TokenLifecycleEvent
 from .control_entities import ControlEntities
 from .diagnostic_sensors import DiagnosticSensors
-from .entity_definition import build_entity_definition
+from .entity_definition import build_entity_definition, filter_attributes
 from .event_bus import EventBus
 from .harvest_action import HarvestActionManager, ServiceCall
 from .session_manager import SessionManager
@@ -97,6 +97,7 @@ def register_views(
     hass.http.register_view(HarvestActivityExportView(activity_store))
     hass.http.register_view(HarvestAggregatesView(activity_store))
     hass.http.register_view(HarvestEntitiesView(hass))
+    hass.http.register_view(HarvestEntityDefinitionView(hass))
     hass.http.register_view(HarvestPanelJsView(hass))
 
 
@@ -1994,6 +1995,85 @@ class HarvestEntitiesView(HomeAssistantView):
             for s in self._hass.states.async_all()
             if get_support_tier(s.domain) != 3
         ])
+
+
+class HarvestEntityDefinitionView(HomeAssistantView):
+    """GET /api/harvest/preview/definition/{entity_id} - build an entity
+    definition using the authoritative server-side logic.
+
+    Used by the panel's EntityPreview to get a pixel-accurate entity
+    definition without duplicating bitmask/icon/feature logic in TypeScript.
+
+    Query params (all optional):
+      capabilities      - "read" | "read-write" (default "read-write")
+      name_override     - friendly name override
+      icon_override     - single icon for all states
+      color_scheme      - "light" | "dark" | "auto"
+      exclude_attributes - comma-separated attribute names
+      display_hints     - JSON-encoded dict
+      gesture_config    - JSON-encoded dict
+      companion_ids     - comma-separated entity IDs
+    """
+
+    url = "/api/harvest/preview/definition/{entity_id}"
+    name = "api:harvest:preview:definition"
+    requires_auth = True
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._hass = hass
+
+    async def get(self, request: web.Request, entity_id: str) -> web.Response:
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            raise web.HTTPForbidden()
+
+        state = self._hass.states.get(entity_id)
+        if state is None:
+            raise web.HTTPNotFound(text=f"Entity {entity_id} not found")
+
+        params = request.query
+        import json as _json
+
+        exclude_raw = params.get("exclude_attributes", "")
+        exclude_list = [a.strip() for a in exclude_raw.split(",") if a.strip()] if exclude_raw else []
+
+        try:
+            display_hints = _json.loads(params["display_hints"]) if "display_hints" in params else {}
+        except (ValueError, KeyError):
+            display_hints = {}
+
+        try:
+            gesture_config = _json.loads(params["gesture_config"]) if "gesture_config" in params else {}
+        except (ValueError, KeyError):
+            gesture_config = {}
+
+        entity_access = EntityAccess(
+            entity_id=entity_id,
+            capabilities=params.get("capabilities", "read-write"),
+            name_override=params.get("name_override") or None,
+            icon_override=params.get("icon_override") or None,
+            exclude_attributes=exclude_list,
+            color_scheme=params.get("color_scheme", "auto"),
+            display_hints=display_hints,
+            gesture_config=gesture_config,
+        )
+
+        companion_raw = params.get("companion_ids", "")
+        companion_ids = [c.strip() for c in companion_raw.split(",") if c.strip()] if companion_raw else None
+
+        definition = build_entity_definition(
+            self._hass, entity_id, entity_access, companions=companion_ids,
+        )
+        if definition is None:
+            raise web.HTTPNotFound(text=f"Entity {entity_id} not found")
+
+        filtered_attrs = filter_attributes(dict(state.attributes))
+
+        return self.json({
+            "definition": definition,
+            "state": state.state,
+            "attributes": filtered_attrs,
+        })
 
 
 # ---------------------------------------------------------------------------

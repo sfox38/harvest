@@ -6,7 +6,7 @@
  *          Sparkline, ActivityGraph, EventRow, fmtRel, fmtBytes
  */
 
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo, useId } from "react";
 import type { TokenStatus, ActivityEvent, HAEntity, ThemeDefinition } from "../types";
 import { Icon } from "./Icon";
 import { api } from "../api";
@@ -51,7 +51,7 @@ interface BadgeProps {
 export function Badge({ kind = "neutral", children }: BadgeProps) {
   return (
     <span className={`badge badge-${kind}`}>
-      <span className="dot" />
+      <span className="dot" aria-hidden="true" />
       {children}
     </span>
   );
@@ -570,6 +570,8 @@ export function EventRow({ ev, onSelectToken }: EventRowProps) {
       className={`event-row expandable${open ? " open" : ""}`}
       onClick={toggle}
       tabIndex={0}
+      role="button"
+      aria-expanded={open}
       onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}
     >
       <div className="event-row-top">
@@ -663,6 +665,7 @@ export function EntityAutocomplete({ value, onChange, onSelect, disabled, filter
   const [dropdownRect, setDropdownRect] = useState<{ top: number; left: number; width: number; maxHeight: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [cacheLen, setCacheLen] = useState(() => getEntityCache().length);
+  const listboxId = useId();
   const prevDisabled = useRef(false);
 
   useEffect(() => {
@@ -757,17 +760,19 @@ export function EntityAutocomplete({ value, onChange, onSelect, disabled, filter
     setOpen(false);
   };
 
+  const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 720px)").matches;
+
   return (
-    <div style={{ flex: 1 }}>
+    <div style={{ flex: 1, position: "relative" }}>
       <input
         ref={inputRef}
         value={value}
         onChange={e => { onChange(e.target.value); setOpen(true); }}
         onFocus={() => {
           setOpen(true);
-          // After the iOS keyboard finishes animating (~300ms), scroll the input
-          // near the top of its scrollable container so the dropdown has room below.
-          setTimeout(() => scrollInputToTopOnMobile(inputRef.current), 320);
+          if (!isMobile) {
+            setTimeout(() => scrollInputToTopOnMobile(inputRef.current), 320);
+          }
         }}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         onKeyDown={e => {
@@ -784,19 +789,53 @@ export function EntityAutocomplete({ value, onChange, onSelect, disabled, filter
         placeholder={placeholder ?? "Search entity ID or friendly name..."}
         className="input"
         style={{ width: "100%", boxSizing: "border-box" }}
+        role="combobox"
         aria-label="Search entities"
         aria-autocomplete="list"
         aria-expanded={open && matches.length > 0}
+        aria-controls={listboxId}
+        aria-activedescendant={open && matches.length > 0 ? `${listboxId}-${highlighted}` : undefined}
       />
-      {dropdownRect && (
+      {isMobile && open && matches.length > 0 && (
         <div
-          className="autocomplete-dropdown"
-          style={{ top: dropdownRect.top, left: dropdownRect.left, width: dropdownRect.width, maxHeight: dropdownRect.maxHeight }}
+          className="autocomplete-dropdown autocomplete-dropdown-inline"
+          style={{ maxHeight: 220 }}
           role="listbox"
+          id={listboxId}
         >
           {matches.map((e, i) => (
             <div
               key={e.entity_id}
+              id={`${listboxId}-${i}`}
+              onMouseDown={() => select(e.entity_id)}
+              onTouchEnd={(ev) => { ev.preventDefault(); select(e.entity_id); }}
+              onMouseEnter={() => setHighlighted(i)}
+              className={`autocomplete-item${i === highlighted ? " highlighted" : ""}`}
+              role="option"
+              aria-selected={i === highlighted}
+            >
+              <span className="badge badge-neutral" style={{ fontSize: 10 }}>{e.domain}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>{e.entity_id}</div>
+                {e.friendly_name !== e.entity_id && (
+                  <div className="muted" style={{ fontSize: 11 }}>{e.friendly_name}</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {!isMobile && dropdownRect && (
+        <div
+          className="autocomplete-dropdown"
+          style={{ top: dropdownRect.top, left: dropdownRect.left, width: dropdownRect.width, maxHeight: dropdownRect.maxHeight }}
+          role="listbox"
+          id={listboxId}
+        >
+          {matches.map((e, i) => (
+            <div
+              key={e.entity_id}
+              id={`${listboxId}-${i}`}
               onMouseDown={() => select(e.entity_id)}
               onMouseEnter={() => setHighlighted(i)}
               className={`autocomplete-item${i === highlighted ? " highlighted" : ""}`}
