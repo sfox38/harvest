@@ -156,6 +156,10 @@ export class HrvCard extends HTMLElement {
   }
 
   disconnectedCallback() {
+    if (this.shadowRoot) ThemeLoader.detach(this.shadowRoot);
+    clearTimeout(this.#optimisticTimer);
+    this.#optimisticTimer = null;
+
     if (!this.#client) return;
 
     const entityRef = this.#entityId || this.#alias;
@@ -164,12 +168,6 @@ export class HrvCard extends HTMLElement {
     for (const companion of this.#companions) {
       this.#client.unregisterCard(companion.entityId);
     }
-
-    // Remove dark-mode listener attached by ThemeLoader.
-    if (this.shadowRoot) ThemeLoader.detach(this.shadowRoot);
-
-    clearTimeout(this.#optimisticTimer);
-    this.#optimisticTimer = null;
   }
 
   attributeChangedCallback(_name, oldVal, newVal) {
@@ -500,6 +498,13 @@ export class HrvCard extends HTMLElement {
     this.#config.colorScheme = entityDef.color_scheme ?? "auto";
     this.#config.displayHints = hints;
 
+    const csNow = _resolveColorScheme(this.#config.colorScheme || "auto");
+    if (csNow === "light" || csNow === "dark") {
+      this.setAttribute("data-color-scheme", csNow);
+    } else {
+      this.removeAttribute("data-color-scheme");
+    }
+
     // Set up preview companions before render() so renderCompanionZoneHTML() creates the zone.
     const previewComps = entityDef.preview_companions ?? [];
     this.#companions = previewComps.map((c) => ({
@@ -527,8 +532,9 @@ export class HrvCard extends HTMLElement {
     // Apply state.
     this.#renderer.applyState(state, attributes);
 
-    // In preview mode, always show controls regardless of entity state (fan off, cover closed, etc.)
-    // so the user can see the full card layout when editing settings.
+    // Default controls to expanded so the user sees the full card layout.
+    // Unlike the live path, this is just an initial default - the user can
+    // collapse/expand interactively and state changes will not reset it.
     if (this.shadowRoot) {
       for (const shell of this.shadowRoot.querySelectorAll(".ndl-controls-shell")) {
         shell.setAttribute("data-collapsed", "false");
@@ -537,7 +543,7 @@ export class HrvCard extends HTMLElement {
 
     this.setErrorState("live");
 
-    // Apply theme CSS variables to the shadow host.
+    // Apply theme via ThemeLoader for dark mode reactivity and XSS validation.
     if (themeVars) {
       this.applyPreviewTheme(themeVars);
     }
@@ -545,18 +551,20 @@ export class HrvCard extends HTMLElement {
 
   /**
    * Update only the theme CSS variables on a preview card without
-   * re-rendering the card structure.
+   * re-rendering the card structure. Accepts either:
+   *   - { variables, dark_variables } object (ThemeLoader handles dark mode)
+   *   - flat dict of pre-merged CSS vars (legacy, no dark mode reactivity)
    *
-   * @param {object} themeVars - CSS custom properties object
+   * @param {object} themeVars - Theme object or flat CSS custom properties dict
    */
   applyPreviewTheme(themeVars) {
     if (!this.shadowRoot) return;
-    const host = this.shadowRoot.host;
-    // Wipe all inline styles so no var from the previous theme lingers
-    // when the incoming theme does not define that property.
-    host.style.cssText = "";
-    for (const [key, value] of Object.entries(themeVars)) {
-      host.style.setProperty(key, String(value));
+    ThemeLoader.detach(this.shadowRoot);
+    const cs = _resolveColorScheme(this.#config.colorScheme || "auto");
+    if (themeVars.variables) {
+      ThemeLoader.apply(themeVars, this.shadowRoot, cs);
+    } else {
+      ThemeLoader.apply({ variables: themeVars }, this.shadowRoot, cs);
     }
   }
 

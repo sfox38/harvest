@@ -23,6 +23,7 @@ import { getOrCreateClient, getClient, setStateCacheRef } from "./harvest-client
 import { StateCache }                      from "./state-cache.js";
 import { registerRenderer, lookupRenderer } from "./renderers/index.js";
 import * as Renderers                      from "./renderers/index.js";
+import { buildEntityDef, filterAttributes } from "./entity-def-builder.js";
 import "./hrv-mount.js";
 
 // Wire StateCache into HarvestClient (avoids a circular import at module
@@ -151,6 +152,8 @@ window.HArvest = {
   create,
   getCard,
   preview,
+  buildEntityDef,
+  filterAttributes,
   registerRenderer,
   renderers: {
     BaseCard:             Renderers.BaseCard,

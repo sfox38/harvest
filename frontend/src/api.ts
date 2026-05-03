@@ -336,6 +336,28 @@ export const api = {
 
     get: (entityId: string): Promise<HAEntityDetail> =>
       _doReq<HAEntityDetail>("GET", `/api/states/${entityId}`),
+
+    getDefinition: (entityId: string, params?: {
+      capabilities?: string;
+      name_override?: string;
+      icon_override?: string;
+      color_scheme?: string;
+      exclude_attributes?: string[];
+      display_hints?: Record<string, unknown>;
+      gesture_config?: Record<string, unknown>;
+      companion_ids?: string[];
+    }): Promise<{ definition: Record<string, unknown>; state: string; attributes: Record<string, unknown> }> => {
+      const p: Record<string, string> = {};
+      if (params?.capabilities) p.capabilities = params.capabilities;
+      if (params?.name_override) p.name_override = params.name_override;
+      if (params?.icon_override) p.icon_override = params.icon_override;
+      if (params?.color_scheme) p.color_scheme = params.color_scheme;
+      if (params?.exclude_attributes?.length) p.exclude_attributes = params.exclude_attributes.join(",");
+      if (params?.display_hints) p.display_hints = JSON.stringify(params.display_hints);
+      if (params?.gesture_config) p.gesture_config = JSON.stringify(params.gesture_config);
+      if (params?.companion_ids?.length) p.companion_ids = params.companion_ids.join(",");
+      return _get(`/preview/definition/${encodeURIComponent(entityId)}`, Object.keys(p).length ? p : undefined);
+    },
   },
 
   // ---------------------------------------------------------------------------
